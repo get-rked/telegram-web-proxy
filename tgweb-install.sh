@@ -1673,6 +1673,7 @@ remove_web_server_interactive() {
   fi
   ui_header "Удаление веб-сервера"
   warn "Будет удалён $installed_web_server и его конфигурация."
+  warn "Если прокси использует этот веб-сервер, публичное подключение перестанет работать до повторной настройки."
   if [[ "$installed_web_server" == caddy ]]; then warn "Удаление Caddy затрагивает /etc/caddy и данные Caddy."; fi
   confirm "Удалить $installed_web_server?" || { info "Удаление отменено."; return 0; }
   case "$installed_web_server" in caddy) remove_caddy ;; nginx) remove_nginx ;; esac
