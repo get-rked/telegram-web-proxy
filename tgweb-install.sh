@@ -21,6 +21,7 @@ readonly SITE_DIR_DEFAULT="/srv/tproxy-site"
 readonly GO_FALLBACK_VERSION="1.26.5"
 readonly GO_FALLBACK_SHA256="5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"
 readonly CADDY_VERSION="2.11.4"
+readonly MTPROXY_COMMIT="f36d8af769ffaeac36978d38c2c0f6d1104c2137"
 readonly CADDY_SHA512="8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9"
 readonly NGINX_SITE="/etc/nginx/sites-available/tproxy-server"
 readonly NGINX_ENABLED="/etc/nginx/sites-enabled/tproxy-server"
@@ -66,7 +67,7 @@ die() {
 }
 info() {
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '\033[1;36m[ИНФО]\033[0m %s\n' "$*"
+    printf '\033[1;34m[ИНФО]\033[0m %s\n' "$*"
   else
     printf '[ИНФО] %s\n' "$*"
   fi
@@ -93,14 +94,14 @@ status_mark() {
     ok) mark='[✓]' ;;
     fail) mark='[✗]' ;;
     warn) mark='[!]' ;;
-    *) mark='[?]' ;;
+    *) mark='[•]' ;;
   esac
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
     case "$kind" in
       ok) printf '\033[1;32m%s\033[0m' "$mark" ;;
       fail) printf '\033[1;31m%s\033[0m' "$mark" ;;
       warn) printf '\033[1;33m%s\033[0m' "$mark" ;;
-      *) printf '\033[1;36m%s\033[0m' "$mark" ;;
+      *) printf '\033[1;34m%s\033[0m' "$mark" ;;
     esac
   else
     printf '%s' "$mark"
@@ -451,21 +452,278 @@ check_os() {
 #  УСТАНОВКА / ОБНОВЛЕНИЕ
 # ============================================================================
 
+package_installed() {
+  dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
+# Проверка совместимости существующей конфигурации веб-сервера с текущими параметрами.
+caddy_config_compatible() {
+  [[ -s /etc/caddy/Caddyfile && -x /usr/local/bin/caddy ]] || return 1
+  grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
+  grep -Fq "127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile || return 1
+  grep -Fq 'TPROXY_SITE_ROOT' /etc/caddy/Caddyfile || return 1
+  grep -Fq 'TPROXY_HOSTNAME' /etc/caddy/Caddyfile || return 1
+  grep -Fq 'ACME_EMAIL' /etc/caddy/Caddyfile || return 1
+  [[ -s /etc/systemd/system/caddy.service ]] || return 1
+  grep -Fq 'ExecStart=/usr/local/bin/caddy run' /etc/systemd/system/caddy.service || return 1
+  grep -Fq -- '--config /etc/caddy/Caddyfile' /etc/systemd/system/caddy.service || return 1
+  grep -Fq 'User=caddy' /etc/systemd/system/caddy.service || return 1
+  local dropin=/etc/systemd/system/caddy.service.d/tproxy.conf
+  [[ -s "$dropin" ]] || return 1
+  grep -Fxq "Environment=TPROXY_HOSTNAME=$HOSTNAME_ARG" "$dropin" || return 1
+  grep -Fxq "Environment=TPROXY_SITE_ROOT=$SITE_DIR" "$dropin" || return 1
+  grep -Fxq "Environment=ACME_EMAIL=$EMAIL_ARG" "$dropin" || return 1
+  TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1
+}
+nginx_config_compatible() {
+  [[ -s "$NGINX_SITE" && -s "$NGINX_MAP" && -L "$NGINX_ENABLED" ]] || return 1
+  [[ "$(readlink -f "$NGINX_ENABLED" 2>/dev/null || true)" == "$NGINX_SITE" ]] || return 1
+  grep -Eq "server_name[[:space:]]+$HOSTNAME_ARG;" "$NGINX_SITE" || return 1
+  grep -Fq 'listen 80;' "$NGINX_SITE" || return 1
+  grep -Fq 'listen 443 ssl;' "$NGINX_SITE" || return 1
+  grep -Fq "proxy_pass http://127.0.0.1:$RELAY_PORT;" "$NGINX_SITE" || return 1
+  grep -Fq 'proxy_set_header Upgrade $http_upgrade;' "$NGINX_SITE" || return 1
+  grep -Fq 'proxy_set_header Connection $connection_upgrade;' "$NGINX_SITE" || return 1
+  grep -Fq 'proxy_buffering off;' "$NGINX_SITE" || return 1
+  grep -Fq 'default upgrade;' "$NGINX_MAP" || return 1
+  nginx -t >/dev/null 2>&1
+}
+
+# Печатает только TCP-порты, относящиеся к данной установке прокси.
+proxy_ports_table() {
+  local relay_addr="${1:-}" admin_addr="${2:-}" backend_addr="${3:-}"
+  local relay_port="${relay_addr##*:}" admin_port="${admin_addr##*:}" backend_port="${backend_addr##*:}"
+  local -a ports=(80 443)
+  local p line local_addr process label existing seen found
+  for p in "$relay_port" "$admin_port" "$backend_port"; do
+    [[ "$p" =~ ^[0-9]+$ ]] || continue
+    seen=0
+    for existing in "${ports[@]}"; do [[ "$existing" == "$p" ]] && seen=1; done
+    (( seen )) || ports+=("$p")
+  done
+  printf '  %-8s %-25s %-8s %s\n' "Порт" "Назначение" "Протокол" "Процесс / состояние"
+  printf '  %-8s %-25s %-8s %s\n' "--------" "-------------------------" "--------" "-------------------------"
+  for p in "${ports[@]}"; do
+    case "$p" in
+      80) label="HTTP / ACME" ;; 443) label="HTTPS / Web Proxy" ;;
+      "$relay_port") label="tproxy-server relay" ;;
+      "$admin_port") label="tproxy-server health" ;;
+      "$backend_port") label="MTProxy backend" ;;
+      *) label="Proxy component" ;;
+    esac
+    found=0
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      local_addr="$(awk '{print $4}' <<< "$line")"
+      process="$(awk '{print $6}' <<< "$line")"
+      printf '  %-8s %-25s %-8s %s (%s)\n' "$p" "$label" "TCP" "${process:--}" "$local_addr"
+      found=1
+    done < <(ss -lntpH 2>/dev/null | awk -v suffix=":$p" '$4 ~ (suffix "$")')
+    if (( ! found )); then printf '  %-8s %-25s %-8s %s\n' "$p" "$label" "TCP" "не слушает"; fi
+  done
+}
+preflight_basics() {
+  require_root
+  local pkg svc state
+  local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
+  local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service)
+  ui_header "Предварительная проверка системы"
+  echo "Проверка основных компонентов до ввода параметров установки."
+  echo
+  printf '  %-30s %s\n' "Базовые пакеты" "Состояние"
+  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  for pkg in "${required_packages[@]}"; do
+    if package_installed "$pkg"; then
+      printf '  %-30s %s\n' "$pkg" "$(status_mark ok) установлен"
+    else
+      printf '  %-30s %s\n' "$pkg" "$(status_mark warn) будет установлен"
+    fi
+  done
+  echo
+  printf '  %-30s %s\n' "Основной компонент" "Состояние"
+  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  if [[ -x /usr/local/bin/tproxy-server ]]; then
+    printf '  %-30s %s\n' "tproxy-server" "$(status_mark ok) бинарный файл найден"
+  else
+    printf '  %-30s %s\n' "tproxy-server" "$(status_mark warn) потребуется установить/собрать"
+  fi
+  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]]; then
+    printf '  %-30s %s\n' "MTProxy" "$(status_mark ok) бинарный файл найден"
+  else
+    printf '  %-30s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
+  fi
+  if command -v caddy >/dev/null 2>&1 || [[ -x /usr/local/bin/caddy ]]; then
+    printf '  %-30s %s\n' "Caddy" "$(status_mark ok) установлен"
+  else
+    printf '  %-30s %s\n' "Caddy" "$(status_mark info) не установлен"
+  fi
+  if command -v nginx >/dev/null 2>&1 || package_installed nginx; then
+    printf '  %-30s %s\n' "Nginx" "$(status_mark ok) установлен"
+  else
+    printf '  %-30s %s\n' "Nginx" "$(status_mark info) не установлен"
+  fi
+  if [[ -d "$SITE_DIR" ]]; then
+    printf '  %-30s %s\n' "Decoy-сайт ($SITE_DIR)" "$(status_mark ok) каталог существует"
+  else
+    printf '  %-30s %s\n' "Decoy-сайт ($SITE_DIR)" "$(status_mark info) будет создан"
+  fi
+  echo
+  printf '  %-30s %s\n' "Служба" "Состояние"
+  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  for svc in "${services[@]}"; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      state="активна"
+      printf '  %-30s %s\n' "$svc" "$(status_mark ok) $state"
+    elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+      state="включена, но не активна"
+      printf '  %-30s %s\n' "$svc" "$(status_mark warn) $state"
+    elif systemctl list-unit-files "$svc" --no-legend 2>/dev/null | grep -q .; then
+      printf '  %-30s %s\n' "$svc" "$(status_mark info) установлена, не активна"
+    else
+      printf '  %-30s %s\n' "$svc" "$(status_mark info) не обнаружена"
+    fi
+  done
+  echo
+  if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
+    die "Для установки требуются apt-get и dpkg-query (Debian/Ubuntu)."
+  fi
+  ok "Предварительная проверка завершена. Параметры установки ещё не запрашивались."
+  echo
+}
+preflight_system() {
+  require_root
+  local pkg svc version go_minor port
+  local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
+  local -a missing_packages=()
+  echo
+  echo "Проверяю совместимость выбранных параметров с текущей конфигурацией."
+  for pkg in "${required_packages[@]}"; do
+    package_installed "$pkg" || missing_packages+=("$pkg")
+  done
+  if command -v go >/dev/null 2>&1; then
+    version="$(go version 2>/dev/null || true)"
+    go_minor="$(go env GOVERSION 2>/dev/null | sed -E 's/^go1\.([0-9]+).*/\1/')"
+    if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 20 )); then
+      printf '  %-24s %s\n' "Go" "$(status_mark ok) $version"
+    else
+      printf '  %-24s %s\n' "Go" "$(status_mark warn) версия ниже 1.20; потребуется Go $GO_FALLBACK_VERSION"
+    fi
+  elif [[ -x "/opt/go${GO_FALLBACK_VERSION}/bin/go" ]]; then
+    printf '  %-24s %s\n' "Go" "$(status_mark ok) найден в /opt/go${GO_FALLBACK_VERSION}"
+  else
+    printf '  %-24s %s\n' "Go" "$(status_mark warn) потребуется установить"
+  fi
+  if command -v caddy >/dev/null 2>&1; then
+    version="$(caddy version 2>/dev/null | head -n1)"
+    printf '  %-24s %s\n' "Caddy" "$(status_mark ok) $version"
+  else
+    printf '  %-24s %s\n' "Caddy" "$(status_mark warn) не установлен"
+  fi
+  if command -v nginx >/dev/null 2>&1 || package_installed nginx; then
+    printf '  %-24s %s\n' "Nginx" "$(status_mark ok) установлен"
+  else
+    printf '  %-24s %s\n' "Nginx" "$(status_mark warn) не установлен"
+  fi
+  if [[ -d "$SITE_DIR" ]]; then
+    printf '  %-24s %s\n' "Каталог сайта" "$(status_mark ok) уже существует: $SITE_DIR (содержимое сохраняется)"
+  else
+    printf '  %-24s %s\n' "Каталог сайта" "$(status_mark info) будет создан: $SITE_DIR"
+  fi
+  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy && -r /opt/MTProxy/.tproxy-commit ]] && grep -Fxq "$MTPROXY_COMMIT" /opt/MTProxy/.tproxy-commit && [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+    printf '  %-24s %s\n' "MTProxy" "$(status_mark ok) нужная сборка уже установлена"
+  elif [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]]; then
+    printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) найдена другая/неполная сборка; установщик создаст резервную копию и обновит её"
+  else
+    printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
+  fi
+  if [[ "$MODE" == "install" ]] && { [[ -s /etc/tproxy-server/config.json ]] || systemctl is-active --quiet tproxy-server 2>/dev/null || [[ -x /usr/local/bin/tproxy-server ]]; }; then
+    die "Обнаружена существующая установка tproxy-server. Для неё выбери «Обновить», чтобы не перезаписать текущую конфигурацию."
+  fi
+  local other_web="" switching_webserver=0
+  if [[ "$WEB_SERVER" == "caddy" ]] && systemctl is-active --quiet nginx.service 2>/dev/null; then other_web="Nginx"
+  elif [[ "$WEB_SERVER" == "nginx" ]] && systemctl is-active --quiet caddy.service 2>/dev/null; then other_web="Caddy"
+  fi
+  if [[ -n "$other_web" ]]; then
+    if [[ "$MODE" == "update" && "$WEB_SERVER_SET" -eq 1 ]]; then
+      switching_webserver=1
+      warn "Обнаружен активный $other_web. Он будет заменён выбранным веб-сервером $WEB_SERVER."
+      confirm "Подтвердить переключение веб-сервера?" || die "переключение отменено"
+    else
+      die "$other_web уже запущен и не выбран. Установщик не будет останавливать или удалять его автоматически."
+    fi
+  fi
+  if [[ "$MODE" != "update" ]]; then
+    for port in "$RELAY_PORT" "$ADMIN_PORT"; do
+      if [[ -n "$port" ]] && ss -lntH 2>/dev/null | awk -v p=":$port" '$4 ~ (p "$") { found=1 } END { exit !found }'; then
+        die "Порт $port уже занят. Выбери свободный порт или останови службу, которая его использует."
+      fi
+    done
+  fi
+  local selected_service
+  [[ "$WEB_SERVER" == "caddy" ]] && selected_service=caddy.service || selected_service=nginx.service
+  for port in 80 443; do
+    if port_in_use "$port"; then
+      if systemctl is-active --quiet "$selected_service" 2>/dev/null; then
+        info "Порт $port уже использует выбранный веб-сервер $WEB_SERVER — повторно не занимаем его."
+      elif [[ "$switching_webserver" -eq 1 ]]; then
+        info "Порт $port сейчас использует $other_web; его переключение уже подтверждено."
+      else
+        die "Порт $port занят сторонней службой. Установщик не будет останавливать её автоматически."
+      fi
+    fi
+  done
+  echo
+  if (("${#missing_packages[@]}")); then info "Потребуется установить только: ${missing_packages[*]}"
+  else ok "Все системные пакеты уже установлены — повторная установка не требуется."; fi
+  if [[ "$WEB_SERVER" == "caddy" ]] && command -v caddy >/dev/null 2>&1; then
+    info "Найденный Caddy будет использован; бинарный файл не будет заменён."
+    if caddy_config_compatible; then
+      ok "Caddyfile, systemd unit и drop-in совместимы с текущими параметрами — перенастройка не потребуется."
+    elif [[ -s /etc/caddy/Caddyfile ]]; then
+      warn "Конфигурация Caddy не полностью совместима (домен, relay, site root, email, unit или проверка). Перед обновлением Caddyfile будет сохранён backup."
+      confirm "Разрешить обновление конфигурации Caddy?" || die "настройка Caddy отменена"
+    else info "Конфигурация Caddy отсутствует и будет создана."; fi
+  elif [[ "$WEB_SERVER" == "nginx" ]] && command -v nginx >/dev/null 2>&1; then
+    info "Nginx уже установлен; пакет повторно устанавливаться не будет."
+    if nginx_config_compatible; then
+      ok "Сайт Nginx и WebSocket map совместимы с текущими параметрами — перенастройка не потребуется."
+    elif [[ -s "$NGINX_SITE" || -s "$NGINX_MAP" ]]; then
+      warn "Конфигурация Nginx не полностью совместима (домен, relay, TLS, WebSocket map, symlink или nginx -t). Перед обновлением файлы будут сохранены в backup."
+      confirm "Разрешить обновление конфигурации Nginx?" || die "настройка Nginx отменена"
+    else info "Конфигурация Nginx отсутствует и будет создана."; fi
+  fi
+  confirm "Продолжить с учётом обнаруженных компонентов?" || die "установка отменена"
+}
+
 install_deps() {
   export DEBIAN_FRONTEND=noninteractive
-  info "apt update + базовые пакеты…"
-  apt-get update -qq
-  apt-get install -y -qq --no-install-recommends \
-    ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode
-  ok "Базовые пакеты установлены"
+  local -a required=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
+  local -a missing=()
+  local pkg
+  for pkg in "${required[@]}"; do package_installed "$pkg" || missing+=("$pkg"); done
+  if (("${#missing[@]}")); then
+    info "Устанавливаю только отсутствующие пакеты: ${missing[*]}"
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends "${missing[@]}"
+    ok "Недостающие базовые пакеты установлены"
+  else
+    ok "Все базовые пакеты уже установлены; apt install пропущен"
+  fi
 }
 
 install_nginx_packages() {
   export DEBIAN_FRONTEND=noninteractive
-  info "Устанавливаю Nginx и Certbot…"
-  apt-get install -y -qq --no-install-recommends nginx certbot
+  local -a missing=()
+  package_installed nginx || missing+=(nginx)
+  package_installed certbot || missing+=(certbot)
+  if (("${#missing[@]}")); then
+    info "Устанавливаю отсутствующие компоненты Nginx: ${missing[*]}"
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends "${missing[@]}"
+  else
+    ok "Nginx и Certbot уже установлены — повторная установка пропущена"
+  fi
   systemctl enable nginx.service
-  ok "Nginx и Certbot установлены"
 }
 
 get_public_ipv4() {
@@ -504,54 +762,40 @@ is_cloudflare_ipv4() {
   return 1
 }
 
+is_cloudflare_proxied_domain() {
+  local hostname="$1" ranges="" address count=0 total=0
+  local -a addresses=()
+  mapfile -t addresses < <(dig +short A "$hostname" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
+  ((${#addresses[@]})) || return 1
+  ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
+  [[ -n "$ranges" ]] || return 1
+  for address in "${addresses[@]}"; do ((total += 1)); if is_cloudflare_ipv4 "$address" "$ranges"; then ((count += 1)); fi; done
+  (( total > 0 && count == total ))
+}
+
 check_dns() {
-  info "Проверяю DNS для $HOSTNAME_ARG…"
+  info "Проверяю DNS для $HOSTNAME_ARG через системный DNS-резолвер…"
   local -a ips=()
-  local public_ip="" matched=0 ip aaaa cloudflare_ranges="" cloudflare_count=0
-  mapfile -t ips < <(dig +short A "$HOSTNAME_ARG" @1.1.1.1 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
-  (("${#ips[@]}")) || die "A-запись для $HOSTNAME_ARG не найдена через 1.1.1.1"
-
+  local public_ip="" matched=0 ip aaaa
+  mapfile -t ips < <(dig +short A "$HOSTNAME_ARG" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
+  ((${#ips[@]})) || die "Системный DNS-резолвер не вернул A-запись для $HOSTNAME_ARG. Проверь DNS-настройки домена и сервера."
   if public_ip="$(get_public_ipv4)"; then
-    for ip in "${ips[@]}"; do
-      [[ "$ip" == "$public_ip" ]] && matched=1
-    done
-
-    if (( matched )); then
-      ok "DNS A-запись содержит публичный IP сервера: $public_ip"
-    else
-      cloudflare_ranges="$(curl --fail --silent --location --max-time 8 \
-        --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
-      if [[ -n "$cloudflare_ranges" ]]; then
-        for ip in "${ips[@]}"; do
-          if is_cloudflare_ipv4 "$ip" "$cloudflare_ranges"; then
-            ((cloudflare_count += 1))
-          fi
-        done
-      fi
-
-      if (( cloudflare_count == ${#ips[@]} )); then
-        warn "Обнаружен Cloudflare Proxy: DNS A возвращает адреса Cloudflare (${ips[*]}), а не IP сервера ($public_ip). Прямая проверка IP пропущена."
-        warn "Убедись, что в Cloudflare включён корректный SSL/TLS-режим (Full strict) и origin доступен по TCP 80/443."
-      elif (( cloudflare_count > 0 )); then
-        die "DNS A содержит смешанные адреса Cloudflare и origin (${ips[*]}), но IP сервера ($public_ip) не найден. Проверь DNS-записи и режим Proxy."
-      else
-        die "DNS A-запись (${ips[*]}) не указывает на публичный IPv4 сервера ($public_ip). Если используется Cloudflare Proxy, проверь доступность списка IP Cloudflare и настройки DNS."
-      fi
-    fi
-  else
-    warn "Не удалось определить публичный IPv4 сервера; A-записи: ${ips[*]}. Сравнение пропущено."
-  fi
-
-  aaaa="$(dig +short AAAA "$HOSTNAME_ARG" @1.1.1.1 2>/dev/null | grep ':' | sort -u | tr '\n' ' ' || true)"
+    for ip in "${ips[@]}"; do [[ "$ip" == "$public_ip" ]] && matched=1; done
+    if (( matched )); then ok "DNS A-запись содержит публичный IPv4 сервера: $public_ip"
+    elif is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
+      info "DNS A: ${ips[*]} (публичный IP сервера: $public_ip)"
+      info "Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера; запросы посетителей перенаправляются через Cloudflare."
+      info "Проверь режим SSL/TLS Full (strict) и доступность origin по TCP 80/443."
+    else die "DNS A-запись (${ips[*]}) не совпадает с публичным IPv4 сервера ($public_ip) и не распознана как адреса Cloudflare. Проверь A-запись и настройки DNS Proxy."; fi
+  else warn "Не удалось определить публичный IPv4 сервера; системный DNS вернул A-записи: ${ips[*]}. Сравнение пропущено."; fi
+  aaaa="$(dig +short AAAA "$HOSTNAME_ARG" 2>/dev/null | grep ':' | sort -u | tr '\n' ' ' || true)"
   if [[ -n "$aaaa" ]]; then
-    if ip -6 route get 2606:4700:4700::1111 2>/dev/null | grep -q 'src'; then
-      warn "Для домена есть AAAA-запись ($aaaa). Проверь, что IPv6 сервера совпадает с ней и TCP 80/443 доступны по IPv6."
-    else
-      warn "Для домена есть AAAA-запись ($aaaa), но у сервера не обнаружен рабочий IPv6-маршрут. Удали AAAA или настрой IPv6."
-    fi
-  else
-    ok "AAAA-запись не задана"
-  fi
+    if is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
+      info "DNS AAAA: $aaaa (IPv6-адреса сети Cloudflare, не origin-сервера)."
+    elif ip -6 route get 2606:4700:4700::1111 2>/dev/null | grep -q 'src'; then
+      warn "Системный DNS возвращает AAAA-запись ($aaaa). Убедись, что эти IPv6-адреса принадлежат origin-серверу и TCP 80/443 доступны по IPv6."
+    else warn "Системный DNS возвращает AAAA-запись ($aaaa), но у сервера нет рабочего IPv6-маршрута. Если IPv6 на origin не настроен, удали AAAA или проверь настройки Cloudflare DNS Proxy."; fi
+  else ok "AAAA-запись через системный DNS-резолвер не обнаружена"; fi
 }
 
 fetch_repo() {
@@ -593,8 +837,14 @@ resolve_base_path() {
 }
 
 install_caddy() {
-  if command -v caddy >/dev/null 2>&1 && caddy version 2>/dev/null | grep -q "v${CADDY_VERSION}"; then
-    ok "Caddy ${CADDY_VERSION} уже установлен"
+  if command -v caddy >/dev/null 2>&1; then
+    local caddy_bin
+    caddy_bin="$(command -v caddy)"
+    if [[ "$caddy_bin" != /usr/local/bin/caddy && ! -x /usr/local/bin/caddy ]]; then
+      ln -s "$caddy_bin" /usr/local/bin/caddy
+      info "Создан совместимый путь /usr/local/bin/caddy → $caddy_bin"
+    fi
+    info "Использую уже установленный Caddy: $(caddy version 2>/dev/null | head -n1)"
   else
     info "Ставлю Caddy ${CADDY_VERSION}…"
     local archive dir
@@ -620,6 +870,14 @@ install_caddy() {
 }
 
 install_nginx_config() {
+  # Сохраняем файлы до записи новых настроек, не трогая остальные сайты Nginx.
+  if [[ -e "$NGINX_SITE" ]]; then
+    cp -a "$NGINX_SITE" "${NGINX_SITE}.before-tproxy.$(date +%Y%m%d%H%M%S)"
+    warn "Существующая конфигурация Nginx сохранена в резервную копию."
+  fi
+  if [[ -e "$NGINX_MAP" ]]; then
+    cp -a "$NGINX_MAP" "${NGINX_MAP}.before-tproxy.$(date +%Y%m%d%H%M%S)"
+  fi
   install -d -m 0755 "$ACME_WEBROOT"
   local cert="/etc/letsencrypt/live/$HOSTNAME_ARG/fullchain.pem"
   local key="/etc/letsencrypt/live/$HOSTNAME_ARG/privkey.pem"
@@ -640,7 +898,8 @@ map $http_upgrade $connection_upgrade {
 }
 EOF
   ln -sfn "$NGINX_SITE" "$NGINX_ENABLED"
-  rm -f /etc/nginx/sites-enabled/default
+  # Системный default site не отключаем: точный server_name домена прокси
+  # имеет приоритет и не требует удаления сторонней конфигурации.
   nginx -t || die "Nginx HTTP-конфигурация невалидна"
   systemctl restart nginx
   if [[ ! -s "$cert" || ! -s "$key" ]]; then
@@ -716,6 +975,12 @@ remove_nginx() {
 }
 
 install_mtproxy_backend() {
+  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy && -r /opt/MTProxy/.tproxy-commit ]] &&
+     grep -Fxq "$MTPROXY_COMMIT" /opt/MTProxy/.tproxy-commit &&
+     [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+    ok "MTProxy нужной версии уже установлен — сборка и обновление Telegram-конфигурации пропущены"
+    return 0
+  fi
   info "Собираю официальный MTProxy…"
   "$REPO_DIR/deploy/install-mtproxy.sh"
   ok "MTProxy собран"
@@ -1059,12 +1324,18 @@ install_units() {
 }
 
 install_caddyfile() {
-  if [[ -e /etc/caddy/Caddyfile ]] && ! cmp -s /etc/caddy/Caddyfile "$REPO_DIR/deploy/Caddyfile"; then
-    cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.before-tproxy.$(date +%Y%m%d%H%M%S)"
+  if [[ -s /etc/caddy/Caddyfile ]] &&
+     grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile &&
+     grep -Fq "127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile; then
+    ok "Caddyfile уже настроен для tproxy и relay-порта $RELAY_PORT — оставляю без изменений"
+  else
+    if [[ -e /etc/caddy/Caddyfile ]]; then
+      cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.before-tproxy.$(date +%Y%m%d%H%M%S)"
+    fi
+    install -m 0644 "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
+    sed -i -E "s#(reverse_proxy[[:space:]]+127\.0\.0\.1:)[0-9]+#\1${RELAY_PORT}#g" /etc/caddy/Caddyfile
+    ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
   fi
-  install -m 0644 "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
-  sed -i -E "s#(reverse_proxy[[:space:]]+127\.0\.0\.1:)[0-9]+#\1${RELAY_PORT}#g" /etc/caddy/Caddyfile
-  ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
 
   if [[ -e /etc/systemd/system/caddy.service ]] && \
      ! cmp -s /etc/systemd/system/caddy.service "$REPO_DIR/deploy/caddy.service"; then
@@ -1306,8 +1577,8 @@ run_config() {
   Формат секрета           : $(if [[ "$secret" == dd* ]]; then echo "dd + 32 hex"; elif [[ -n "$secret" ]]; then echo "32 hex"; else echo "<не задан>"; fi)
   Секрет клиента           : ${secret:-<не задан>}
 
-Слушающие TCP-порты:
-$(ss -lntp 2>/dev/null || true)
+Слушающие TCP-порты прокси:
+$(proxy_ports_table "$relay" "$admin" "$backend")
 
 Ссылки подключения:
 ${link:-<не удалось сформировать: проверь config.json и profiles.json>}
@@ -1506,8 +1777,10 @@ EOF
   else
     echo "  ПЕРЕД УСТАНОВКОЙ"
     cat <<'EOF'
-  Будут установлены зависимости и Caddy, собраны tproxy-server и MTProxy,
-  созданы конфигурации и службы, настроен HTTPS и запущены сервисы.
+  Сначала будет проверено, какие зависимости и компоненты уже установлены.
+  Будут добавлены только отсутствующие пакеты; существующие Go, Caddy,
+  Nginx и подходящая сборка MTProxy будут повторно использованы.
+  Конфигурации сторонних сайтов сохраняются или резервируются перед изменением.
   Домен должен указывать на IP этого сервера.
 EOF
   fi
@@ -1533,12 +1806,14 @@ run_install() {
   require_root
   check_arch
   check_os
+  preflight_basics
   show_operation_overview
   if [[ "$MODE" == "update" ]]; then
     interactive_update_fill
   else
     interactive_fill
   fi
+  preflight_system
   install -d -m 0755 /etc/tproxy-server
   printf '%s\n' "$EMAIL_ARG" > /etc/tproxy-server/acme-email
   chmod 0600 /etc/tproxy-server/acme-email
@@ -1553,16 +1828,16 @@ run_install() {
   # иначе он продолжит занимать 80/443 (особенно при установке без marker-файла).
   if [[ "$WEB_SERVER" == "caddy" ]]; then
     if [[ "$previous_web_server" == "nginx" ]]; then
+      warn "Предыдущий веб-сервер Nginx будет заменён на Caddy согласно выбранной конфигурации."
+      confirm "Продолжить переключение Nginx → Caddy?" || die "переключение отменено"
       remove_nginx
-    else
-      systemctl disable --now nginx.service 2>/dev/null || true
     fi
     install_caddy
   else
     if [[ "$previous_web_server" == "caddy" ]]; then
+      warn "Предыдущий веб-сервер Caddy будет заменён на Nginx согласно выбранной конфигурации."
+      confirm "Продолжить переключение Caddy → Nginx?" || die "переключение отменено"
       remove_caddy
-    else
-      systemctl disable --now caddy.service 2>/dev/null || true
     fi
     install_nginx_packages
   fi
@@ -1573,7 +1848,13 @@ run_install() {
   write_configs
   write_mtproxy_env
   install_units
-  if [[ "$WEB_SERVER" == "caddy" ]]; then install_caddyfile; else install_nginx_config; fi
+  if [[ "$WEB_SERVER" == "caddy" ]]; then
+    if caddy_config_compatible; then ok "Совместимая конфигурация Caddy уже существует — запись пропущена."
+    else install_caddyfile; fi
+  else
+    if nginx_config_compatible; then ok "Совместимая конфигурация Nginx уже существует — запись и reload пропущены."
+    else install_nginx_config; fi
+  fi
   validate_configs
   start_services
   wait_ready || die "relay не стал ready"
@@ -1642,37 +1923,53 @@ run_uninstall() {
   ok "Удаление завершено"
 }
 
-run_purge() {
-  # Сохраняем фактический каталог сайта до удаления конфигурации прокси.
+remove_decoy_site() {
+  require_root
   local configured_site=""
   if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
     configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
   fi
-  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then
-    SITE_DIR="$configured_site"
-  fi
+  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
 
-  run_uninstall
-  echo
-  echo "------------------------------------------------------------"
-  echo "  Удаление decoy-сайта"
-  echo "------------------------------------------------------------"
-  if [[ ! -d "$SITE_DIR" ]]; then
-    info "Каталог decoy-сайта не найден: $SITE_DIR"
-    return 0
-  fi
-
-  # Удаляем только созданную установщиком заглушку Vibe Studio.
-  # Любой другой сайт или изменённый пользователем каталог сохраняем.
+  ui_header "Удаление decoy-сайта"
+  if [[ ! -d "$SITE_DIR" ]]; then info "Каталог сайта не найден: $SITE_DIR"; return 0; fi
   if [[ ! -f "$SITE_DIR/index.html" ]] || ! grep -qF '<title>Vibe Studio — код в потоке</title>' "$SITE_DIR/index.html"; then
-    warn "Каталог $SITE_DIR не распознан как decoy-сайт Vibe Studio и оставлен без изменений."
-    return 0
+    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт Vibe Studio. Ничего не удалено."
+    return 1
   fi
-
-  warn "Будет удалён decoy-сайт и его файлы: $SITE_DIR"
-  confirm "Удалить decoy-сайт?" || { info "Decoy-сайт оставлен без изменений."; return 0; }
+  info "Будет удалён только штатный decoy-сайт: $SITE_DIR"
+  confirm "Удалить decoy-сайт?" || { info "Удаление отменено."; return 0; }
   rm -rf -- "$SITE_DIR"
   ok "Decoy-сайт удалён: $SITE_DIR"
+}
+
+remove_web_server_interactive() {
+  require_root
+  local installed_web_server
+  installed_web_server="$(cat /etc/tproxy-server/web-server 2>/dev/null || true)"
+  if [[ "$installed_web_server" != caddy && "$installed_web_server" != nginx ]]; then
+    if systemctl is-active --quiet nginx.service || command -v nginx >/dev/null 2>&1; then installed_web_server=nginx
+    elif systemctl is-active --quiet caddy.service || [[ -x /usr/local/bin/caddy || -x /usr/bin/caddy ]]; then installed_web_server=caddy
+    else warn "Установленный Caddy/Nginx не обнаружен."; return 0; fi
+  fi
+  ui_header "Удаление веб-сервера"
+  warn "Будет удалён $installed_web_server и его конфигурация."
+  warn "Если прокси использует этот веб-сервер, публичное подключение перестанет работать до повторной настройки."
+  if [[ "$installed_web_server" == caddy ]]; then warn "Удаление Caddy затрагивает /etc/caddy и данные Caddy."; fi
+  confirm "Удалить $installed_web_server?" || { info "Удаление отменено."; return 0; }
+  case "$installed_web_server" in caddy) remove_caddy ;; nginx) remove_nginx ;; esac
+  ok "$installed_web_server удалён."
+}
+
+run_purge() {
+  local configured_site=""
+  if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
+    configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
+  fi
+  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
+  KEEP_WEB_SERVER=0
+  run_uninstall
+  remove_decoy_site
 }
 
 # ============================================================================
@@ -1693,7 +1990,7 @@ diagnostics_command() {
 
   echo
   echo "------------------------------------------------------------"
-  echo "  РАСШИРЕННАЯ ДИАГНОСТИКА СЕРВЕРА"
+  echo "  ДИАГНОСТИКА И ПОИСК НЕИСПРАВНОСТЕЙ"
   echo "------------------------------------------------------------"
 
   echo
@@ -1721,7 +2018,31 @@ diagnostics_command() {
   done
 
   echo
-  echo "3. Локальные endpoints и backend"
+  echo "3. Сетевая цепочка и прослушиваемые порты"
+  local port label
+  for port in 80 443 "${relay##*:}" "${admin##*:}" "$backend_port"; do
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    case "$port" in
+      80) label="HTTP / ACME" ;; 443) label="HTTPS / веб-сервер" ;;
+      "${admin##*:}") label="tproxy-server health" ;;
+      "$backend_port") label="MTProxy backend (порт из конфигурации)" ;; *) label="tproxy-server relay" ;;
+    esac
+    if ss -lntH 2>/dev/null | awk -v p=":$port" '$4 ~ (p "$") { found=1 } END { exit !found }'; then
+      printf '  %s %s слушает TCP-порт %s\n' "$(status_mark ok)" "$label" "$port"
+    else
+      printf '  %s %s не слушает TCP-порт %s\n' "$(status_mark fail)" "$label" "$port"; failed=1
+    fi
+  done
+  if [[ -n "$host" ]] && command -v timeout >/dev/null 2>&1; then
+    if timeout 5 bash -c 'exec 3<>/dev/tcp/"$1"/443' _ "$host" 2>/dev/null; then
+      printf '  %s TCP-соединение с %s:443 установлено\n' "$(status_mark ok)" "$host"
+    else
+      printf '  %s TCP-соединение с %s:443 не установлено (возможна фильтрация извне)\n' "$(status_mark warn)" "$host"; warnings=1
+    fi
+  fi
+
+  echo
+  echo "4. Локальные endpoints и backend"
   if [[ -n "$admin" ]]; then
     for endpoint in healthz readyz; do
       if curl --fail --silent --max-time 4 "http://$admin/$endpoint" >/dev/null; then
@@ -1740,9 +2061,9 @@ diagnostics_command() {
   fi
 
   echo
-  echo "4. Веб-сервер, HTTPS и TLS"
+  echo "5. Веб-сервер, HTTPS и TLS"
   if [[ "$web_server" == nginx ]]; then
-    if nginx -t 2>&1; then printf '  %s Nginx config valid\n' "$(status_mark ok)"; else printf '  %s Ошибка конфигурации Nginx\n' "$(status_mark fail)"; failed=1; fi
+    if nginx -t >/dev/null 2>&1; then printf '  %s Конфигурация Nginx корректна\n' "$(status_mark ok)"; else printf '  %s Ошибка конфигурации Nginx (подробности: nginx -t)\n' "$(status_mark fail)"; failed=1; fi
     cert_path="/etc/letsencrypt/live/$host/fullchain.pem"
   else
     if [[ -x /usr/local/bin/caddy && -s /etc/caddy/Caddyfile ]]; then
@@ -1778,31 +2099,61 @@ diagnostics_command() {
       printf '  %s HTTPS-проверка не пройдена (127.0.0.1:443, домен %s)\n' "$(status_mark fail)" "$host"; failed=1
     fi
     local -a dns_ips=()
-    mapfile -t dns_ips < <(dig +short A "$host" @1.1.1.1 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
+    local dns_public_ip="" dns_matched=0 dns_ip
+    mapfile -t dns_ips < <(dig +short A "$host" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
     if (("${#dns_ips[@]}")); then
-      printf '  %s DNS A: %s\n' "$(status_mark ok)" "${dns_ips[*]}"
-    else
-      printf '  %s DNS A-запись не найдена\n' "$(status_mark fail)"; failed=1
-    fi
+      if dns_public_ip="$(get_public_ipv4)"; then
+        for dns_ip in "${dns_ips[@]}"; do [[ "$dns_ip" == "$dns_public_ip" ]] && dns_matched=1; done
+        if (( dns_matched )); then
+          printf '  %s DNS A: %s (совпадает с публичным IP сервера %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
+        else
+          printf '  %s DNS A: %s (публичный IP сервера: %s)\n' "$(status_mark warn)" "${dns_ips[*]}" "$dns_public_ip"
+          if is_cloudflare_proxied_domain "$host"; then
+            printf '  %s Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера.\n' "$(status_mark warn)"
+          else
+            printf '  %s DNS A: %s (не совпадает с IP сервера и не распознана как Cloudflare)\n' "$(status_mark fail)" "${dns_ips[*]}"
+            printf '  %s Проверь A-запись и DNS Proxy\n' "$(status_mark fail)"
+            failed=1
+          fi
+        fi
+      else
+        printf '  %s DNS A: %s (не удалось определить публичный IP сервера)\n' "$(status_mark warn)" "${dns_ips[*]}"
+        warnings=1
+      fi
+    else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\n' "$(status_mark fail)"; failed=1; fi
     local aaaa
-    aaaa="$(dig +short AAAA "$host" @1.1.1.1 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
+    aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
-      printf '  %s DNS AAAA задан: %s — убедись, что IPv6 настроен и доступен извне\n' "$(status_mark warn)" "$aaaa"
-      warnings=1
-    else
-      printf '  %s DNS AAAA не задан\n' "$(status_mark ok)"
-    fi
+      if is_cloudflare_proxied_domain "$host"; then
+        printf '  %s DNS AAAA: %s (IPv6-адреса сети Cloudflare, не origin-сервера)\n' "$(status_mark warn)" "$aaaa"
+      else printf '  %s DNS AAAA задан: %s — проверь IPv6 origin-сервера и доступность TCP 80/443 извне\n' "$(status_mark warn)" "$aaaa"; warnings=1; fi
+    else printf '  %s DNS AAAA не задан через системный DNS-резолвер\n' "$(status_mark ok)"; fi
   else
     printf '  %s Домен не прочитан из config.json\n' "$(status_mark fail)"; failed=1
   fi
 
   echo
-  echo "5. Порты и последние ошибки"
-  ss -lntp 2>/dev/null | sed 's/^/  /' || true
-  local log_output
-  log_output="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u "$web_server" -p err -n 12 --no-pager -o short-iso 2>/dev/null || true)"
-  if [[ -n "$log_output" ]]; then
-    printf '%s\n' "$log_output" | sed 's/^/  /'
+  echo "6. Порты и последние ошибки"
+  echo
+  echo "  Порты, относящиеся к прокси:"
+  proxy_ports_table "$relay" "$admin" "$backend"
+  echo
+  echo "  Последние ошибки служб:"
+  local log_json
+  log_json="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u "$web_server" -p err -n 12 --no-pager -o json 2>/dev/null || true)"
+  if [[ -n "$log_json" ]] && command -v jq >/dev/null 2>&1; then
+    while IFS= read -r log_row; do
+      [[ -n "$log_row" ]] || continue
+      printf '  %s\n' "$log_row"
+    done < <(
+      printf '%s\n' "$log_json" | jq -r '
+        [
+          (.__REALTIME_TIMESTAMP // "0" | tonumber / 1000000 | strftime("%Y-%m-%d %H:%M:%S")),
+          (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"),
+          (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110])
+        ] | join(" | ")
+      '
+    )
   else
     printf '  %s Ошибок уровня error в доступном журнале не найдено\n' "$(status_mark ok)"
   fi
@@ -1883,66 +2234,84 @@ restore_command() {
   info "Для проверки выполни: diagnostics"
 }
 
+ui_header() {
+  local title="$1"
+  echo
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+    printf '  \033[1;34m◆\033[0m %s\n' "$title"
+    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+  else
+    printf '%s\n' '============================================================'
+    printf '  %s\n' "$title"
+    printf '%s\n' '============================================================'
+  fi
+}
+ui_option() {
+  local number="$1" icon="$2" label="$3"
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '  \033[1;34m%s)\033[0m %s %s\n' "$number" "$icon" "$label"
+  else printf '  %s) %s %s\n' "$number" "$icon" "$label"; fi
+}
+show_deletion_menu() {
+  local choice
+  while true; do
+    ui_header "Удаление компонентов"
+    ui_option 1 "⚙" "Прокси и службы (веб-сервер и сайт оставить)"
+    ui_option 2 "▣" "Decoy-сайт"
+    ui_option 3 "◆" "Веб-сервер Caddy/Nginx"
+    ui_option 4 "✖" "Всё: прокси, decoy-сайт и веб-сервер"
+    ui_option 5 "↩" "Назад"
+    echo
+    read -r -p "Выбор [1-5]: " choice
+    case "$choice" in
+      1) KEEP_WEB_SERVER=1; run_uninstall; read -r -p "Enter — назад..." _ ;;
+      2) remove_decoy_site; read -r -p "Enter — назад..." _ ;;
+      3) remove_web_server_interactive; read -r -p "Enter — назад..." _ ;;
+      4) run_purge; read -r -p "Enter — назад..." _ ;;
+      5) return 0 ;;
+      *) warn "Выбери пункт от 1 до 5." ;;
+    esac
+  done
+}
 show_tools_menu() {
   local choice archive
   while true; do
-    echo
-    echo "------------------------------------------------------------"
-    echo "  Инструменты"
-    echo "------------------------------------------------------------"
-    echo "  1) Диагностика (службы, порты, конфигурации и ошибки)"
-    echo "  2) Создать резервную копию"
-    echo "  3) Восстановить резервную копию"
-    echo "  4) Назад"
+    ui_header "Инструменты"
+    ui_option 1 "⌕" "Диагностика и поиск неисправностей"
+    ui_option 2 "▤" "Создать резервную копию"
+    ui_option 3 "↻" "Восстановить резервную копию"
+    ui_option 4 "↩" "Назад"
     echo
     read -r -p "Выбор [1-4]: " choice
     case "$choice" in
-      1)
-        require_root
-        diagnostics_command || true
-        read -r -p "Нажми Enter, чтобы вернуться в меню инструментов..." _
-        ;;
-      2)
-        read -r -p "Путь к архиву (Enter — путь по умолчанию): " archive
-        require_root
-        if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi
-        read -r -p "Нажми Enter, чтобы вернуться в меню инструментов..." _
-        ;;
-      3)
-        read -e -r -p "Абсолютный путь к архиву: " archive
-        [[ -n "$archive" ]] || { warn "Путь к архиву не указан"; continue; }
-        require_root
-        restore_command "$archive"
-        read -r -p "Нажми Enter, чтобы вернуться в меню инструментов..." _
-        ;;
+      1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
+      2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
+      3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
       4) return 0 ;;
+      *) warn "Выбери пункт от 1 до 4." ;;
     esac
   done
 }
 show_menu() {
-  echo
-  echo "------------------------------------------------------------"
-  echo "  tproxy-manager v${SCRIPT_VERSION} — что делаем?"
-  echo "------------------------------------------------------------"
-  echo "  1) Установить tproxy-server"
-  echo "  2) Обновить (без пересоздания существующих сервисов)"
-  echo "  3) Удалить tproxy-server (веб-сервер оставить)"
-  echo "  4) Удалить прокси и decoy-сайт"
-  echo "  5) Просмотреть текущую конфигурацию"
-  echo "  6) Инструменты"
-  echo "  7) Выход"
-  echo
   local choice
-  read -r -p "Выбор [1-7]: " choice
+  ui_header "tproxy-manager v${SCRIPT_VERSION}"
+  ui_option 1 "⇧" "Установить tproxy-server"
+  ui_option 2 "↻" "Обновить существующую установку"
+  ui_option 3 "⌫" "Удаление"
+  ui_option 4 "▤" "Текущая конфигурация"
+  ui_option 5 "⚒" "Инструменты"
+  ui_option 6 "⏻" "Выход"
+  echo
+  read -r -p "Выбор [1-6]: " choice
   case "$choice" in
     1) MODE=install ;;
     2) MODE=update; SKIP_TESTS=1 ;;
-    3) MODE=uninstall; KEEP_WEB_SERVER=1 ;;
-    4) MODE=purge ;;
-    5) MODE=config ;;
-    6) MODE=tools ;;
-    7) exit 0 ;;
-    *) die "Неверный выбор" ;;
+    3) MODE=delete ;;
+    4) MODE=config ;;
+    5) MODE=tools ;;
+    6) exit 0 ;;
+    *) warn "Неверный выбор." ;;
   esac
 }
 
@@ -1958,6 +2327,9 @@ main() {
       case "$MODE" in
         tools)
           show_tools_menu
+          ;;
+        delete)
+          show_deletion_menu
           ;;
         config)
           require_root
@@ -1998,5 +2370,6 @@ main() {
     *) die "Unknown mode: $MODE (install|update|uninstall|purge|config|diagnostics|backup|restore)" ;;
   esac
 }
+
 
 main "$@"
