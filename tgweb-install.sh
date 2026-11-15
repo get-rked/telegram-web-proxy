@@ -2063,7 +2063,7 @@ diagnostics_command() {
   echo
   echo "5. Веб-сервер, HTTPS и TLS"
   if [[ "$web_server" == nginx ]]; then
-    if nginx -t 2>&1; then printf '  %s Nginx config valid\n' "$(status_mark ok)"; else printf '  %s Ошибка конфигурации Nginx\n' "$(status_mark fail)"; failed=1; fi
+    if nginx -t >/dev/null 2>&1; then printf '  %s Nginx: конфигурация корректна\n' "$(status_mark ok)"; else printf '  %s Nginx: ошибка конфигурации (подробности: nginx -t)\n' "$(status_mark fail)"; failed=1; fi
     cert_path="/etc/letsencrypt/live/$host/fullchain.pem"
   else
     if [[ -x /usr/local/bin/caddy && -s /etc/caddy/Caddyfile ]]; then
@@ -2105,18 +2105,18 @@ diagnostics_command() {
       if dns_public_ip="$(get_public_ipv4)"; then
         for dns_ip in "${dns_ips[@]}"; do [[ "$dns_ip" == "$dns_public_ip" ]] && dns_matched=1; done
         if (( dns_matched )); then
-          printf '  DNS A: %s (совпадает с публичным IP сервера %s)\n' "${dns_ips[*]}" "$dns_public_ip"
+          printf '  %s DNS A: %s (совпадает с публичным IP сервера %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
         else
-          printf '  DNS A: %s (публичный IP сервера: %s)\n' "${dns_ips[*]}" "$dns_public_ip"
+          printf '  %s DNS A: %s (публичный IP сервера: %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
           if is_cloudflare_proxied_domain "$host"; then
-            printf '  Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера; запросы посетителей перенаправляются через Cloudflare.\n'
+            printf '  %s Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера.\n' "$(status_mark ok)"
           else
             printf '  %s DNS-адреса не совпадают с IP сервера и не распознаны как адреса Cloudflare — проверь A-запись и DNS Proxy\n' "$(status_mark fail)"
             failed=1
           fi
         fi
       else
-        printf '  DNS A: %s (не удалось определить публичный IP сервера)\n' "${dns_ips[*]}"
+        printf '  %s DNS A: %s (не удалось определить публичный IP сервера)\n' "$(status_mark warn)" "${dns_ips[*]}"
         warnings=1
       fi
     else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\n' "$(status_mark fail)"; failed=1; fi
@@ -2124,7 +2124,7 @@ diagnostics_command() {
     aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
       if is_cloudflare_proxied_domain "$host"; then
-        printf '  DNS AAAA: %s (IPv6-адреса сети Cloudflare, не origin-сервера)\n' "$aaaa"
+        printf '  %s DNS AAAA: %s (IPv6-адреса сети Cloudflare, не origin-сервера)\n' "$(status_mark ok)" "$aaaa"
       else printf '  %s DNS AAAA задан: %s — проверь IPv6 origin-сервера и доступность TCP 80/443 извне\n' "$(status_mark warn)" "$aaaa"; warnings=1; fi
     else printf '  %s DNS AAAA не задан через системный DNS-резолвер\n' "$(status_mark ok)"; fi
   else
