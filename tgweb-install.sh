@@ -509,7 +509,7 @@ proxy_ports_table() {
       "$relay_port") label="tproxy-server relay" ;;
       "$admin_port") label="tproxy-server health" ;;
       "$backend_port") label="MTProxy backend" ;;
-      2398|8888) label="MTProxy internal" ;; *) label="Proxy component" ;;
+      *) label="Proxy component" ;;
     esac
     found=0
     while IFS= read -r line; do
