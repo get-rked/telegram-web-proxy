@@ -21,6 +21,7 @@ readonly SITE_DIR_DEFAULT="/srv/tproxy-site"
 readonly GO_FALLBACK_VERSION="1.26.5"
 readonly GO_FALLBACK_SHA256="5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"
 readonly CADDY_VERSION="2.11.4"
+readonly MTPROXY_COMMIT="f36d8af769ffaeac36978d38c2c0f6d1104c2137"
 readonly CADDY_SHA512="8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9"
 readonly NGINX_SITE="/etc/nginx/sites-available/tproxy-server"
 readonly NGINX_ENABLED="/etc/nginx/sites-enabled/tproxy-server"
@@ -458,7 +459,7 @@ package_installed() {
 preflight_system() {
   require_root
   local pkg svc version go_minor
-  local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode)
+  local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a missing_packages=()
   ui_header "Проверка системы перед установкой"
   echo "Проверяю зависимости, службы, веб-серверы, порты и существующую установку."
@@ -511,6 +512,13 @@ preflight_system() {
   else
     printf '  %-24s %s\n' "Каталог сайта" "$(status_mark info) будет создан: $SITE_DIR"
   fi
+  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy && -r /opt/MTProxy/.tproxy-commit ]] && grep -Fxq "$MTPROXY_COMMIT" /opt/MTProxy/.tproxy-commit && [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+    printf '  %-24s %s\n' "MTProxy" "$(status_mark ok) нужная сборка уже установлена"
+  elif [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]]; then
+    printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) найдена другая/неполная сборка; установщик создаст резервную копию и обновит её"
+  else
+    printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
+  fi
   if [[ "$MODE" == "install" ]] && { [[ -s /etc/tproxy-server/config.json ]] || systemctl is-active --quiet tproxy-server 2>/dev/null || [[ -x /usr/local/bin/tproxy-server ]]; }; then
     die "Обнаружена существующая установка tproxy-server. Для неё выбери «Обновить», чтобы не перезаписать текущую конфигурацию."
   fi
@@ -529,6 +537,17 @@ preflight_system() {
       fi
     done
   fi
+  local selected_service
+  [[ "$WEB_SERVER" == "caddy" ]] && selected_service=caddy.service || selected_service=nginx.service
+  for port in 80 443; do
+    if port_in_use "$port"; then
+      if systemctl is-active --quiet "$selected_service" 2>/dev/null; then
+        info "Порт $port уже использует выбранный веб-сервер $WEB_SERVER — повторно не занимаем его."
+      else
+        die "Порт $port занят сторонней службой. Установщик не будет останавливать её автоматически."
+      fi
+    fi
+  done
   echo
   if (("${#missing_packages[@]}")); then info "Потребуется установить только: ${missing_packages[*]}"
   else ok "Все системные пакеты уже установлены — повторная установка не требуется."; fi
@@ -542,7 +561,7 @@ preflight_system() {
 
 install_deps() {
   export DEBIAN_FRONTEND=noninteractive
-  local -a required=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode)
+  local -a required=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a missing=()
   local pkg
   for pkg in "${required[@]}"; do package_installed "$pkg" || missing+=("$pkg"); done
@@ -723,6 +742,14 @@ install_caddy() {
 }
 
 install_nginx_config() {
+  # Сохраняем файлы до записи новых настроек, не трогая остальные сайты Nginx.
+  if [[ -e "$NGINX_SITE" ]]; then
+    cp -a "$NGINX_SITE" "${NGINX_SITE}.before-tproxy.$(date +%Y%m%d%H%M%S)"
+    warn "Существующая конфигурация Nginx сохранена в резервную копию."
+  fi
+  if [[ -e "$NGINX_MAP" ]]; then
+    cp -a "$NGINX_MAP" "${NGINX_MAP}.before-tproxy.$(date +%Y%m%d%H%M%S)"
+  fi
   install -d -m 0755 "$ACME_WEBROOT"
   local cert="/etc/letsencrypt/live/$HOSTNAME_ARG/fullchain.pem"
   local key="/etc/letsencrypt/live/$HOSTNAME_ARG/privkey.pem"
@@ -742,13 +769,6 @@ map $http_upgrade $connection_upgrade {
     ''      '';
 }
 EOF
-  if [[ -e "$NGINX_SITE" ]]; then
-    cp -a "$NGINX_SITE" "${NGINX_SITE}.before-tproxy.$(date +%Y%m%d%H%M%S)"
-    warn "Существующая конфигурация Nginx сохранена в резервную копию."
-  fi
-  if [[ -e "$NGINX_MAP" ]]; then
-    cp -a "$NGINX_MAP" "${NGINX_MAP}.before-tproxy.$(date +%Y%m%d%H%M%S)"
-  fi
   ln -sfn "$NGINX_SITE" "$NGINX_ENABLED"
   # Системный default site не отключаем: точный server_name домена прокси
   # имеет приоритет и не требует удаления сторонней конфигурации.
@@ -827,6 +847,12 @@ remove_nginx() {
 }
 
 install_mtproxy_backend() {
+  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy && -r /opt/MTProxy/.tproxy-commit ]] &&
+     grep -Fxq "$MTPROXY_COMMIT" /opt/MTProxy/.tproxy-commit &&
+     [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+    ok "MTProxy нужной версии уже установлен — сборка и обновление Telegram-конфигурации пропущены"
+    return 0
+  fi
   info "Собираю официальный MTProxy…"
   "$REPO_DIR/deploy/install-mtproxy.sh"
   ok "MTProxy собран"
