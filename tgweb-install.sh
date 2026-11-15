@@ -495,7 +495,7 @@ proxy_ports_table() {
   local relay_port="${relay_addr##*:}" admin_port="${admin_addr##*:}" backend_port="${backend_addr##*:}"
   local -a ports=(80 443)
   local p line local_addr process label existing seen found
-  for p in "$relay_port" "$admin_port" "$backend_port" 2398 8888; do
+  for p in "$relay_port" "$admin_port" "$backend_port"; do
     [[ "$p" =~ ^[0-9]+$ ]] || continue
     seen=0
     for existing in "${ports[@]}"; do [[ "$existing" == "$p" ]] && seen=1; done
@@ -528,9 +528,9 @@ preflight_basics() {
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service)
   ui_header "Предварительная проверка системы"
-  echo "До ввода параметров проверяю базовые пакеты и состояние служб."
+  echo "Проверка основных компонентов до ввода параметров установки."
   echo
-  printf '  %-30s %s\n' "Пакет" "Состояние"
+  printf '  %-30s %s\n' "Базовые пакеты" "Состояние"
   printf '  %-30s %s\n' "------------------------------" "------------------------------"
   for pkg in "${required_packages[@]}"; do
     if package_installed "$pkg"; then
@@ -539,6 +539,34 @@ preflight_basics() {
       printf '  %-30s %s\n' "$pkg" "$(status_mark warn) будет установлен"
     fi
   done
+  echo
+  printf '  %-30s %s\n' "Основной компонент" "Состояние"
+  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  if [[ -x /usr/local/bin/tproxy-server ]]; then
+    printf '  %-30s %s\n' "tproxy-server" "$(status_mark ok) бинарный файл найден"
+  else
+    printf '  %-30s %s\n' "tproxy-server" "$(status_mark warn) потребуется установить/собрать"
+  fi
+  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]]; then
+    printf '  %-30s %s\n' "MTProxy" "$(status_mark ok) бинарный файл найден"
+  else
+    printf '  %-30s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
+  fi
+  if command -v caddy >/dev/null 2>&1 || [[ -x /usr/local/bin/caddy ]]; then
+    printf '  %-30s %s\n' "Caddy" "$(status_mark ok) установлен"
+  else
+    printf '  %-30s %s\n' "Caddy" "$(status_mark info) не установлен"
+  fi
+  if command -v nginx >/dev/null 2>&1 || package_installed nginx; then
+    printf '  %-30s %s\n' "Nginx" "$(status_mark ok) установлен"
+  else
+    printf '  %-30s %s\n' "Nginx" "$(status_mark info) не установлен"
+  fi
+  if [[ -d "$SITE_DIR" ]]; then
+    printf '  %-30s %s\n' "Decoy-сайт ($SITE_DIR)" "$(status_mark ok) каталог существует"
+  else
+    printf '  %-30s %s\n' "Decoy-сайт ($SITE_DIR)" "$(status_mark info) будет создан"
+  fi
   echo
   printf '  %-30s %s\n' "Служба" "Состояние"
   printf '  %-30s %s\n' "------------------------------" "------------------------------"
@@ -559,7 +587,7 @@ preflight_basics() {
   if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
     die "Для установки требуются apt-get и dpkg-query (Debian/Ubuntu)."
   fi
-  ok "Базовая проверка завершена. Параметры установки ещё не запрашивались."
+  ok "Предварительная проверка завершена. Параметры установки ещё не запрашивались."
   echo
 }
 preflight_system() {
@@ -2006,12 +2034,12 @@ diagnostics_command() {
   echo
   echo "3. Сетевая цепочка и прослушиваемые порты"
   local port label
-  for port in 80 443 "${relay##*:}" "${admin##*:}" "$backend_port" 2398 8888; do
+  for port in 80 443 "${relay##*:}" "${admin##*:}" "$backend_port"; do
     [[ "$port" =~ ^[0-9]+$ ]] || continue
     case "$port" in
       80) label="HTTP / ACME" ;; 443) label="HTTPS / веб-сервер" ;;
       "${admin##*:}") label="tproxy-server health" ;;
-      "$backend_port"|2398|8888) label="MTProxy backend" ;; *) label="tproxy-server relay" ;;
+      "$backend_port") label="MTProxy backend (порт из конфигурации)" ;; *) label="tproxy-server relay" ;;
     esac
     if ss -lntH 2>/dev/null | awk -v p=":$port" '$4 ~ (p "$") { found=1 } END { exit !found }'; then
       printf '  %s %s слушает TCP-порт %s\n' "$(status_mark ok)" "$label" "$port"
