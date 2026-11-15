@@ -66,7 +66,7 @@ die() {
 }
 info() {
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '\033[1;36m[ИНФО]\033[0m %s\n' "$*"
+    printf '\033[1;34m[ИНФО]\033[0m %s\n' "$*"
   else
     printf '[ИНФО] %s\n' "$*"
   fi
@@ -93,14 +93,14 @@ status_mark() {
     ok) mark='[✓]' ;;
     fail) mark='[✗]' ;;
     warn) mark='[!]' ;;
-    *) mark='[?]' ;;
+    *) mark='[•]' ;;
   esac
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
     case "$kind" in
       ok) printf '\033[1;32m%s\033[0m' "$mark" ;;
       fail) printf '\033[1;31m%s\033[0m' "$mark" ;;
       warn) printf '\033[1;33m%s\033[0m' "$mark" ;;
-      *) printf '\033[1;36m%s\033[0m' "$mark" ;;
+      *) printf '\033[1;34m%s\033[0m' "$mark" ;;
     esac
   else
     printf '%s' "$mark"
@@ -1642,37 +1642,52 @@ run_uninstall() {
   ok "Удаление завершено"
 }
 
-run_purge() {
-  # Сохраняем фактический каталог сайта до удаления конфигурации прокси.
+remove_decoy_site() {
+  require_root
   local configured_site=""
   if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
     configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
   fi
-  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then
-    SITE_DIR="$configured_site"
-  fi
+  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
 
-  run_uninstall
-  echo
-  echo "------------------------------------------------------------"
-  echo "  Удаление decoy-сайта"
-  echo "------------------------------------------------------------"
-  if [[ ! -d "$SITE_DIR" ]]; then
-    info "Каталог decoy-сайта не найден: $SITE_DIR"
-    return 0
-  fi
-
-  # Удаляем только созданную установщиком заглушку Vibe Studio.
-  # Любой другой сайт или изменённый пользователем каталог сохраняем.
+  ui_header "Удаление decoy-сайта"
+  if [[ ! -d "$SITE_DIR" ]]; then info "Каталог сайта не найден: $SITE_DIR"; return 0; fi
   if [[ ! -f "$SITE_DIR/index.html" ]] || ! grep -qF '<title>Vibe Studio — код в потоке</title>' "$SITE_DIR/index.html"; then
-    warn "Каталог $SITE_DIR не распознан как decoy-сайт Vibe Studio и оставлен без изменений."
-    return 0
+    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт Vibe Studio. Ничего не удалено."
+    return 1
   fi
-
-  warn "Будет удалён decoy-сайт и его файлы: $SITE_DIR"
-  confirm "Удалить decoy-сайт?" || { info "Decoy-сайт оставлен без изменений."; return 0; }
+  info "Будет удалён только штатный decoy-сайт: $SITE_DIR"
+  confirm "Удалить decoy-сайт?" || { info "Удаление отменено."; return 0; }
   rm -rf -- "$SITE_DIR"
   ok "Decoy-сайт удалён: $SITE_DIR"
+}
+
+remove_web_server_interactive() {
+  require_root
+  local installed_web_server
+  installed_web_server="$(cat /etc/tproxy-server/web-server 2>/dev/null || true)"
+  if [[ "$installed_web_server" != caddy && "$installed_web_server" != nginx ]]; then
+    if systemctl is-active --quiet nginx.service || command -v nginx >/dev/null 2>&1; then installed_web_server=nginx
+    elif systemctl is-active --quiet caddy.service || [[ -x /usr/local/bin/caddy || -x /usr/bin/caddy ]]; then installed_web_server=caddy
+    else warn "Установленный Caddy/Nginx не обнаружен."; return 0; fi
+  fi
+  ui_header "Удаление веб-сервера"
+  warn "Будет удалён $installed_web_server и его конфигурация."
+  if [[ "$installed_web_server" == caddy ]]; then warn "Удаление Caddy затрагивает /etc/caddy и данные Caddy."; fi
+  confirm "Удалить $installed_web_server?" || { info "Удаление отменено."; return 0; }
+  case "$installed_web_server" in caddy) remove_caddy ;; nginx) remove_nginx ;; esac
+  ok "$installed_web_server удалён."
+}
+
+run_purge() {
+  local configured_site=""
+  if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
+    configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
+  fi
+  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
+  KEEP_WEB_SERVER=0
+  run_uninstall
+  remove_decoy_site
 }
 
 # ============================================================================
@@ -1693,7 +1708,7 @@ diagnostics_command() {
 
   echo
   echo "------------------------------------------------------------"
-  echo "  РАСШИРЕННАЯ ДИАГНОСТИКА СЕРВЕРА"
+  echo "  ДИАГНОСТИКА И ПОИСК НЕИСПРАВНОСТЕЙ"
   echo "------------------------------------------------------------"
 
   echo
@@ -1721,7 +1736,27 @@ diagnostics_command() {
   done
 
   echo
-  echo "3. Локальные endpoints и backend"
+  echo "3. Сетевая цепочка и прослушиваемые порты"
+  local port label
+  for port in 443 "${relay##*:}" "$backend_port"; do
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    case "$port" in 443) label="HTTPS / веб-сервер" ;; "$backend_port") label="MTProxy backend" ;; *) label="tproxy-server relay" ;; esac
+    if ss -lntH 2>/dev/null | awk -v p=":$port" '$4 ~ (p "$") { found=1 } END { exit !found }'; then
+      printf '  %s %s слушает TCP-порт %s\n' "$(status_mark ok)" "$label" "$port"
+    else
+      printf '  %s %s не слушает TCP-порт %s\n' "$(status_mark fail)" "$label" "$port"; failed=1
+    fi
+  done
+  if [[ -n "$host" ]] && command -v timeout >/dev/null 2>&1; then
+    if timeout 5 bash -c 'exec 3<>/dev/tcp/"$1"/443' _ "$host" 2>/dev/null; then
+      printf '  %s TCP-соединение с %s:443 установлено\n' "$(status_mark ok)" "$host"
+    else
+      printf '  %s TCP-соединение с %s:443 не установлено (возможна фильтрация извне)\n' "$(status_mark warn)" "$host"; warnings=1
+    fi
+  fi
+
+  echo
+  echo "4. Локальные endpoints и backend"
   if [[ -n "$admin" ]]; then
     for endpoint in healthz readyz; do
       if curl --fail --silent --max-time 4 "http://$admin/$endpoint" >/dev/null; then
@@ -1740,7 +1775,7 @@ diagnostics_command() {
   fi
 
   echo
-  echo "4. Веб-сервер, HTTPS и TLS"
+  echo "5. Веб-сервер, HTTPS и TLS"
   if [[ "$web_server" == nginx ]]; then
     if nginx -t 2>&1; then printf '  %s Nginx config valid\n' "$(status_mark ok)"; else printf '  %s Ошибка конфигурации Nginx\n' "$(status_mark fail)"; failed=1; fi
     cert_path="/etc/letsencrypt/live/$host/fullchain.pem"
@@ -1797,7 +1832,7 @@ diagnostics_command() {
   fi
 
   echo
-  echo "5. Порты и последние ошибки"
+  echo "6. Порты и последние ошибки"
   ss -lntp 2>/dev/null | sed 's/^/  /' || true
   local log_output
   log_output="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u "$web_server" -p err -n 12 --no-pager -o short-iso 2>/dev/null || true)"
@@ -1883,66 +1918,84 @@ restore_command() {
   info "Для проверки выполни: diagnostics"
 }
 
+ui_header() {
+  local title="$1"
+  echo
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+    printf '  \033[1;34m◆\033[0m %s\n' "$title"
+    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+  else
+    printf '%s\n' '============================================================'
+    printf '  %s\n' "$title"
+    printf '%s\n' '============================================================'
+  fi
+}
+ui_option() {
+  local number="$1" icon="$2" label="$3"
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '  \033[1;34m%s)\033[0m %s %s\n' "$number" "$icon" "$label"
+  else printf '  %s) %s %s\n' "$number" "$icon" "$label"; fi
+}
+show_deletion_menu() {
+  local choice
+  while true; do
+    ui_header "Удаление компонентов"
+    ui_option 1 "⚙" "Прокси и службы (веб-сервер и сайт оставить)"
+    ui_option 2 "▣" "Decoy-сайт"
+    ui_option 3 "◆" "Веб-сервер Caddy/Nginx"
+    ui_option 4 "✖" "Всё: прокси, decoy-сайт и веб-сервер"
+    ui_option 5 "↩" "Назад"
+    echo
+    read -r -p "Выбор [1-5]: " choice
+    case "$choice" in
+      1) KEEP_WEB_SERVER=1; run_uninstall; read -r -p "Enter — назад..." _ ;;
+      2) remove_decoy_site; read -r -p "Enter — назад..." _ ;;
+      3) remove_web_server_interactive; read -r -p "Enter — назад..." _ ;;
+      4) run_purge; read -r -p "Enter — назад..." _ ;;
+      5) return 0 ;;
+      *) warn "Выбери пункт от 1 до 5." ;;
+    esac
+  done
+}
 show_tools_menu() {
   local choice archive
   while true; do
-    echo
-    echo "------------------------------------------------------------"
-    echo "  Инструменты"
-    echo "------------------------------------------------------------"
-    echo "  1) Диагностика (службы, порты, конфигурации и ошибки)"
-    echo "  2) Создать резервную копию"
-    echo "  3) Восстановить резервную копию"
-    echo "  4) Назад"
+    ui_header "Инструменты"
+    ui_option 1 "⌕" "Диагностика и поиск неисправностей"
+    ui_option 2 "▤" "Создать резервную копию"
+    ui_option 3 "↻" "Восстановить резервную копию"
+    ui_option 4 "↩" "Назад"
     echo
     read -r -p "Выбор [1-4]: " choice
     case "$choice" in
-      1)
-        require_root
-        diagnostics_command || true
-        read -r -p "Нажми Enter, чтобы вернуться в меню инструментов..." _
-        ;;
-      2)
-        read -r -p "Путь к архиву (Enter — путь по умолчанию): " archive
-        require_root
-        if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi
-        read -r -p "Нажми Enter, чтобы вернуться в меню инструментов..." _
-        ;;
-      3)
-        read -e -r -p "Абсолютный путь к архиву: " archive
-        [[ -n "$archive" ]] || { warn "Путь к архиву не указан"; continue; }
-        require_root
-        restore_command "$archive"
-        read -r -p "Нажми Enter, чтобы вернуться в меню инструментов..." _
-        ;;
+      1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
+      2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
+      3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
       4) return 0 ;;
+      *) warn "Выбери пункт от 1 до 4." ;;
     esac
   done
 }
 show_menu() {
-  echo
-  echo "------------------------------------------------------------"
-  echo "  tproxy-manager v${SCRIPT_VERSION} — что делаем?"
-  echo "------------------------------------------------------------"
-  echo "  1) Установить tproxy-server"
-  echo "  2) Обновить (без пересоздания существующих сервисов)"
-  echo "  3) Удалить tproxy-server (веб-сервер оставить)"
-  echo "  4) Удалить прокси и decoy-сайт"
-  echo "  5) Просмотреть текущую конфигурацию"
-  echo "  6) Инструменты"
-  echo "  7) Выход"
-  echo
   local choice
-  read -r -p "Выбор [1-7]: " choice
+  ui_header "tproxy-manager v${SCRIPT_VERSION}"
+  ui_option 1 "⇧" "Установить tproxy-server"
+  ui_option 2 "↻" "Обновить существующую установку"
+  ui_option 3 "⌫" "Удаление"
+  ui_option 4 "▤" "Текущая конфигурация"
+  ui_option 5 "⚒" "Инструменты"
+  ui_option 6 "⏻" "Выход"
+  echo
+  read -r -p "Выбор [1-6]: " choice
   case "$choice" in
     1) MODE=install ;;
     2) MODE=update; SKIP_TESTS=1 ;;
-    3) MODE=uninstall; KEEP_WEB_SERVER=1 ;;
-    4) MODE=purge ;;
-    5) MODE=config ;;
-    6) MODE=tools ;;
-    7) exit 0 ;;
-    *) die "Неверный выбор" ;;
+    3) MODE=delete ;;
+    4) MODE=config ;;
+    5) MODE=tools ;;
+    6) exit 0 ;;
+    *) warn "Неверный выбор." ;;
   esac
 }
 
@@ -1958,6 +2011,9 @@ main() {
       case "$MODE" in
         tools)
           show_tools_menu
+          ;;
+        delete)
+          show_deletion_menu
           ;;
         config)
           require_root
