@@ -2063,7 +2063,7 @@ diagnostics_command() {
   echo
   echo "5. Веб-сервер, HTTPS и TLS"
   if [[ "$web_server" == nginx ]]; then
-    if nginx -t >/dev/null 2>&1; then printf '  %s Nginx: конфигурация корректна\n' "$(status_mark ok)"; else printf '  %s Nginx: ошибка конфигурации (подробности: nginx -t)\n' "$(status_mark fail)"; failed=1; fi
+    if nginx -t >/dev/null 2>&1; then printf '  %s Nginx config valid\n' "$(status_mark ok)"; else printf '  %s Nginx config invalid (details: nginx -t)\n' "$(status_mark fail)"; failed=1; fi
     cert_path="/etc/letsencrypt/live/$host/fullchain.pem"
   else
     if [[ -x /usr/local/bin/caddy && -s /etc/caddy/Caddyfile ]]; then
