@@ -458,7 +458,7 @@ package_installed() {
 
 preflight_system() {
   require_root
-  local pkg svc version go_minor
+  local pkg svc version go_minor port
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a missing_packages=()
   ui_header "Проверка системы перед установкой"
@@ -536,7 +536,6 @@ preflight_system() {
     fi
   fi
   if [[ "$MODE" != "update" ]]; then
-    local port
     for port in "$RELAY_PORT" "$ADMIN_PORT"; do
       if [[ -n "$port" ]] && ss -lntH 2>/dev/null | awk -v p=":$port" '$4 ~ (p "$") { found=1 } END { exit !found }'; then
         die "Порт $port уже занят. Выбери свободный порт или останови службу, которая его использует."
@@ -735,6 +734,12 @@ resolve_base_path() {
 
 install_caddy() {
   if command -v caddy >/dev/null 2>&1; then
+    local caddy_bin
+    caddy_bin="$(command -v caddy)"
+    if [[ "$caddy_bin" != /usr/local/bin/caddy && ! -x /usr/local/bin/caddy ]]; then
+      ln -s "$caddy_bin" /usr/local/bin/caddy
+      info "Создан совместимый путь /usr/local/bin/caddy → $caddy_bin"
+    fi
     info "Использую уже установленный Caddy: $(caddy version 2>/dev/null | head -n1)"
   else
     info "Ставлю Caddy ${CADDY_VERSION}…"
@@ -1668,8 +1673,10 @@ EOF
   else
     echo "  ПЕРЕД УСТАНОВКОЙ"
     cat <<'EOF'
-  Будут установлены зависимости и Caddy, собраны tproxy-server и MTProxy,
-  созданы конфигурации и службы, настроен HTTPS и запущены сервисы.
+  Сначала будет проверено, какие зависимости и компоненты уже установлены.
+  Будут добавлены только отсутствующие пакеты; существующие Go, Caddy,
+  Nginx и подходящая сборка MTProxy будут повторно использованы.
+  Конфигурации сторонних сайтов сохраняются или резервируются перед изменением.
   Домен должен указывать на IP этого сервера.
 EOF
   fi
