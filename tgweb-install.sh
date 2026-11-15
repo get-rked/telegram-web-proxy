@@ -522,12 +522,18 @@ preflight_system() {
   if [[ "$MODE" == "install" ]] && { [[ -s /etc/tproxy-server/config.json ]] || systemctl is-active --quiet tproxy-server 2>/dev/null || [[ -x /usr/local/bin/tproxy-server ]]; }; then
     die "Обнаружена существующая установка tproxy-server. Для неё выбери «Обновить», чтобы не перезаписать текущую конфигурацию."
   fi
-  local other_web=""
+  local other_web="" switching_webserver=0
   if [[ "$WEB_SERVER" == "caddy" ]] && systemctl is-active --quiet nginx.service 2>/dev/null; then other_web="Nginx"
   elif [[ "$WEB_SERVER" == "nginx" ]] && systemctl is-active --quiet caddy.service 2>/dev/null; then other_web="Caddy"
   fi
   if [[ -n "$other_web" ]]; then
-    die "$other_web уже запущен и не выбран. Автоматически останавливать или удалять существующий веб-сервер небезопасно. Выбери его или останови вручную."
+    if [[ "$MODE" == "update" && "$WEB_SERVER_SET" -eq 1 ]]; then
+      switching_webserver=1
+      warn "Обнаружен активный $other_web. Он будет заменён выбранным веб-сервером $WEB_SERVER."
+      confirm "Подтвердить переключение веб-сервера?" || die "переключение отменено"
+    else
+      die "$other_web уже запущен и не выбран. Установщик не будет останавливать или удалять его автоматически."
+    fi
   fi
   if [[ "$MODE" != "update" ]]; then
     local port
@@ -543,6 +549,8 @@ preflight_system() {
     if port_in_use "$port"; then
       if systemctl is-active --quiet "$selected_service" 2>/dev/null; then
         info "Порт $port уже использует выбранный веб-сервер $WEB_SERVER — повторно не занимаем его."
+      elif [[ "$switching_webserver" -eq 1 ]]; then
+        info "Порт $port сейчас использует $other_web; его переключение уже подтверждено."
       else
         die "Порт $port занят сторонней службой. Установщик не будет останавливать её автоматически."
       fi
