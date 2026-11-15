@@ -2089,7 +2089,13 @@ diagnostics_command() {
   local log_json
   log_json="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u "$web_server" -p err -n 12 --no-pager -o json 2>/dev/null || true)"
   if [[ -n "$log_json" ]] && command -v jq >/dev/null 2>&1; then
-    printf '%s\n' "$log_json" | jq -r '[ (.["__REALTIME_TIMESTAMP"] // "0" | tonumber / 1000000 | strftime("%Y-%m-%d %H:%M:%S")), (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"), (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110]) ] | @tsv' | while IFS=
+    while IFS= read -r log_row; do
+      [[ -n "$log_row" ]] || continue
+      printf '  %s\n' "$log_row"
+    done < <(printf '%s\n' "$log_json" | jq -r '[ (.__REALTIME_TIMESTAMP // "0" | tonumber / 1000000 | strftime("%Y-%m-%d %H:%M:%S")), (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"), (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110]) ] | join(" | ")')
+  else
+    printf '  %s Ошибок уровня error в доступном журнале не найдено\n' "$(status_mark ok)"
+  fi
 
   echo
   echo "------------------------------------------------------------"
