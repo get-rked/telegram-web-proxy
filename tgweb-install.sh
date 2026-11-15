@@ -1251,13 +1251,13 @@ ensure_tproxy_user() {
 
 prepare_layout() {
   require_root
-  install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
   local legacy
   for legacy in /etc/tproxy-server /etc/mtproxy /opt/tproxy-server /opt/MTProxy; do
     if [[ -e "$legacy" && ! -L "$legacy" ]]; then
       die "Обнаружен старый каталог $legacy. Сначала выполни отдельный скрипт миграции в $BASE_DIR, затем повтори команду."
     fi
   done
+  install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
   ln -sfn "$PROXY_CONFIG_DIR" /etc/tproxy-server
   ln -sfn "$MTPROXY_CONFIG_DIR" /etc/mtproxy
   ln -sfn "$REPO_DIR" /opt/tproxy-server
