@@ -765,7 +765,7 @@ is_cloudflare_ipv4() {
 is_cloudflare_proxied_domain() {
   local hostname="$1" ranges="" address count=0 total=0
   local -a addresses=()
-  mapfile -t addresses < <(dig +short A "$hostname" 2>/dev/null | grep -E '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' | sort -u)
+  mapfile -t addresses < <(dig +short A "$hostname" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
   ((${#addresses[@]})) || return 1
   ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
   [[ -n "$ranges" ]] || return 1
@@ -777,7 +777,7 @@ check_dns() {
   info "Проверяю DNS для $HOSTNAME_ARG через системный DNS-резолвер…"
   local -a ips=()
   local public_ip="" matched=0 ip aaaa
-  mapfile -t ips < <(dig +short A "$HOSTNAME_ARG" 2>/dev/null | grep -E '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' | sort -u)
+  mapfile -t ips < <(dig +short A "$HOSTNAME_ARG" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
   ((${#ips[@]})) || die "Системный DNS-резолвер не вернул A-запись для $HOSTNAME_ARG. Проверь DNS-настройки домена и сервера."
   if public_ip="$(get_public_ipv4)"; then
     for ip in "${ips[@]}"; do [[ "$ip" == "$public_ip" ]] && matched=1; done
@@ -788,7 +788,7 @@ check_dns() {
       info "Проверь режим SSL/TLS Full (strict) и доступность origin по TCP 80/443."
     else die "DNS A-запись (${ips[*]}) не совпадает с публичным IPv4 сервера ($public_ip) и не распознана как адреса Cloudflare. Проверь A-запись и настройки DNS Proxy."; fi
   else warn "Не удалось определить публичный IPv4 сервера; системный DNS вернул A-записи: ${ips[*]}. Сравнение пропущено."; fi
-  aaaa="$(dig +short AAAA "$HOSTNAME_ARG" 2>/dev/null | grep ':' | sort -u | tr '\\n' ' ' || true)"
+  aaaa="$(dig +short AAAA "$HOSTNAME_ARG" 2>/dev/null | grep ':' | sort -u | tr '\n' ' ' || true)"
   if [[ -n "$aaaa" ]]; then
     if is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
       info "DNS AAAA возвращает IPv6-адреса сети Cloudflare ($aaaa). При включённом DNS Proxy это адреса прокси-сети, а не прямые IPv6-адреса origin-сервера; IPv6-маршрут origin по ним не оценивается."
@@ -2106,7 +2106,7 @@ diagnostics_command() {
       else printf '  %s DNS A (системный резолвер): %s\n' "$(status_mark ok)" "${dns_ips[*]}"; fi
     else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\n' "$(status_mark fail)"; failed=1; fi
     local aaaa
-    aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\\n' ' ' || true)"
+    aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
       if is_cloudflare_proxied_domain "$host"; then
         printf '  %s DNS AAAA: %s — адреса сети Cloudflare, а не прямые IPv6-адреса origin-сервера; IPv6 origin по ним не оценивается\n' "$(status_mark ok)" "$aaaa"
