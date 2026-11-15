@@ -783,16 +783,15 @@ check_dns() {
     for ip in "${ips[@]}"; do [[ "$ip" == "$public_ip" ]] && matched=1; done
     if (( matched )); then ok "DNS A-запись содержит публичный IPv4 сервера: $public_ip"
     elif is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
-      info "IP-адреса, которые возвращает системный DNS (${ips[*]}), отличаются от публичного IP-адреса сервера ($public_ip)."
-      ok "Cloudflare DNS Proxy включён: DNS возвращает адреса сети Cloudflare вместо исходного IP origin-сервера. Это штатное поведение проксируемой DNS-записи."
-      info "Посетители получают edge-адреса Cloudflare, а запросы передаются через сеть Cloudflare на origin-сервер. Прямое совпадение DNS-адреса с IP сервера не требуется."
+      info "DNS A: ${ips[*]} (публичный IP сервера: $public_ip)"
+      info "Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера; запросы посетителей перенаправляются через Cloudflare."
       info "Проверь режим SSL/TLS Full (strict) и доступность origin по TCP 80/443."
     else die "DNS A-запись (${ips[*]}) не совпадает с публичным IPv4 сервера ($public_ip) и не распознана как адреса Cloudflare. Проверь A-запись и настройки DNS Proxy."; fi
   else warn "Не удалось определить публичный IPv4 сервера; системный DNS вернул A-записи: ${ips[*]}. Сравнение пропущено."; fi
   aaaa="$(dig +short AAAA "$HOSTNAME_ARG" 2>/dev/null | grep ':' | sort -u | tr '\n' ' ' || true)"
   if [[ -n "$aaaa" ]]; then
     if is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
-      info "DNS AAAA возвращает IPv6-адреса сети Cloudflare ($aaaa). При включённом DNS Proxy это адреса прокси-сети, а не прямые IPv6-адреса origin-сервера; IPv6-маршрут origin по ним не оценивается."
+      info "DNS AAAA: $aaaa (IPv6-адреса сети Cloudflare, не origin-сервера)."
     elif ip -6 route get 2606:4700:4700::1111 2>/dev/null | grep -q 'src'; then
       warn "Системный DNS возвращает AAAA-запись ($aaaa). Убедись, что эти IPv6-адреса принадлежат origin-серверу и TCP 80/443 доступны по IPv6."
     else warn "Системный DNS возвращает AAAA-запись ($aaaa), но у сервера нет рабочего IPv6-маршрута. Если IPv6 на origin не настроен, удали AAAA или проверь настройки Cloudflare DNS Proxy."; fi
@@ -2101,28 +2100,26 @@ diagnostics_command() {
     fi
     local -a dns_ips=()
     local dns_public_ip="" dns_matched=0 dns_ip
-    mapfile -t dns_ips < <(dig +short A "$host" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
+    mapfile -t dns_ips < <(dig +short A "$host" 2>/dev/null | grep -E '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' | sort -u)
     if (("${#dns_ips[@]}")); then
       if dns_public_ip="$(get_public_ipv4)"; then
         for dns_ip in "${dns_ips[@]}"; do [[ "$dns_ip" == "$dns_public_ip" ]] && dns_matched=1; done
         if (( dns_matched )); then
-          printf '  %s DNS A: %s — совпадает с публичным IP-адресом сервера (%s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
+          printf '  DNS A: %s (совпадает с публичным IP сервера %s)\\n' "${dns_ips[*]}" "$dns_public_ip"
         else
-          printf '  %s IP-адреса, которые возвращает системный DNS (%s), отличаются от публичного IP-адреса сервера (%s)\n' "$(status_mark warn)" "${dns_ips[*]}" "$dns_public_ip"
-          warnings=1
+          printf '  DNS A: %s (публичный IP сервера: %s)\\n' "${dns_ips[*]}" "$dns_public_ip"
           if is_cloudflare_proxied_domain "$host"; then
-            printf '  %s Cloudflare DNS Proxy включён: DNS возвращает адреса сети Cloudflare вместо исходного IP origin-сервера. Это штатное поведение проксируемой DNS-записи\n' "$(status_mark ok)"
-            printf '  %s Посетители получают edge-адреса Cloudflare, а запросы передаются через сеть Cloudflare на origin-сервер; прямое совпадение DNS-адреса с IP сервера не требуется\n' "$(status_mark ok)"
+            printf '  Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера; запросы посетителей перенаправляются через Cloudflare.\\n'
           else
-            printf '  %s Адреса не распознаны как сеть Cloudflare — проверь A-запись домена и настройки DNS Proxy\n' "$(status_mark fail)"
+            printf '  %s DNS-адреса не совпадают с IP сервера и не распознаны как адреса Cloudflare — проверь A-запись и DNS Proxy\\n' "$(status_mark fail)"
             failed=1
           fi
         fi
       else
-        printf '  %s Не удалось определить публичный IP-адрес сервера; DNS A: %s\n' "$(status_mark warn)" "${dns_ips[*]}"
+        printf '  DNS A: %s (не удалось определить публичный IP сервера)\\n' "${dns_ips[*]}"
         warnings=1
       fi
-    else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\n' "$(status_mark fail)"; failed=1; fi
+    else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\\n' "$(status_mark fail)"; failed=1; fi
     local aaaa
     aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
