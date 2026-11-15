@@ -22,7 +22,7 @@ readonly CONFIG_DIR="$BASE_DIR/config"
 readonly PROXY_CONFIG_DIR="$CONFIG_DIR/proxy"
 readonly MTPROXY_CONFIG_DIR="$CONFIG_DIR/mtproxy"
 readonly DATA_DIR="$BASE_DIR/data"
-readonly MTPROXY_DIR="$DATA_DIR/mtproxy"
+readonly MTPROXY_DIR="$SOURCE_DIR/mtproxy"
 readonly SOURCE_DIR="$BASE_DIR/src"
 readonly REPO_DIR="$SOURCE_DIR/tproxy-server"
 readonly SYSTEMD_DIR="$BASE_DIR/systemd"
@@ -2008,14 +2008,14 @@ run_purge() {
 
 diagnostics_command() {
   local failed=0 warnings=0 svc state file web_server host relay admin backend backend_port cert_path expiry
-  web_server="$(cat /etc/tproxy-server/web-server 2>/dev/null || true)"
+  web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   [[ "$web_server" == "nginx" || "$web_server" == "caddy" ]] || {
     if systemctl is-enabled --quiet nginx 2>/dev/null; then web_server=nginx; else web_server=caddy; fi
   }
-  host="$(jq -r '.public_hostname // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
-  relay="$(jq -r '.listen // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
-  admin="$(jq -r '.admin_listen // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
-  backend="$(jq -r '.profiles[0].backend // empty' /etc/tproxy-server/profiles.json 2>/dev/null || true)"
+  host="$(jq -r '.public_hostname // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null || true)"
+  relay="$(jq -r '.listen // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null || true)"
+  admin="$(jq -r '.admin_listen // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null || true)"
+  backend="$(jq -r '.profiles[0].backend // empty' "$PROXY_CONFIG_DIR/profiles.json" 2>/dev/null || true)"
   backend_port="${backend##*:}"
 
   echo
@@ -2097,7 +2097,7 @@ diagnostics_command() {
     cert_path="/etc/letsencrypt/live/$host/fullchain.pem"
   else
     if [[ -x /usr/local/bin/caddy && -s /etc/caddy/Caddyfile ]]; then
-      if TPROXY_HOSTNAME="$host" TPROXY_SITE_ROOT="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null)" ACME_EMAIL="$(cat /etc/tproxy-server/acme-email 2>/dev/null || true)" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+      if TPROXY_HOSTNAME="$host" TPROXY_SITE_ROOT="$(jq -r '.public_dir // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null)" ACME_EMAIL="$(cat "$PROXY_CONFIG_DIR/acme-email" 2>/dev/null || true)" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
         printf '  %s Caddy config valid\n' "$(status_mark ok)"
       else
         printf '  %s Ошибка конфигурации Caddy\n' "$(status_mark fail)"; failed=1
