@@ -2092,7 +2092,15 @@ diagnostics_command() {
     while IFS= read -r log_row; do
       [[ -n "$log_row" ]] || continue
       printf '  %s\n' "$log_row"
-    done < <(printf '%s\n' "$log_json" | jq -r '[ (.__REALTIME_TIMESTAMP // "0" | tonumber / 1000000 | strftime("%Y-%m-%d %H:%M:%S")), (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"), (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110]) ] | join(" | ")')
+    done < <(
+      printf '%s\n' "$log_json" | jq -r '
+        [
+          (.__REALTIME_TIMESTAMP // "0" | tonumber / 1000000 | strftime("%Y-%m-%d %H:%M:%S")),
+          (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"),
+          (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110])
+        ] | join(" | ")
+      '
+    )
   else
     printf '  %s Ошибок уровня error в доступном журнале не найдено\n' "$(status_mark ok)"
   fi
