@@ -28,7 +28,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly PURGE_PACKAGES=(nftables git jq netcat-openbsd dnsutils build-essential qrencode)
+readonly SCRIPT_VERSION="1.0.1"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -1643,19 +1643,36 @@ run_uninstall() {
 }
 
 run_purge() {
+  # Сохраняем фактический каталог сайта до удаления конфигурации прокси.
+  local configured_site=""
+  if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
+    configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
+  fi
+  if [[ -n "$configured_site" && "$configured_site" == /* ]]; then
+    SITE_DIR="$configured_site"
+  fi
+
   run_uninstall
   echo
   echo "------------------------------------------------------------"
-  echo "  Удаление пакетов"
+  echo "  Удаление decoy-сайта"
   echo "------------------------------------------------------------"
-  warn "Будут удалены: ${PURGE_PACKAGES[*]}"
-  warn "Эти пакеты могут использоваться другими сервисами (Docker, firewall, git-репозитории)."
-  confirm "Продолжить?" || die "отменено"
+  if [[ ! -d "$SITE_DIR" ]]; then
+    info "Каталог decoy-сайта не найден: $SITE_DIR"
+    return 0
+  fi
 
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get remove -y --purge "${PURGE_PACKAGES[@]}" 2>/dev/null || true
-  apt-get autoremove -y --purge 2>/dev/null || true
-  ok "Пакеты удалены"
+  # Удаляем только созданную установщиком заглушку Vibe Studio.
+  # Любой другой сайт или изменённый пользователем каталог сохраняем.
+  if [[ ! -f "$SITE_DIR/index.html" ]] || ! grep -qF '<title>Vibe Studio — код в потоке</title>' "$SITE_DIR/index.html"; then
+    warn "Каталог $SITE_DIR не распознан как decoy-сайт Vibe Studio и оставлен без изменений."
+    return 0
+  fi
+
+  warn "Будет удалён decoy-сайт и его файлы: $SITE_DIR"
+  confirm "Удалить decoy-сайт?" || { info "Decoy-сайт оставлен без изменений."; return 0; }
+  rm -rf -- "$SITE_DIR"
+  ok "Decoy-сайт удалён: $SITE_DIR"
 }
 
 # ============================================================================
@@ -1905,12 +1922,12 @@ show_tools_menu() {
 show_menu() {
   echo
   echo "------------------------------------------------------------"
-  echo "  tproxy-manager — что делаем?"
+  echo "  tproxy-manager v${SCRIPT_VERSION} — что делаем?"
   echo "------------------------------------------------------------"
   echo "  1) Установить tproxy-server"
   echo "  2) Обновить (без пересоздания существующих сервисов)"
   echo "  3) Удалить tproxy-server (веб-сервер оставить)"
-  echo "  4) Удалить всё, включая пакеты"
+  echo "  4) Удалить прокси и decoy-сайт"
   echo "  5) Просмотреть текущую конфигурацию"
   echo "  6) Инструменты"
   echo "  7) Выход"
