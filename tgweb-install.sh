@@ -1317,7 +1317,7 @@ write_mtproxy_env() {
     info "NAT: $local_address → $public_address, использую --nat-info"
   elif [[ "$local_address" =~ ^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) && -z "$mtproxy_nat_args" ]]; then
     warn "локальный IP $local_address приватный, публичный не определён."
-    warn "Если MTProxy будет молчать — задай MTPROXY_NAT_ARGS в /etc/mtproxy/mtproxy.env"
+    warn "Если MTProxy будет молчать — задай MTPROXY_NAT_ARGS в $MTPROXY_CONFIG_DIR/mtproxy.env"
   fi
 
   mkdir -p /etc/mtproxy
