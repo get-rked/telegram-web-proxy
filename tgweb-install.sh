@@ -1514,7 +1514,7 @@ tproxy-server развёрнут
  Proxy server:    $client_address
  Proxy secret:    $proxy_secret
  Proxy link:      $proxy_link
- QR image:        /etc/tproxy-server/proxy-qr.png
+ QR image:        $QR_DIR/proxy-qr.png
 
  Проверка:
    curl -fsS http://127.0.0.1:$ADMIN_PORT/healthz
@@ -1615,7 +1615,7 @@ $(proxy_ports_table "$relay" "$admin" "$backend")
 
 Ссылки подключения:
 ${link:-<не удалось сформировать: проверь config.json и profiles.json>}
-QR-код (PNG)          : ${link:+/etc/tproxy-server/proxy-qr.png}
+QR-код (PNG)          : ${link:+$QR_DIR/proxy-qr.png}
 ==============================================================
 EOF
 )"
