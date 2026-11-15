@@ -530,29 +530,29 @@ preflight_basics() {
   ui_header "Предварительная проверка системы"
   echo "До ввода параметров проверяю базовые пакеты и состояние служб."
   echo
-  printf '  %-30s %s\\n' "Пакет" "Состояние"
-  printf '  %-30s %s\\n' "------------------------------" "------------------------------"
-  for pkg in "${required_packages[@]}}"; do
+  printf '  %-30s %s\n' "Пакет" "Состояние"
+  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  for pkg in "${required_packages[@]}"; do
     if package_installed "$pkg"; then
-      printf '  %-30s %s\\n' "$pkg" "$(status_mark ok) установлен"
+      printf '  %-30s %s\n' "$pkg" "$(status_mark ok) установлен"
     else
-      printf '  %-30s %s\\n' "$pkg" "$(status_mark warn) будет установлен"
+      printf '  %-30s %s\n' "$pkg" "$(status_mark warn) будет установлен"
     fi
   done
   echo
-  printf '  %-30s %s\\n' "Служба" "Состояние"
-  printf '  %-30s %s\\n' "------------------------------" "------------------------------"
-  for svc in "${services[@]}}"; do
+  printf '  %-30s %s\n' "Служба" "Состояние"
+  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  for svc in "${services[@]}"; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
       state="активна"
-      printf '  %-30s %s\\n' "$svc" "$(status_mark ok) $state"
+      printf '  %-30s %s\n' "$svc" "$(status_mark ok) $state"
     elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
       state="включена, но не активна"
-      printf '  %-30s %s\\n' "$svc" "$(status_mark warn) $state"
+      printf '  %-30s %s\n' "$svc" "$(status_mark warn) $state"
     elif systemctl list-unit-files "$svc" --no-legend 2>/dev/null | grep -q .; then
-      printf '  %-30s %s\\n' "$svc" "$(status_mark info) установлена, не активна"
+      printf '  %-30s %s\n' "$svc" "$(status_mark info) установлена, не активна"
     else
-      printf '  %-30s %s\\n' "$svc" "$(status_mark info) не обнаружена"
+      printf '  %-30s %s\n' "$svc" "$(status_mark info) не обнаружена"
     fi
   done
   echo
