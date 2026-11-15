@@ -2107,9 +2107,9 @@ diagnostics_command() {
         if (( dns_matched )); then
           printf '  %s DNS A: %s (совпадает с публичным IP сервера %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
         else
-          printf '  %s DNS A: %s (публичный IP сервера: %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
+          printf '  %s DNS A: %s (публичный IP сервера: %s)\n' "$(status_mark warn)" "${dns_ips[*]}" "$dns_public_ip"
           if is_cloudflare_proxied_domain "$host"; then
-            printf '  %s Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера.\n' "$(status_mark ok)"
+            printf '  %s Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера.\n' "$(status_mark warn)"
           else
             printf '  %s DNS-адреса не совпадают с IP сервера и не распознаны как адреса Cloudflare — проверь A-запись и DNS Proxy\n' "$(status_mark fail)"
             failed=1
@@ -2124,7 +2124,7 @@ diagnostics_command() {
     aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
       if is_cloudflare_proxied_domain "$host"; then
-        printf '  %s DNS AAAA: %s (IPv6-адреса сети Cloudflare, не origin-сервера)\n' "$(status_mark ok)" "$aaaa"
+        printf '  %s DNS AAAA: %s (IPv6-адреса сети Cloudflare, не origin-сервера)\n' "$(status_mark warn)" "$aaaa"
       else printf '  %s DNS AAAA задан: %s — проверь IPv6 origin-сервера и доступность TCP 80/443 извне\n' "$(status_mark warn)" "$aaaa"; warnings=1; fi
     else printf '  %s DNS AAAA не задан через системный DNS-резолвер\n' "$(status_mark ok)"; fi
   else
