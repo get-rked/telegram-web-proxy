@@ -2101,28 +2101,28 @@ diagnostics_command() {
     fi
     local -a dns_ips=()
     local dns_public_ip="" dns_matched=0 dns_ip
-    mapfile -t dns_ips < <(dig +short A "$host" 2>/dev/null | grep -E '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' | sort -u)
+    mapfile -t dns_ips < <(dig +short A "$host" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
     if (("${#dns_ips[@]}")); then
       if dns_public_ip="$(get_public_ipv4)"; then
         for dns_ip in "${dns_ips[@]}"; do [[ "$dns_ip" == "$dns_public_ip" ]] && dns_matched=1; done
         if (( dns_matched )); then
-          printf '  %s DNS A: %s — совпадает с публичным IP-адресом сервера (%s)\\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
+          printf '  %s DNS A: %s — совпадает с публичным IP-адресом сервера (%s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
         else
-          printf '  %s IP-адреса, которые возвращает системный DNS (%s), отличаются от публичного IP-адреса сервера (%s)\\n' "$(status_mark warn)" "${dns_ips[*]}" "$dns_public_ip"
+          printf '  %s IP-адреса, которые возвращает системный DNS (%s), отличаются от публичного IP-адреса сервера (%s)\n' "$(status_mark warn)" "${dns_ips[*]}" "$dns_public_ip"
           warnings=1
           if is_cloudflare_proxied_domain "$host"; then
-            printf '  %s Cloudflare DNS Proxy включён: DNS возвращает адреса сети Cloudflare вместо исходного IP origin-сервера. Это штатное поведение проксируемой DNS-записи\\n' "$(status_mark ok)"
-            printf '  %s Посетители получают edge-адреса Cloudflare, а запросы передаются через сеть Cloudflare на origin-сервер; прямое совпадение DNS-адреса с IP сервера не требуется\\n' "$(status_mark ok)"
+            printf '  %s Cloudflare DNS Proxy включён: DNS возвращает адреса сети Cloudflare вместо исходного IP origin-сервера. Это штатное поведение проксируемой DNS-записи\n' "$(status_mark ok)"
+            printf '  %s Посетители получают edge-адреса Cloudflare, а запросы передаются через сеть Cloudflare на origin-сервер; прямое совпадение DNS-адреса с IP сервера не требуется\n' "$(status_mark ok)"
           else
-            printf '  %s Адреса не распознаны как сеть Cloudflare — проверь A-запись домена и настройки DNS Proxy\\n' "$(status_mark fail)"
+            printf '  %s Адреса не распознаны как сеть Cloudflare — проверь A-запись домена и настройки DNS Proxy\n' "$(status_mark fail)"
             failed=1
           fi
         fi
       else
-        printf '  %s Не удалось определить публичный IP-адрес сервера; DNS A: %s\\n' "$(status_mark warn)" "${dns_ips[*]}"
+        printf '  %s Не удалось определить публичный IP-адрес сервера; DNS A: %s\n' "$(status_mark warn)" "${dns_ips[*]}"
         warnings=1
       fi
-    else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\\n' "$(status_mark fail)"; failed=1; fi
+    else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\n' "$(status_mark fail)"; failed=1; fi
     local aaaa
     aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
