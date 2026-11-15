@@ -696,8 +696,8 @@ resolve_base_path() {
 }
 
 install_caddy() {
-  if command -v caddy >/dev/null 2>&1 && caddy version 2>/dev/null | grep -q "v${CADDY_VERSION}"; then
-    ok "Caddy ${CADDY_VERSION} уже установлен"
+  if command -v caddy >/dev/null 2>&1; then
+    info "Использую уже установленный Caddy: $(caddy version 2>/dev/null | head -n1)"
   else
     info "Ставлю Caddy ${CADDY_VERSION}…"
     local archive dir
@@ -742,8 +742,16 @@ map $http_upgrade $connection_upgrade {
     ''      '';
 }
 EOF
+  if [[ -e "$NGINX_SITE" ]]; then
+    cp -a "$NGINX_SITE" "${NGINX_SITE}.before-tproxy.$(date +%Y%m%d%H%M%S)"
+    warn "Существующая конфигурация Nginx сохранена в резервную копию."
+  fi
+  if [[ -e "$NGINX_MAP" ]]; then
+    cp -a "$NGINX_MAP" "${NGINX_MAP}.before-tproxy.$(date +%Y%m%d%H%M%S)"
+  fi
   ln -sfn "$NGINX_SITE" "$NGINX_ENABLED"
-  rm -f /etc/nginx/sites-enabled/default
+  # Системный default site не отключаем: точный server_name домена прокси
+  # имеет приоритет и не требует удаления сторонней конфигурации.
   nginx -t || die "Nginx HTTP-конфигурация невалидна"
   systemctl restart nginx
   if [[ ! -s "$cert" || ! -s "$key" ]]; then
@@ -1642,6 +1650,7 @@ run_install() {
   else
     interactive_fill
   fi
+  preflight_system
   install -d -m 0755 /etc/tproxy-server
   printf '%s\n' "$EMAIL_ARG" > /etc/tproxy-server/acme-email
   chmod 0600 /etc/tproxy-server/acme-email
@@ -1656,16 +1665,16 @@ run_install() {
   # иначе он продолжит занимать 80/443 (особенно при установке без marker-файла).
   if [[ "$WEB_SERVER" == "caddy" ]]; then
     if [[ "$previous_web_server" == "nginx" ]]; then
+      warn "Предыдущий веб-сервер Nginx будет заменён на Caddy согласно выбранной конфигурации."
+      confirm "Продолжить переключение Nginx → Caddy?" || die "переключение отменено"
       remove_nginx
-    else
-      systemctl disable --now nginx.service 2>/dev/null || true
     fi
     install_caddy
   else
     if [[ "$previous_web_server" == "caddy" ]]; then
+      warn "Предыдущий веб-сервер Caddy будет заменён на Nginx согласно выбранной конфигурации."
+      confirm "Продолжить переключение Caddy → Nginx?" || die "переключение отменено"
       remove_caddy
-    else
-      systemctl disable --now caddy.service 2>/dev/null || true
     fi
     install_nginx_packages
   fi
