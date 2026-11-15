@@ -16,8 +16,19 @@ umask 077
 # ----------------------------- константы ------------------------------------
 readonly REPO_URL="https://github.com/telegramdesktop/tproxy-server.git"
 readonly UPSTREAM_COMMIT="c8adb8b7c6b7fc46c12ae3acb68be9070c26a8e8"
-readonly REPO_DIR="/opt/tproxy-server"
-readonly SITE_DIR_DEFAULT="/srv/tproxy-site"
+readonly BASE_DIR="/opt/telegram-web-proxy"
+readonly BIN_DIR="$BASE_DIR/bin"
+readonly CONFIG_DIR="$BASE_DIR/config"
+readonly PROXY_CONFIG_DIR="$CONFIG_DIR/proxy"
+readonly MTPROXY_CONFIG_DIR="$CONFIG_DIR/mtproxy"
+readonly DATA_DIR="$BASE_DIR/data"
+readonly MTPROXY_DIR="$DATA_DIR/mtproxy"
+readonly SOURCE_DIR="$BASE_DIR/src"
+readonly REPO_DIR="$SOURCE_DIR/tproxy-server"
+readonly SYSTEMD_DIR="$BASE_DIR/systemd"
+readonly QR_DIR="$BASE_DIR/qr"
+readonly BACKUP_DIR="$BASE_DIR/backups"
+readonly SITE_DIR_DEFAULT="$DATA_DIR/website"
 readonly GO_FALLBACK_VERSION="1.26.5"
 readonly GO_FALLBACK_SHA256="5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"
 readonly CADDY_VERSION="2.11.4"
@@ -29,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.0.1"
+readonly SCRIPT_VERSION="1.1.0"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -140,7 +151,7 @@ Usage:
   backup [ABSOLUTE_PATH]     Резервная копия конфигураций
   restore ABSOLUTE_PATH      Восстановить конфигурации из архива
   --base-path SLUG|none     Базовый путь (default: генерируется)
-  --site-dir PATH           Каталог сайта (default: /srv/tproxy-site)
+  --site-dir PATH           Каталог сайта (default: /opt/telegram-web-proxy/data/website)
   --no-site                 Не устанавливать сайт
   --workers N               MTProxy workers (default: 1)
   --max-connections N       MTProxy max connections (default: 4096)
@@ -542,12 +553,12 @@ preflight_basics() {
   echo
   printf '  %-30s %s\n' "Основной компонент" "Состояние"
   printf '  %-30s %s\n' "------------------------------" "------------------------------"
-  if [[ -x /usr/local/bin/tproxy-server ]]; then
+  if [[ -x "$BIN_DIR/tproxy-server" || -x /usr/local/bin/tproxy-server ]]; then
     printf '  %-30s %s\n' "tproxy-server" "$(status_mark ok) бинарный файл найден"
   else
     printf '  %-30s %s\n' "tproxy-server" "$(status_mark warn) потребуется установить/собрать"
   fi
-  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]]; then
+  if [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" ]]; then
     printf '  %-30s %s\n' "MTProxy" "$(status_mark ok) бинарный файл найден"
   else
     printf '  %-30s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
@@ -629,9 +640,9 @@ preflight_system() {
   else
     printf '  %-24s %s\n' "Каталог сайта" "$(status_mark info) будет создан: $SITE_DIR"
   fi
-  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy && -r /opt/MTProxy/.tproxy-commit ]] && grep -Fxq "$MTPROXY_COMMIT" /opt/MTProxy/.tproxy-commit && [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+  if [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" && -r "$MTPROXY_DIR/.tproxy-commit" ]] && grep -Fxq "$MTPROXY_COMMIT" "$MTPROXY_DIR/.tproxy-commit" && [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
     printf '  %-24s %s\n' "MTProxy" "$(status_mark ok) нужная сборка уже установлена"
-  elif [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]]; then
+  elif [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" ]]; then
     printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) найдена другая/неполная сборка; установщик создаст резервную копию и обновит её"
   else
     printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
@@ -975,14 +986,19 @@ remove_nginx() {
 }
 
 install_mtproxy_backend() {
-  if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy && -r /opt/MTProxy/.tproxy-commit ]] &&
-     grep -Fxq "$MTPROXY_COMMIT" /opt/MTProxy/.tproxy-commit &&
+  if [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" && -r "$MTPROXY_DIR/.tproxy-commit" ]] &&
+     grep -Fxq "$MTPROXY_COMMIT" "$MTPROXY_DIR/.tproxy-commit" &&
      [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
     ok "MTProxy нужной версии уже установлен — сборка и обновление Telegram-конфигурации пропущены"
     return 0
   fi
   info "Собираю официальный MTProxy…"
+  sed -i -e "s#/opt/MTProxy#$MTPROXY_DIR#g" -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/install-mtproxy.sh"
+  sed -i "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/refresh-mtproxy-config.sh"
   "$REPO_DIR/deploy/install-mtproxy.sh"
+  ln -sfn "$MTPROXY_DIR" /opt/MTProxy
+  ln -sfn "$MTPROXY_DIR/objs/bin/mtproto-proxy" "$BIN_DIR/mtproto-proxy"
+  ln -sfn "$BIN_DIR/mtproto-proxy" /usr/local/bin/mtproxy
   ok "MTProxy собран"
 }
 
@@ -1023,9 +1039,11 @@ build_tproxy() {
   else
     warn "  go test пропущен (--skip-tests)"
   fi
-  "$GO_BIN" build -trimpath -ldflags='-s -w' -o /usr/local/bin/tproxy-server ./cmd/tproxy-server
-  chown root:root /usr/local/bin/tproxy-server
-  chmod 0755 /usr/local/bin/tproxy-server
+  install -d -m 0755 "$BIN_DIR"
+  "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$BIN_DIR/tproxy-server" ./cmd/tproxy-server
+  chown root:root "$BIN_DIR/tproxy-server"
+  chmod 0755 "$BIN_DIR/tproxy-server"
+  ln -sfn "$BIN_DIR/tproxy-server" /usr/local/bin/tproxy-server
   cd - >/dev/null
   ok "tproxy-server собран"
 }
@@ -1231,6 +1249,21 @@ ensure_tproxy_user() {
   fi
 }
 
+prepare_layout() {
+  require_root
+  install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
+  local legacy
+  for legacy in /etc/tproxy-server /etc/mtproxy /opt/tproxy-server /opt/MTProxy; do
+    if [[ -e "$legacy" && ! -L "$legacy" ]]; then
+      die "Обнаружен старый каталог $legacy. Сначала выполни отдельный скрипт миграции в $BASE_DIR, затем повтори команду."
+    fi
+  done
+  ln -sfn "$PROXY_CONFIG_DIR" /etc/tproxy-server
+  ln -sfn "$MTPROXY_CONFIG_DIR" /etc/mtproxy
+  ln -sfn "$REPO_DIR" /opt/tproxy-server
+  ln -sfn "$MTPROXY_DIR" /opt/MTProxy
+}
+
 write_configs() {
   install -d -o root -g tproxy -m 0750 /etc/tproxy-server
   bash "$REPO_DIR/deploy/ensure-token-key.sh"
@@ -1300,29 +1333,29 @@ EOF
 }
 
 install_units() {
-  local src dst
-  local -A units=(
-    ["$REPO_DIR/deploy/tproxy-server.service"]="/etc/systemd/system/tproxy-server.service"
-    ["$REPO_DIR/deploy/mtproxy.service"]="/etc/systemd/system/mtproxy.service"
-    ["$REPO_DIR/deploy/tproxy-firewall.service"]="/etc/systemd/system/tproxy-firewall.service"
-    ["$REPO_DIR/deploy/refresh-mtproxy-config.service"]="/etc/systemd/system/refresh-mtproxy-config.service"
-    ["$REPO_DIR/deploy/refresh-mtproxy-config.timer"]="/etc/systemd/system/refresh-mtproxy-config.timer"
-  )
-  for src in "${!units[@]}"; do
-    dst="${units[$src]}"
-    if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
-      info "  юнит без изменений: $(basename "$dst")"
-    else
-      [[ -f "$dst" ]] && cp -a "$dst" "${dst}.bak.$(date +%s)"
-      install -m 0644 "$src" "$dst"
-      info "  юнит обновлён: $(basename "$dst")"
-    fi
+  local name src dst
+  local -a names=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.service refresh-mtproxy-config.timer)
+  install -d -m 0755 "$SYSTEMD_DIR" "$PROXY_CONFIG_DIR" "$BIN_DIR"
+  for name in "${names[@]}"; do
+    src="$REPO_DIR/deploy/$name"
+    dst="$SYSTEMD_DIR/$name"
+    [[ -f "$src" ]] || die "Не найден шаблон службы: $src"
+    sed \
+      -e "s#/etc/tproxy-server#$PROXY_CONFIG_DIR#g" \
+      -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" \
+      -e "s#/opt/MTProxy#$MTPROXY_DIR#g" \
+      -e "s#/usr/local/bin/tproxy-server#$BIN_DIR/tproxy-server#g" \
+      -e "s#/usr/local/sbin/refresh-mtproxy-config#$BIN_DIR/refresh-mtproxy-config#g" \
+      -e "s#/srv/tproxy-site#$SITE_DIR_DEFAULT#g" "$src" > "$dst"
+    chmod 0644 "$dst"
+    ln -sfn "$dst" "/etc/systemd/system/$name"
   done
-  install -m 0644 "$REPO_DIR/deploy/firewall.nft" /etc/tproxy-server/firewall.nft 2>/dev/null || true
-  install -m 0755 "$REPO_DIR/deploy/refresh-mtproxy-config.sh" /usr/local/sbin/refresh-mtproxy-config 2>/dev/null || true
-  ok "systemd units синхронизированы"
+  install -m 0644 "$REPO_DIR/deploy/firewall.nft" "$PROXY_CONFIG_DIR/firewall.nft"
+  sed -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/refresh-mtproxy-config.sh" > "$BIN_DIR/refresh-mtproxy-config"
+  chmod 0755 "$BIN_DIR/refresh-mtproxy-config"
+  ln -sfn "$BIN_DIR/refresh-mtproxy-config" /usr/local/sbin/refresh-mtproxy-config
+  ok "Файлы служб размещены в $SYSTEMD_DIR и подключены через системные ссылки"
 }
-
 install_caddyfile() {
   if [[ -s /etc/caddy/Caddyfile ]] &&
      grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile &&
@@ -1374,7 +1407,7 @@ verify_site_permissions() {
 validate_configs() {
   verify_site_permissions
   info "Валидация config.json…"
-  /usr/local/bin/tproxy-server -config /etc/tproxy-server/config.json \
+    "$BIN_DIR/tproxy-server" -config /etc/tproxy-server/config.json \
     -profiles-file /etc/tproxy-server/profiles.json -check \
     || die "tproxy-server -check упал"
   if [[ "$WEB_SERVER" == "caddy" ]]; then
@@ -1439,9 +1472,9 @@ web_proxy_secret() {
 }
 
 generate_proxy_qr() {
-  local link="$1" qr_file="${2:-/etc/tproxy-server/proxy-qr.png}"
+  local link="$1" qr_file="${2:-$QR_DIR/proxy-qr.png}"
   command -v qrencode >/dev/null 2>&1 || die "qrencode не установлен"
-  install -d -m 0750 /etc/tproxy-server
+  install -d -m 0750 "$QR_DIR"
   qrencode -o "$qr_file" -t PNG -s 8 -m 2 "$link"
   chmod 0600 "$qr_file"
   chown root:root "$qr_file"
@@ -1508,8 +1541,8 @@ EOF
 
 
 run_config() {
-  local cfg=/etc/tproxy-server/config.json profiles=/etc/tproxy-server/profiles.json
-  local envf=/etc/mtproxy/mtproxy.env host="" base="" relay="" admin="" public_dir="" email="" web_server=""
+  local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
+  local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
   local backend="" secret="" workers="" maxconn="" nat="" proxy_secret="" server="" link="" output=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1629,8 +1662,8 @@ EOF
 }
 
 load_existing_config() {
-  local cfg=/etc/tproxy-server/config.json profiles=/etc/tproxy-server/profiles.json
-  local envf=/etc/mtproxy/mtproxy.env dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
+  local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
+  local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
   [[ -r "$cfg" && -r "$profiles" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
   command -v jq >/dev/null 2>&1 || die "Для чтения настроек нужен jq"
   v="$(jq -er '.public_hostname | select(type == "string" and length > 0)' "$cfg")" || die "Не удалось прочитать hostname"
@@ -1806,6 +1839,7 @@ run_install() {
   require_root
   check_arch
   check_os
+  prepare_layout
   preflight_basics
   show_operation_overview
   if [[ "$MODE" == "update" ]]; then
@@ -1884,7 +1918,7 @@ run_uninstall() {
   echo "------------------------------------------------------------"
   echo "Будет удалено:"
   echo "  - сервисы: tproxy-server, mtproxy, tproxy-firewall, refresh-mtproxy-config"
-  echo "  - каталоги: $REPO_DIR, /etc/tproxy-server, /etc/mtproxy; сайт $SITE_DIR сохраняется"
+  echo "  - каталоги: $REPO_DIR, $PROXY_CONFIG_DIR, $MTPROXY_CONFIG_DIR, $MTPROXY_DIR; сайт $SITE_DIR сохраняется"
   echo "  - бинарники: /usr/local/bin/tproxy-server, /usr/local/bin/mtproxy"
   echo "  - nftables: inet tproxy_backend"
   echo "  - пользователи: tproxy, mtproxy"
@@ -1897,21 +1931,17 @@ run_uninstall() {
     systemctl stop "$svc" 2>/dev/null || true
     systemctl disable "$svc" 2>/dev/null || true
   done
-  rm -f /etc/systemd/system/tproxy-server.service
-  rm -f /etc/systemd/system/mtproxy.service
-  rm -f /etc/systemd/system/tproxy-firewall.service
-  rm -f /etc/systemd/system/refresh-mtproxy-config.service
-  rm -f /etc/systemd/system/refresh-mtproxy-config.timer
+  rm -f /etc/systemd/system/tproxy-server.service /etc/systemd/system/mtproxy.service /etc/systemd/system/tproxy-firewall.service /etc/systemd/system/refresh-mtproxy-config.service /etc/systemd/system/refresh-mtproxy-config.timer
+  rm -f "$SYSTEMD_DIR"/tproxy-server.service "$SYSTEMD_DIR"/mtproxy.service "$SYSTEMD_DIR"/tproxy-firewall.service "$SYSTEMD_DIR"/refresh-mtproxy-config.service "$SYSTEMD_DIR"/refresh-mtproxy-config.timer
   rm -rf /etc/systemd/system/tproxy-server.service.d
   rm -f /etc/tproxy-server/web-server
   systemctl daemon-reload
 
   nft delete table inet tproxy_backend 2>/dev/null || true
 
-  rm -rf "$REPO_DIR" /etc/tproxy-server /etc/mtproxy
+  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproto-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
+  rm -f /etc/tproxy-server /etc/mtproxy /opt/MTProxy /opt/tproxy-server /usr/local/bin/tproxy-server /usr/local/bin/mtproxy /usr/local/sbin/refresh-mtproxy-config
   info "Каталог сайта $SITE_DIR сохранён."
-  rm -f /usr/local/bin/tproxy-server /usr/local/bin/mtproxy
-  rm -f /usr/local/sbin/refresh-mtproxy-config
 
   userdel -r tproxy 2>/dev/null || true
   userdel -r mtproxy 2>/dev/null || true
@@ -2007,7 +2037,7 @@ diagnostics_command() {
 
   echo
   echo "2. Конфигурационные файлы и права"
-  for file in /etc/tproxy-server/config.json /etc/tproxy-server/profiles.json /etc/mtproxy/mtproxy.env; do
+  for file in "$PROXY_CONFIG_DIR/config.json" "$PROXY_CONFIG_DIR/profiles.json" "$MTPROXY_CONFIG_DIR/mtproxy.env"; do
     if [[ ! -f "$file" ]]; then
       printf '  %s %s — отсутствует\n' "$(status_mark fail)" "$file"; failed=1
     elif [[ "$file" == *.json ]] && ! jq empty "$file" >/dev/null 2>&1; then
@@ -2173,7 +2203,7 @@ diagnostics_command() {
 }
 
 backup_command() {
-  local dest="${1:-/root/tproxy-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
+  local dest="${1:-$BACKUP_DIR/tproxy-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
   [[ "$dest" = /* ]] || die "Путь backup должен быть абсолютным"
   install -d -m 0700 "$(dirname "$dest")"
   [[ ! -e "$dest" ]] || die "Файл уже существует: $dest (не перезаписываю резервную копию)"
@@ -2181,6 +2211,7 @@ backup_command() {
   local -a items=()
   local p
   for p in \
+    opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website \
     etc/tproxy-server etc/mtproxy \
     etc/caddy/Caddyfile etc/caddy/Caddyfile.d \
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
@@ -2221,7 +2252,7 @@ restore_command() {
     [[ "$normalized" != /* ]] || die "Небезопасный абсолютный путь в архиве: $entry"
     [[ ! "/$normalized/" =~ /\.\./ ]] || die "Небезопасный путь в архиве: $entry"
     case "$normalized" in
-      etc/tproxy-server|etc/tproxy-server/*|etc/mtproxy|etc/mtproxy/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
+      opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|etc/tproxy-server|etc/tproxy-server/*|etc/mtproxy|etc/mtproxy/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
       *) die "В архиве обнаружен путь вне разрешённого списка: $entry" ;;
     esac
   done < <(tar -tzf "$archive")
