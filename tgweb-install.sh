@@ -553,8 +553,19 @@ preflight_system() {
   else ok "Все системные пакеты уже установлены — повторная установка не требуется."; fi
   if [[ "$WEB_SERVER" == "caddy" ]] && command -v caddy >/dev/null 2>&1; then
     info "Найденный Caddy будет использован; бинарный файл не будет заменён."
+    if [[ -s /etc/caddy/Caddyfile ]]; then
+      if grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile && grep -Fq "127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile; then
+        ok "Caddyfile уже содержит конфигурацию tproxy для выбранного relay-порта."
+      else
+        warn "Найден существующий Caddyfile. Перед заменой будет создана резервная копия; остальные сайты в нём могут потребовать ручного объединения."
+        confirm "Разрешить настройку Caddyfile для tproxy?" || die "настройка Caddy отменена"
+      fi
+    fi
   elif [[ "$WEB_SERVER" == "nginx" ]] && command -v nginx >/dev/null 2>&1; then
     info "Nginx уже установлен; пакет повторно устанавливаться не будет."
+    if [[ -s "$NGINX_SITE" ]]; then
+      warn "Найден отдельный файл сайта Nginx $NGINX_SITE. Перед изменением будет создана резервная копия."
+    fi
   fi
   confirm "Продолжить с учётом обнаруженных компонентов?" || die "установка отменена"
 }
@@ -1196,12 +1207,18 @@ install_units() {
 }
 
 install_caddyfile() {
-  if [[ -e /etc/caddy/Caddyfile ]] && ! cmp -s /etc/caddy/Caddyfile "$REPO_DIR/deploy/Caddyfile"; then
-    cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.before-tproxy.$(date +%Y%m%d%H%M%S)"
+  if [[ -s /etc/caddy/Caddyfile ]] &&
+     grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile &&
+     grep -Fq "127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile; then
+    ok "Caddyfile уже настроен для tproxy и relay-порта $RELAY_PORT — оставляю без изменений"
+  else
+    if [[ -e /etc/caddy/Caddyfile ]]; then
+      cp -a /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.before-tproxy.$(date +%Y%m%d%H%M%S)"
+    fi
+    install -m 0644 "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
+    sed -i -E "s#(reverse_proxy[[:space:]]+127\.0\.0\.1:)[0-9]+#\1${RELAY_PORT}#g" /etc/caddy/Caddyfile
+    ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
   fi
-  install -m 0644 "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
-  sed -i -E "s#(reverse_proxy[[:space:]]+127\.0\.0\.1:)[0-9]+#\1${RELAY_PORT}#g" /etc/caddy/Caddyfile
-  ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
 
   if [[ -e /etc/systemd/system/caddy.service ]] && \
      ! cmp -s /etc/systemd/system/caddy.service "$REPO_DIR/deploy/caddy.service"; then
