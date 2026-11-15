@@ -1346,7 +1346,7 @@ install_units() {
       -e "s#/opt/MTProxy#$MTPROXY_DIR#g" \
       -e "s#/usr/local/bin/tproxy-server#$BIN_DIR/tproxy-server#g" \
       -e "s#/usr/local/sbin/refresh-mtproxy-config#$BIN_DIR/refresh-mtproxy-config#g" \
-      -e "s#/srv/tproxy-site#$SITE_DIR_DEFAULT#g" "$src" > "$dst"
+      -e "s#/srv/tproxy-site#$SITE_DIR#g" "$src" > "$dst"
     chmod 0644 "$dst"
     ln -sfn "$dst" "/etc/systemd/system/$name"
   done
@@ -1919,7 +1919,7 @@ run_uninstall() {
   echo "Будет удалено:"
   echo "  - сервисы: tproxy-server, mtproxy, tproxy-firewall, refresh-mtproxy-config"
   echo "  - каталоги: $REPO_DIR, $PROXY_CONFIG_DIR, $MTPROXY_CONFIG_DIR, $MTPROXY_DIR; сайт $SITE_DIR сохраняется"
-  echo "  - бинарники: /usr/local/bin/tproxy-server, /usr/local/bin/mtproxy"
+  echo "  - бинарники: $BIN_DIR/tproxy-server, $BIN_DIR/mtproto-proxy"
   echo "  - nftables: inet tproxy_backend"
   echo "  - пользователи: tproxy, mtproxy"
   if [[ $KEEP_WEB_SERVER -eq 0 ]]; then echo "  - веб-сервер: будет спрошено отдельно"; else echo "  - веб-сервер: НЕ будет удалён (--keep-web-server)"; fi
