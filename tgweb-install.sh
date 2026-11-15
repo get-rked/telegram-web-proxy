@@ -2111,7 +2111,8 @@ diagnostics_command() {
           if is_cloudflare_proxied_domain "$host"; then
             printf '  %s Cloudflare Proxy: включён — DNS возвращает адреса сети Cloudflare вместо IP origin-сервера.\n' "$(status_mark warn)"
           else
-            printf '  %s DNS-адреса не совпадают с IP сервера и не распознаны как адреса Cloudflare — проверь A-запись и DNS Proxy\n' "$(status_mark fail)"
+            printf '  %s DNS A: %s (не совпадает с IP сервера и не распознана как Cloudflare)\\n' "$(status_mark fail)" "${dns_ips[*]}"
+            printf '  %s Проверь A-запись и DNS Proxy\\n' "$(status_mark fail)"
             failed=1
           fi
         fi
