@@ -451,21 +451,124 @@ check_os() {
 #  УСТАНОВКА / ОБНОВЛЕНИЕ
 # ============================================================================
 
+package_installed() {
+  dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
+preflight_system() {
+  require_root
+  local pkg svc version go_minor
+  local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode)
+  local -a missing_packages=()
+  ui_header "Проверка системы перед установкой"
+  echo "Проверяю зависимости, службы, веб-серверы, порты и существующую установку."
+  echo
+  printf '  %-24s %s\n' "Компонент" "Состояние"
+  printf '  %-24s %s\n' "------------------------" "------------------------------"
+  for pkg in "${required_packages[@]}"; do
+    if package_installed "$pkg"; then
+      printf '  %-24s %s\n' "$pkg" "$(status_mark ok) уже установлен"
+    else
+      printf '  %-24s %s\n' "$pkg" "$(status_mark warn) потребуется установить"
+      missing_packages+=("$pkg")
+    fi
+  done
+  if command -v go >/dev/null 2>&1; then
+    version="$(go version 2>/dev/null || true)"
+    go_minor="$(go env GOVERSION 2>/dev/null | sed -E 's/^go1\.([0-9]+).*/\1/')"
+    if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 20 )); then
+      printf '  %-24s %s\n' "Go" "$(status_mark ok) $version"
+    else
+      printf '  %-24s %s\n' "Go" "$(status_mark warn) версия ниже 1.20; потребуется Go $GO_FALLBACK_VERSION"
+    fi
+  elif [[ -x "/opt/go${GO_FALLBACK_VERSION}/bin/go" ]]; then
+    printf '  %-24s %s\n' "Go" "$(status_mark ok) найден в /opt/go${GO_FALLBACK_VERSION}"
+  else
+    printf '  %-24s %s\n' "Go" "$(status_mark warn) потребуется установить"
+  fi
+  if command -v caddy >/dev/null 2>&1; then
+    version="$(caddy version 2>/dev/null | head -n1)"
+    printf '  %-24s %s\n' "Caddy" "$(status_mark ok) $version"
+  else
+    printf '  %-24s %s\n' "Caddy" "$(status_mark warn) не установлен"
+  fi
+  if command -v nginx >/dev/null 2>&1 || package_installed nginx; then
+    printf '  %-24s %s\n' "Nginx" "$(status_mark ok) установлен"
+  else
+    printf '  %-24s %s\n' "Nginx" "$(status_mark warn) не установлен"
+  fi
+  for svc in tproxy-server mtproxy tproxy-firewall refresh-mtproxy-config.timer; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      printf '  %-24s %s\n' "$svc" "$(status_mark ok) активна"
+    elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+      printf '  %-24s %s\n' "$svc" "$(status_mark warn) включена, но не активна"
+    else
+      printf '  %-24s %s\n' "$svc" "$(status_mark info) не обнаружена"
+    fi
+  done
+  if [[ -d "$SITE_DIR" ]]; then
+    printf '  %-24s %s\n' "Каталог сайта" "$(status_mark ok) уже существует: $SITE_DIR (содержимое сохраняется)"
+  else
+    printf '  %-24s %s\n' "Каталог сайта" "$(status_mark info) будет создан: $SITE_DIR"
+  fi
+  if [[ "$MODE" == "install" ]] && { [[ -s /etc/tproxy-server/config.json ]] || systemctl is-active --quiet tproxy-server 2>/dev/null || [[ -x /usr/local/bin/tproxy-server ]]; }; then
+    die "Обнаружена существующая установка tproxy-server. Для неё выбери «Обновить», чтобы не перезаписать текущую конфигурацию."
+  fi
+  local other_web=""
+  if [[ "$WEB_SERVER" == "caddy" ]] && systemctl is-active --quiet nginx.service 2>/dev/null; then other_web="Nginx"
+  elif [[ "$WEB_SERVER" == "nginx" ]] && systemctl is-active --quiet caddy.service 2>/dev/null; then other_web="Caddy"
+  fi
+  if [[ -n "$other_web" ]]; then
+    die "$other_web уже запущен и не выбран. Автоматически останавливать или удалять существующий веб-сервер небезопасно. Выбери его или останови вручную."
+  fi
+  if [[ "$MODE" != "update" ]]; then
+    local port
+    for port in "$RELAY_PORT" "$ADMIN_PORT"; do
+      if [[ -n "$port" ]] && ss -lntH 2>/dev/null | awk -v p=":$port" '$4 ~ (p "$") { found=1 } END { exit !found }'; then
+        die "Порт $port уже занят. Выбери свободный порт или останови службу, которая его использует."
+      fi
+    done
+  fi
+  echo
+  if (("${#missing_packages[@]}")); then info "Потребуется установить только: ${missing_packages[*]}"
+  else ok "Все системные пакеты уже установлены — повторная установка не требуется."; fi
+  if [[ "$WEB_SERVER" == "caddy" ]] && command -v caddy >/dev/null 2>&1; then
+    info "Найденный Caddy будет использован; бинарный файл не будет заменён."
+  elif [[ "$WEB_SERVER" == "nginx" ]] && command -v nginx >/dev/null 2>&1; then
+    info "Nginx уже установлен; пакет повторно устанавливаться не будет."
+  fi
+  confirm "Продолжить с учётом обнаруженных компонентов?" || die "установка отменена"
+}
+
 install_deps() {
   export DEBIAN_FRONTEND=noninteractive
-  info "apt update + базовые пакеты…"
-  apt-get update -qq
-  apt-get install -y -qq --no-install-recommends \
-    ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode
-  ok "Базовые пакеты установлены"
+  local -a required=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode)
+  local -a missing=()
+  local pkg
+  for pkg in "${required[@]}"; do package_installed "$pkg" || missing+=("$pkg"); done
+  if (("${#missing[@]}")); then
+    info "Устанавливаю только отсутствующие пакеты: ${missing[*]}"
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends "${missing[@]}"
+    ok "Недостающие базовые пакеты установлены"
+  else
+    ok "Все базовые пакеты уже установлены; apt install пропущен"
+  fi
 }
 
 install_nginx_packages() {
   export DEBIAN_FRONTEND=noninteractive
-  info "Устанавливаю Nginx и Certbot…"
-  apt-get install -y -qq --no-install-recommends nginx certbot
+  local -a missing=()
+  package_installed nginx || missing+=(nginx)
+  package_installed certbot || missing+=(certbot)
+  if (("${#missing[@]}")); then
+    info "Устанавливаю отсутствующие компоненты Nginx: ${missing[*]}"
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends "${missing[@]}"
+  else
+    ok "Nginx и Certbot уже установлены — повторная установка пропущена"
+  fi
   systemctl enable nginx.service
-  ok "Nginx и Certbot установлены"
 }
 
 get_public_ipv4() {
