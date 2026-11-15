@@ -522,23 +522,55 @@ proxy_ports_table() {
     if (( ! found )); then printf '  %-8s %-25s %-8s %s\n' "$p" "$label" "TCP" "не слушает"; fi
   done
 }
+preflight_basics() {
+  require_root
+  local pkg svc state
+  local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
+  local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service)
+  ui_header "Предварительная проверка системы"
+  echo "До ввода параметров проверяю базовые пакеты и состояние служб."
+  echo
+  printf '  %-30s %s\\n' "Пакет" "Состояние"
+  printf '  %-30s %s\\n' "------------------------------" "------------------------------"
+  for pkg in "${required_packages[@]}}"; do
+    if package_installed "$pkg"; then
+      printf '  %-30s %s\\n' "$pkg" "$(status_mark ok) установлен"
+    else
+      printf '  %-30s %s\\n' "$pkg" "$(status_mark warn) будет установлен"
+    fi
+  done
+  echo
+  printf '  %-30s %s\\n' "Служба" "Состояние"
+  printf '  %-30s %s\\n' "------------------------------" "------------------------------"
+  for svc in "${services[@]}}"; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      state="активна"
+      printf '  %-30s %s\\n' "$svc" "$(status_mark ok) $state"
+    elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+      state="включена, но не активна"
+      printf '  %-30s %s\\n' "$svc" "$(status_mark warn) $state"
+    elif systemctl list-unit-files "$svc" --no-legend 2>/dev/null | grep -q .; then
+      printf '  %-30s %s\\n' "$svc" "$(status_mark info) установлена, не активна"
+    else
+      printf '  %-30s %s\\n' "$svc" "$(status_mark info) не обнаружена"
+    fi
+  done
+  echo
+  if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
+    die "Для установки требуются apt-get и dpkg-query (Debian/Ubuntu)."
+  fi
+  ok "Базовая проверка завершена. Параметры установки ещё не запрашивались."
+  echo
+}
 preflight_system() {
   require_root
   local pkg svc version go_minor port
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a missing_packages=()
-  ui_header "Проверка системы перед установкой"
-  echo "Проверяю зависимости, службы, веб-серверы, порты и существующую установку."
   echo
-  printf '  %-24s %s\n' "Компонент" "Состояние"
-  printf '  %-24s %s\n' "------------------------" "------------------------------"
+  echo "Проверяю совместимость выбранных параметров с текущей конфигурацией."
   for pkg in "${required_packages[@]}"; do
-    if package_installed "$pkg"; then
-      printf '  %-24s %s\n' "$pkg" "$(status_mark ok) уже установлен"
-    else
-      printf '  %-24s %s\n' "$pkg" "$(status_mark warn) потребуется установить"
-      missing_packages+=("$pkg")
-    fi
+    package_installed "$pkg" || missing_packages+=("$pkg")
   done
   if command -v go >/dev/null 2>&1; then
     version="$(go version 2>/dev/null || true)"
@@ -564,15 +596,6 @@ preflight_system() {
   else
     printf '  %-24s %s\n' "Nginx" "$(status_mark warn) не установлен"
   fi
-  for svc in tproxy-server mtproxy tproxy-firewall refresh-mtproxy-config.timer; do
-    if systemctl is-active --quiet "$svc" 2>/dev/null; then
-      printf '  %-24s %s\n' "$svc" "$(status_mark ok) активна"
-    elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-      printf '  %-24s %s\n' "$svc" "$(status_mark warn) включена, но не активна"
-    else
-      printf '  %-24s %s\n' "$svc" "$(status_mark info) не обнаружена"
-    fi
-  done
   if [[ -d "$SITE_DIR" ]]; then
     printf '  %-24s %s\n' "Каталог сайта" "$(status_mark ok) уже существует: $SITE_DIR (содержимое сохраняется)"
   else
@@ -1769,6 +1792,7 @@ run_install() {
   require_root
   check_arch
   check_os
+  preflight_basics
   show_operation_overview
   if [[ "$MODE" == "update" ]]; then
     interactive_update_fill
