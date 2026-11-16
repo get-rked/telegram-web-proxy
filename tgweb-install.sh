@@ -2902,6 +2902,51 @@ ensure_advanced_manager() {
   [[ -x "$helper" ]] || die "Не удалось установить модуль дополнительных функций"
 }
 
+restart_proxy_services() {
+  require_root
+  local unit result failed=0 restarted=0 web_server
+  local -a units=(tproxy-firewall.service mtproxy.service tproxy-server.service)
+
+  web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
+  case "$web_server" in
+    nginx) units+=(nginx.service) ;;
+    caddy) units+=(caddy.service) ;;
+    *)
+      if systemctl cat nginx.service >/dev/null 2>&1; then units+=(nginx.service)
+      elif systemctl cat caddy.service >/dev/null 2>&1; then units+=(caddy.service)
+      fi
+      ;;
+  esac
+  units+=(refresh-mtproxy-config.timer)
+
+  echo
+  ui_header "Перезапуск служб прокси"
+  for unit in "${units[@]}"; do
+    if ! systemctl cat "$unit" >/dev/null 2>&1; then
+      printf '  [—] %-36s не установлена, пропуск\n' "$unit"
+      continue
+    fi
+    if systemctl restart "$unit"; then
+      printf '  [OK] %s перезапущена\n' "$unit"
+      restarted=$((restarted + 1))
+    else
+      printf '  [ОШИБКА] Не удалось перезапустить %s\n' "$unit"
+      failed=1
+    fi
+  done
+  echo
+  if (( failed )); then
+    warn "Перезапуск завершён с ошибками. Проверь состояние служб: systemctl --failed"
+    return 1
+  elif (( restarted == 0 )); then
+    warn "Не найдено установленных служб прокси для перезапуска."
+    return 1
+  else
+    ok "Перезапущено служб/таймеров: $restarted"
+    return 0
+  fi
+}
+
 show_tools_menu() {
   local choice archive
   while true; do
@@ -2910,16 +2955,18 @@ show_tools_menu() {
     ui_option 2 "▤" "Создать резервную копию"
     ui_option 3 "↻" "Восстановить резервную копию"
     ui_option 4 "◉" "Carrier mode, профили, public_upstream"
-    ui_option 5 "↩" "Назад"
+    ui_option 5 "⟳" "Перезапустить все службы прокси"
+    ui_option 6 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-5]: " choice
+    read -r -p "Выбор [1-6]: " choice
     case "$choice" in
       1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
       2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
       3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
       4) ensure_advanced_manager; "$BIN_DIR/tproxy-advanced" menu ;;
-      5) return 0 ;;
-      *) warn "Выбери пункт от 1 до 5." ;;
+      5) restart_proxy_services || true; read -r -p "Enter — назад..." _ ;;
+      6) return 0 ;;
+      *) warn "Выбери пункт от 1 до 6." ;;
     esac
   done
 }
