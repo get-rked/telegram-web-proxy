@@ -40,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.2.5"
+readonly SCRIPT_VERSION="1.0.1"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
