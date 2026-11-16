@@ -1579,9 +1579,9 @@ EOF
   while IFS= read -r -d '' profile_file; do
     [[ "$profile_file" == "$profile_dir/default/profile.json" ]] || profile_files+=("$profile_file")
   done < <(find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
-  (( \${#profile_files[@]} > 0 )) || die "Не найдено файлов профилей для сборки profiles.json"
+  (( ${#profile_files[@]} > 0 )) || die "Не найдено файлов профилей для сборки profiles.json"
   profiles_tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
-  jq -s '{profiles: .}' "\${profile_files[@]}" > "$profiles_tmp" ||
+  jq -s '{profiles: .}' "${profile_files[@]}" > "$profiles_tmp" ||
     die "Не удалось собрать общий profiles.json из файлов профилей"
   chown root:tproxy "$profiles_tmp"; chmod 0400 "$profiles_tmp"
   mv -f "$profiles_tmp" "$PROXY_CONFIG_DIR/profiles.json"
