@@ -43,7 +43,7 @@ readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/462618309fbe768eee29672fb2cec40fca6d9d7c/tproxy-advanced.sh"
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/27313ada5cbf95d53b7a7be3f9fac2fa9c20cafb/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -2748,7 +2748,7 @@ show_tools_menu() {
     ui_option 1 "⌕" "Диагностика и поиск неисправностей"
     ui_option 2 "▤" "Создать резервную копию"
     ui_option 3 "↻" "Восстановить резервную копию"
-    ui_option 4 "◉" "Панель мониторинга, carrier mode, профили, public_upstream"
+    ui_option 4 "⚙" "Дополнительные настройки"
     ui_option 5 "↩" "Назад"
     echo
     read -r -p "Выбор [1-5]: " choice
