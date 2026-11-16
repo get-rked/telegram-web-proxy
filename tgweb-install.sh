@@ -2003,7 +2003,6 @@ run_install() {
   require_root
   check_arch
   check_os
-  prepare_layout
   preflight_basics
   show_operation_overview
   if [[ "$MODE" == "update" ]]; then
@@ -2012,6 +2011,8 @@ run_install() {
     interactive_fill
   fi
   preflight_system
+  # До завершения preflight не создаём каталоги и не удаляем legacy-ссылки.
+  prepare_layout
   install -d -m 0755 $PROXY_CONFIG_DIR
   printf '%s\n' "$EMAIL_ARG" > $PROXY_CONFIG_DIR/acme-email
   chmod 0600 $PROXY_CONFIG_DIR/acme-email
