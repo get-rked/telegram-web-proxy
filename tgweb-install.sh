@@ -42,6 +42,7 @@ readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/feature/stage2-dashboard-stage3-profiles/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -62,6 +63,7 @@ NONINTERACTIVE="${NONINTERACTIVE:-0}"
 RELAY_PORT=""
 ADMIN_PORT=""
 CARRIER_MODE_ARG="https"
+CARRIER_MODE_SET=0
 SKIP_TESTS="${SKIP_TESTS:-0}"
 KEEP_WEB_SERVER=0
 ASSUME_YES=0
@@ -405,6 +407,7 @@ parse_install_args() {
       --web-server)      [[ $# -ge 2 ]] || die "--web-server требует caddy|nginx"; WEB_SERVER="$2"; WEB_SERVER_SET=1; shift 2 ;;
       --email)           EMAIL_ARG="$2";     shift 2 ;;
       --secret)          [[ $# -ge 2 ]] || die "--secret требует значение"; SECRET_ARG="$2"; shift 2 ;;
+      --carrier-mode)    [[ $# -ge 2 ]] || die "--carrier-mode требует значение"; CARRIER_MODE_ARG="$2"; CARRIER_MODE_SET=1; shift 2 ;;
       --secret-prefix)   [[ $# -ge 2 ]] || die "--secret-prefix требует plain|dd"; SECRET_PREFIX_MODE="$2"; SECRET_PREFIX_MODE_SET=1; shift 2 ;;
       --base-path)       BASE_PATH_ARG="$2"; shift 2 ;;
       --site-dir)        SITE_DIR="$2";      shift 2 ;;
@@ -426,6 +429,7 @@ parse_install_args() {
   fi
   [[ "$WEB_SERVER" == "caddy" || "$WEB_SERVER" == "nginx" ]] || die "--web-server: допустимо caddy или nginx"
   [[ "$SECRET_PREFIX_MODE" == "plain" || "$SECRET_PREFIX_MODE" == "dd" ]] || die "--secret-prefix: допустимо plain или dd"
+  [[ "$CARRIER_MODE_ARG" == "https" || "$CARRIER_MODE_ARG" == "https-lanes" || "$CARRIER_MODE_ARG" == "websocket" || "$CARRIER_MODE_ARG" == "websocket-lanes" ]] || die "--carrier-mode: допустимо https, https-lanes, websocket или websocket-lanes"
   if [[ -n "$SECRET_ARG" ]]; then
     validate_secret "$SECRET_ARG" >/dev/null || die "невалидный --secret"
   fi
@@ -1489,8 +1493,13 @@ prepare_layout() {
   require_root
   remove_legacy_compat_links
   install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$CONFIG_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
-  [[ -f "$SCRIPT_DIR/tproxy-advanced.sh" ]] || die "Не найден tproxy-advanced.sh рядом с установщиком"
-  install -m 0750 "$SCRIPT_DIR/tproxy-advanced.sh" "$BIN_DIR/tproxy-advanced"
+  if [[ ! -f "$SCRIPT_DIR/tproxy-advanced.sh" ]]; then
+    curl --fail --silent --show-error --location --proto "=https" --proto-redir "=https" --tlsv1.2 \
+      "$ADVANCED_SCRIPT_URL" -o "$BIN_DIR/tproxy-advanced" || die "Не удалось загрузить модуль дополнительных функций"
+  else
+    install -m 0750 "$SCRIPT_DIR/tproxy-advanced.sh" "$BIN_DIR/tproxy-advanced"
+  fi
+  chmod 0750 "$BIN_DIR/tproxy-advanced"
 }
 
 write_configs() {
@@ -1565,6 +1574,7 @@ write_mtproxy_env() {
   if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
     while IFS= read -r profile_secret; do
       [[ -n "$profile_secret" ]] || continue
+      profile_secret="${profile_secret#dd}"
       if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
       mtproxy_secrets+="$profile_secret"
     done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
@@ -1927,7 +1937,7 @@ load_existing_config() {
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
   v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
   [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
-  CARRIER_MODE_ARG="$(jq -r '.profiles[0].carrier_mode // "https"' "$profiles")"
+  if [[ "$CARRIER_MODE_SET" -eq 0 ]]; then CARRIER_MODE_ARG="$(jq -r '.profiles[0].carrier_mode // "https"' "$profiles")"; fi
   if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
     if [[ "$SECRET_ARG" == dd* ]]; then SECRET_PREFIX_MODE="dd"; else SECRET_PREFIX_MODE="plain"; fi
   fi
