@@ -1514,8 +1514,8 @@ profile_manifest_valid() {
       (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and
       (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
       (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
-      (.carrier_mode | type == "string" and
-        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+      (.carrier_mode | (type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
     ) and
     ([.profiles[].name] | length == (unique | length))
   ' "$file" >/dev/null 2>&1
@@ -1554,6 +1554,14 @@ profile_storage_rebuild() {
     fi
   fi
 
+  while IFS= read -r -d '' dir; do
+    name="${dir##*/}"
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] ||
+      die "Недопустимое имя каталога профиля: $name"
+    [[ -s "$dir/profile.json" ]] ||
+      die "В каталоге профиля отсутствует profile.json: $dir"
+  done < <(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+
   if [[ -s "$profile_dir/default/profile.json" ]]; then
     profile_files+=("$profile_dir/default/profile.json")
   fi
@@ -1571,8 +1579,8 @@ profile_storage_rebuild() {
       type == "object" and .name == $n and
       (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
       (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
-      (.carrier_mode | type == "string" and
-        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+      (.carrier_mode | (type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
     ' "$file" >/dev/null 2>&1 || die "Некорректный файл профиля: $file"
   done
 
