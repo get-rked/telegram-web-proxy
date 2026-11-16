@@ -81,51 +81,15 @@ patch_mtproxy_unit() {
   systemctl daemon-reload
 }
 
-dashboard() {
-  local key cert
-  [[ -t 0 ]] || die 'Панель мониторинга требует интерактивный терминал.'
-  while :; do
-    clear
-    printf 'Telegram Web Proxy — LIVE DASHBOARD (обновление 2 сек.)\n'
-    printf 'Домен: %s | Веб-сервер: %s | Время: %s\n' "$HOSTNAME_VALUE" "$WEB_SERVER" "$(date '+%F %T %Z')"
-    printf '%s\n' '────────────────────────────────────────────────────────────'
-    printf 'Службы:\n'
-    for svc in tproxy-server mtproxy tproxy-firewall "$WEB_SERVER"; do
-      printf '  %-24s %s\n' "$svc" "$(systemctl is-active "$svc" 2>/dev/null || echo unknown)"
-    done
-    printf '\nRelay health/ready:\n'
-    for endpoint in healthz readyz; do
-      if curl -fsS --max-time 1 "http://127.0.0.1:$ADMIN_PORT/$endpoint" >/dev/null 2>&1; then
-        printf '  %-12s OK\n' "$endpoint"
-      else
-        printf '  %-12s FAIL\n' "$endpoint"
-      fi
-    done
-    printf '\nRelay metrics (loopback only):\n'
-    if curl -fsS --max-time 2 "http://127.0.0.1:$ADMIN_PORT/metrics" 2>/dev/null | grep -E '^(tproxy_|process_|go_)' | head -n 16; then :; else echo '  Метрики недоступны'; fi
-    printf '\nMTProxy statistics (127.0.0.1:8888):\n'
-    if curl -fsS --max-time 2 http://127.0.0.1:8888/stats 2>/dev/null | head -n 8; then :; else echo '  Статистика недоступна'; fi
-    printf '\nTLS certificate (served on 127.0.0.1:443):\n'
-    cert="$(timeout 6 openssl s_client -connect 127.0.0.1:443 -servername "$HOSTNAME_VALUE" </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -fingerprint -sha256 2>/dev/null || true)"
-    if [[ -n $cert ]]; then printf '%s\n' "$cert"; else echo '  Сертификат не удалось получить'; fi
-    printf '\nNetwork summary:\n'
-    ss -s 2>/dev/null | head -n 4
-    printf '\nInterface counters:\n'
-    awk 'NR==1 || $1 !~ /lo:/ {print}' /proc/net/dev 2>/dev/null | head -n 8
-    printf '\nНажми q для выхода.\n'
-    if IFS= read -r -t 2 -n 1 key; then [[ $key == q || $key == Q ]] && break; fi
-  done
-}
-
 profile_menu() {
   local choice name secret mode backend count
   while :; do
     clear
-    echo 'Профили и carrier mode'
+    echo 'Профили и режим подключения'
     jq -r '.profiles | to_entries[] | "  \(.key + 1). \(.value.name) | \(.value.carrier_mode // "https") | backend \(.value.backend)"' "$PROFILES_FILE"
     echo
     echo '1) Добавить профиль'
-    echo '2) Изменить carrier mode профиля'
+    echo '2) Изменить режим подключения профиля'
     echo '3) Удалить дополнительный профиль'
     echo '4) Назад'
     read -r -p 'Выбор: ' choice
@@ -141,7 +105,7 @@ profile_menu() {
         read -r -s -p 'Новый секрет (32 hex, опционально dd): ' secret; echo
         valid_secret "$secret" || { echo 'Недопустимый секрет'; read -r -p 'Enter...' _; continue; }
         if jq -e --arg s "$secret" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then echo 'Секрет уже используется (включая dd-префикс)'; read -r -p 'Enter...' _; continue; fi
-        echo 'Carrier mode: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
+        echo 'Режим подключения: 1) HTTPS  2) HTTPS с несколькими каналами  3) WebSocket  4) WebSocket с несколькими каналами'
         read -r -p 'Выбор [1-4]: ' choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo 'Неверный режим'; continue ;; esac
         local tmp; tmp="$(mktemp "${PROFILES_FILE}.XXXXXX")"
@@ -154,14 +118,14 @@ profile_menu() {
       2)
         read -r -p 'Имя профиля: ' name
         jq -e --arg n "$name" '.profiles[] | select(.name == $n)' "$PROFILES_FILE" >/dev/null || { echo 'Профиль не найден'; read -r -p 'Enter...' _; continue; }
-        echo 'Carrier mode: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
+        echo 'Режим подключения: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
         read -r -p 'Выбор [1-4]: ' choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo 'Неверный режим'; continue ;; esac
         local tmp; tmp="$(mktemp "${PROFILES_FILE}.XXXXXX")"
         jq --arg n "$name" --arg m "$mode" '(.profiles[] | select(.name == $n)).carrier_mode = $m' "$PROFILES_FILE" > "$tmp"
         chown root:tproxy "$tmp"; chmod 0400 "$tmp"; mv -f "$tmp" "$PROFILES_FILE"
         systemctl restart tproxy-server
-        echo "Carrier mode профиля $name изменён."
+        echo "Режим подключения профиля $name изменён."
         read -r -p 'Enter...' _ ;;
       3)
         count="$(jq '.profiles | length' "$PROFILES_FILE")"
@@ -189,10 +153,10 @@ upstream_menu() {
 
   while :; do
     clear
-    ui_header "Публичный сайт · public_upstream"
+    ui_header "Настройка публичного сайта"
     if [[ -n $current ]]; then
       printf '  Текущий источник: %s\n\n' "$current"
-      ui_option 1 "↩" "Отключить upstream и выбрать каталог сайта"
+      ui_option 1 "↩" "Отключить приложение и выбрать каталог сайта"
       ui_option 2 "↻" "Обновить список локальных приложений"
       ui_option 3 "←" "Назад"
       echo
@@ -213,7 +177,7 @@ upstream_menu() {
     fi
 
     clear
-    ui_header "Выбор локального HTTP-приложения"
+    ui_header "Выбор локального веб-приложения"
     printf '  Поиск работающих HTTP-сервисов на localhost...\n\n'
     ports=()
     codes=()
@@ -276,23 +240,26 @@ main() {
   need_root
   need_files
   case "${1:-menu}" in
-    dashboard) dashboard ;;
     profiles) profile_menu ;;
     upstream) upstream_menu ;;
     menu)
       local choice
       while :; do
         clear
-        ui_header "Дополнительные возможности"
-        ui_option 1 "◉" "Панель мониторинга"
-        ui_option 2 "▤" "Carrier mode и профили"
-        ui_option 3 "⇄" "Публичный сайт (public_upstream)"
-        ui_option 4 "←" "Назад"
+        ui_header "Дополнительные настройки"
+        ui_option 1 "▤" "Профили и режимы подключения"
+        ui_option 2 "⇄" "Публичный сайт"
+        ui_option 3 "←" "Назад"
         echo
-        read -r -p "Выбор [1-4]: " choice
-        case "$choice" in 1) dashboard ;; 2) profile_menu ;; 3) upstream_menu ;; 4|"") break ;; *) echo 'Неверный выбор'; sleep 1 ;; esac
+        read -r -p "Выбор [1-3]: " choice
+        case "$choice" in
+          1) profile_menu ;;
+          2) upstream_menu ;;
+          3|"") break ;;
+          *) echo 'Неверный выбор'; sleep 1 ;;
+        esac
       done ;;
-    *) die 'Использование: tproxy-advanced.sh [dashboard|profiles|upstream|menu]' ;;
+    *) die 'Использование: tproxy-advanced.sh [profiles|upstream|menu]' ;;
   esac
 }
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
