@@ -1682,7 +1682,7 @@ wait_ready() {
   echo "=== Диагностика ==="
   echo "--- tproxy-server ---"
   systemctl status tproxy-server --no-pager -l 2>/dev/null | head -20 || true
-  journalctl -u tproxy-server -n 20 --no-pager 2>/dev/null || true
+  journalctl -u tproxy-server -u mtproxy -n 20 --no-pager 2>/dev/null | redact_sensitive_log || true
   echo "--- mtproxy ---"
   systemctl status mtproxy --no-pager -l 2>/dev/null | head -15 || true
   echo "--- порты ---"
