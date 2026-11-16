@@ -667,10 +667,15 @@ elif kind == 'caddy':
                 hs=[]
                 for m in matcher:
                     if isinstance(m,dict) and 'host' in m: hs += m['host']
+                if hs and any(h != host for h in hs): fail('another domain is configured in Caddy')
                 if hs: local=hs
+            if x.get('handler')=='vars' and 'root' in x and not local:
+                fail('Caddy catch-all root route is ambiguous')
             if x.get('handler')=='vars' and 'root' in x and local:
                 if any(h != host for h in local): fail('another domain is configured in Caddy')
                 found=True; roots.append(x['root'])
+            if x.get('handler')=='file_server' and not local:
+                fail('Caddy catch-all file_server route is ambiguous')
             if x.get('handler')=='file_server' and local:
                 if any(h != host for h in local): fail('another domain is configured in Caddy')
                 found=True
