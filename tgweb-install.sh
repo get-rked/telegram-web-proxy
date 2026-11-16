@@ -1626,31 +1626,35 @@ EOF
 EOF
   fi
 
-  # Rebuild the aggregate before reading or changing any profile.
+  # Per-profile JSON files are authoritative. Read the selected profile,
+  # apply the installer choices, and write back only that profile object.
   profile_storage_rebuild
-  local profile_dir="$PROXY_CONFIG_DIR/profiles" profile_name
+  local profile_dir="$PROXY_CONFIG_DIR/profiles" profile_name profile_tmp
   profile_name="$(jq -r '.profiles[0].name' "$PROXY_CONFIG_DIR/profiles.json")"
   [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя профиля: $profile_name"
   install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
-  jq --arg n "$profile_name" --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" \
-    '(.profiles[] | select(.name == $n)).secret = $secret | (.profiles[] | select(.name == $n)).carrier_mode = $mode' \
-    "$PROXY_CONFIG_DIR/profiles.json" > "$profile_dir/$profile_name/profile.json"
-  chown root:tproxy "$profile_dir/$profile_name/profile.json"
-  chmod 0640 "$profile_dir/$profile_name/profile.json"
-  local profiles_tmp profile_file
-  local -a profile_files=()
-  if [[ -s "$profile_dir/default/profile.json" ]]; then
-    profile_files+=("$profile_dir/default/profile.json")
+  profile_tmp="$(mktemp "$profile_dir/$profile_name/profile.json.XXXXXX")"
+  if ! jq --arg n "$profile_name" --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" '
+      .profiles[] | select(.name == $n) |
+      .secret = $secret | .carrier_mode = $mode
+    ' "$PROXY_CONFIG_DIR/profiles.json" > "$profile_tmp" ||
+     ! jq -e --arg n "$profile_name" '
+      type == "object" and .name == $n and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+    ' "$profile_tmp" >/dev/null; then
+    rm -f "$profile_tmp"
+    die "Не удалось сформировать индивидуальный файл профиля $profile_name"
   fi
-  while IFS= read -r -d '' profile_file; do
-    [[ "$profile_file" == "$profile_dir/default/profile.json" ]] || profile_files+=("$profile_file")
-  done < <(find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
-  (( ${#profile_files[@]} > 0 )) || die "Не найдено файлов профилей для сборки profiles.json"
-  profiles_tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
-  jq -s '{profiles: .}' "${profile_files[@]}" > "$profiles_tmp" ||
-    die "Не удалось собрать общий profiles.json из файлов профилей"
-  chown root:tproxy "$profiles_tmp"; chmod 0400 "$profiles_tmp"
-  mv -f "$profiles_tmp" "$PROXY_CONFIG_DIR/profiles.json"
+  chown root:tproxy "$profile_tmp"
+  chmod 0640 "$profile_tmp"
+  mv -f "$profile_tmp" "$profile_dir/$profile_name/profile.json"
+
+  # Rebuild the aggregate from validated per-profile objects. This prevents
+  # accidentally writing the whole {"profiles":[...]} wrapper into profile.json.
+  profile_storage_rebuild
   chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
   chmod 0640 $PROXY_CONFIG_DIR/config.json
   chmod 0400 $PROXY_CONFIG_DIR/profiles.json
