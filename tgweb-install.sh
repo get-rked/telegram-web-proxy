@@ -40,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.2.2"
+readonly SCRIPT_VERSION="1.2.3"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -2315,11 +2315,22 @@ diagnostics_command() {
       fi
     else printf '  %s DNS A-запись не найдена через системный DNS-резолвер\n' "$(status_mark fail)"; failed=1; fi
     local aaaa
-    aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | tr '\n' ' ' || true)"
+    local -a server_ipv6=()
+    local ipv6_matched=0 dns_ipv6 server_ipv6_addr
+    aaaa="$(dig +short AAAA "$host" 2>/dev/null | grep ':' | sort -u | tr '\n' ' ' || true)"
     if [[ -n "$aaaa" ]]; then
-      if is_cloudflare_proxied_domain "$host"; then
-        printf '  %s DNS AAAA: %s (IPv6-адреса сети Cloudflare, не origin-сервера)\n' "$(status_mark warn)" "$aaaa"
-      else printf '  %s DNS AAAA задан: %s — проверь IPv6 origin-сервера и доступность TCP 80/443 извне\n' "$(status_mark warn)" "$aaaa"; warnings=1; fi
+      mapfile -t server_ipv6 < <(ip -6 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | sort -u)
+      for dns_ipv6 in $aaaa; do
+        for server_ipv6_addr in "${server_ipv6[@]}"; do
+          [[ "$dns_ipv6" == "$server_ipv6_addr" ]] && ipv6_matched=1
+        done
+      done
+      if (( ipv6_matched )); then
+        printf '  %s DNS AAAA: %s (совпадает с IPv6-адресом сервера)\n' "$(status_mark ok)" "$aaaa"
+      else
+        printf '  %s DNS AAAA: %s (не совпадает с IPv6-адресами сервера; если используется Cloudflare DNS Proxy, это ожидаемо — проверь статус Proxy для AAAA-записи)\n' "$(status_mark warn)" "$aaaa"
+        warnings=1
+      fi
     else printf '  %s DNS AAAA не задан через системный DNS-резолвер\n' "$(status_mark ok)"; fi
   else
     printf '  %s Домен не прочитан из config.json\n' "$(status_mark fail)"; failed=1
