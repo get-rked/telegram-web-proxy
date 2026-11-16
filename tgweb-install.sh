@@ -1504,6 +1504,89 @@ prepare_layout() {
   chmod 0750 "$BIN_DIR/tproxy-advanced"
 }
 
+profile_manifest_valid() {
+  local file="${1:-$PROXY_CONFIG_DIR/profiles.json}"
+  [[ -s "$file" ]] && jq -e '
+    type == "object" and
+    (.profiles | type == "array" and length >= 1 and length <= 32) and
+    all(.profiles[];
+      type == "object" and
+      (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+    ) and
+    ([.profiles[].name] | length == (unique | length))
+  ' "$file" >/dev/null 2>&1
+}
+
+profile_storage_rebuild() {
+  local profile_dir="$PROXY_CONFIG_DIR/profiles"
+  local count dir file name tmp
+  local -a profile_files=()
+
+  install -d -o root -g tproxy -m 0750 "$profile_dir"
+  count="$(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+
+  if (( count == 0 )); then
+    if profile_manifest_valid; then
+      # Migrate the legacy aggregate only when no per-profile source exists.
+      while IFS= read -r name; do
+        [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] ||
+          die "Недопустимое имя профиля в старом profiles.json"
+        install -d -o root -g tproxy -m 0750 "$profile_dir/$name"
+        jq --arg n "$name" '.profiles[] | select(.name == $n)' "$PROXY_CONFIG_DIR/profiles.json" > "$profile_dir/$name/profile.json" ||
+          die "Не удалось перенести профиль $name"
+        chown root:tproxy "$profile_dir/$name/profile.json"
+        chmod 0640 "$profile_dir/$name/profile.json"
+      done < <(jq -r '.profiles[].name' "$PROXY_CONFIG_DIR/profiles.json")
+    elif [[ ! -s "$PROXY_CONFIG_DIR/config.json" ]]; then
+      # Fresh installation: there is no previous profile data to preserve.
+      install -d -o root -g tproxy -m 0750 "$profile_dir/default"
+      jq -n --arg s "$SECRET_ARG" --arg m "$CARRIER_MODE_ARG" \
+        '{name:"default",secret:$s,backend:"127.0.0.1:2398",carrier_mode:$m}' \
+        > "$profile_dir/default/profile.json"
+      chown root:tproxy "$profile_dir/default/profile.json"
+      chmod 0640 "$profile_dir/default/profile.json"
+    else
+      die "profiles.json повреждён, а индивидуальных файлов профилей нет. Восстановление без исходных секретов невозможно."
+    fi
+  fi
+
+  if [[ -s "$profile_dir/default/profile.json" ]]; then
+    profile_files+=("$profile_dir/default/profile.json")
+  fi
+  while IFS= read -r -d '' file; do
+    [[ "$file" == "$profile_dir/default/profile.json" ]] || profile_files+=("$file")
+  done < <(find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
+
+  (( ${#profile_files[@]} >= 1 && ${#profile_files[@]} <= 32 )) ||
+    die "В хранилище должно быть от 1 до 32 файлов профилей"
+
+  for file in "${profile_files[@]}"; do
+    dir="${file%/profile.json}"
+    name="${dir##*/}"
+    jq -e --arg n "$name" '
+      type == "object" and .name == $n and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+    ' "$file" >/dev/null 2>&1 || die "Некорректный файл профиля: $file"
+  done
+
+  tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
+  if ! jq -s '{profiles: .}' "${profile_files[@]}" > "$tmp" ||
+     ! profile_manifest_valid "$tmp"; then
+    rm -f "$tmp"
+    die "Не удалось пересобрать profiles.json из индивидуальных файлов"
+  fi
+  chown root:tproxy "$tmp"
+  chmod 0400 "$tmp"
+  mv -f "$tmp" "$PROXY_CONFIG_DIR/profiles.json"
+}
+
 write_configs() {
   install -d -o root -g tproxy -m 0750 $PROXY_CONFIG_DIR
   sed -i "s#/etc/tproxy-server#$PROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/ensure-token-key.sh"
@@ -1535,34 +1618,9 @@ EOF
 EOF
   fi
 
-  if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
-    local profiles_tmp
-    profiles_tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
-    jq --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" \
-      '.profiles[0].secret = $secret | .profiles[0].carrier_mode = $mode' \
-      "$PROXY_CONFIG_DIR/profiles.json" > "$profiles_tmp" || die "Не удалось обновить profiles.json"
-    chown root:tproxy "$profiles_tmp"; chmod 0400 "$profiles_tmp"
-    mv -f "$profiles_tmp" "$PROXY_CONFIG_DIR/profiles.json"
-  else
-    cat > "$PROXY_CONFIG_DIR/profiles.json" <<EOF
-{"profiles":[{"name":"default","secret":"$SECRET_ARG","backend":"127.0.0.1:2398","carrier_mode":"$CARRIER_MODE_ARG"}]}
-EOF
-  fi
-  # Individual profile files are the source of truth; profiles.json remains
-  # the aggregate consumed by the pinned tproxy-server runtime.
-  local profile_dir="$PROXY_CONFIG_DIR/profiles" profile_count profile_name profile_json
-  install -d -o root -g tproxy -m 0750 "$profile_dir"
-  profile_count="$(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)"
-  if (( profile_count == 0 )); then
-    while IFS= read -r profile_json; do
-      profile_name="$(jq -r '.name' <<< "$profile_json")"
-      [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя существующего профиля: $profile_name"
-      install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
-      printf '%s\n' "$profile_json" | jq . > "$profile_dir/$profile_name/profile.json"
-      chown root:tproxy "$profile_dir/$profile_name/profile.json"
-      chmod 0640 "$profile_dir/$profile_name/profile.json"
-    done < <(jq -c '.profiles[]' "$PROXY_CONFIG_DIR/profiles.json")
-  fi
+  # Rebuild the aggregate before reading or changing any profile.
+  profile_storage_rebuild
+  local profile_dir="$PROXY_CONFIG_DIR/profiles" profile_name
   profile_name="$(jq -r '.profiles[0].name' "$PROXY_CONFIG_DIR/profiles.json")"
   [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя профиля: $profile_name"
   install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
@@ -2022,6 +2080,7 @@ load_existing_config() {
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
   [[ -r "$cfg" && -r "$profiles" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
   command -v jq >/dev/null 2>&1 || die "Для чтения настроек нужен jq"
+  profile_storage_rebuild
   v="$(jq -er '.public_hostname | select(type == "string" and length > 0)' "$cfg")" || die "Не удалось прочитать hostname"
   [[ -n "$HOSTNAME_ARG" ]] || HOSTNAME_ARG="$v"
   v="$(jq -r '.base_path // "none"' "$cfg")"; [[ -n "$BASE_PATH_ARG" ]] || BASE_PATH_ARG="$v"
