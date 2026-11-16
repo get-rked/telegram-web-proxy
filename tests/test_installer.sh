@@ -41,6 +41,22 @@ assert_valid validate_hostname 'proxy.example.com'
 assert_invalid validate_hostname 'https://proxy.example.com'
 assert_invalid validate_hostname 'localhost'
 
+# The shared update flow already supports secret rotation; verify both keeping
+# the current value and generating a replacement with the existing prefix.
+SECRET_ARG='0123456789abcdef0123456789abcdef'
+SECRET_PREFIX_MODE='plain'
+printf '\n' | prompt_update_secret
+[[ "$SECRET_ARG" == '0123456789abcdef0123456789abcdef' ]]
+
+SECRET_PREFIX_MODE='dd'
+printf 'n\n\n' | prompt_update_secret
+assert_valid validate_secret "$SECRET_ARG"
+[[ "$SECRET_ARG" == dd* ]]
+
+SECRET_ARG='0123456789abcdef0123456789abcdef'
+printf 'n\n11111111111111111111111111111111\n11111111111111111111111111111111\n' | prompt_update_secret
+[[ "$SECRET_ARG" == '11111111111111111111111111111111' ]]
+
 redacted="$(printf '%s\n' 'secret=0123456789abcdef token:abcdef authorization: Bearer supersecret https://proxy.example.com/private/path?hash=abcdef' | redact_sensitive_log)"
 for sensitive in '0123456789abcdef' 'abcdef' 'supersecret' '/private/path'; do
   if [[ "$redacted" == *"$sensitive"* ]]; then
