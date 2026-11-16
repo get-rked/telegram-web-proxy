@@ -62,7 +62,7 @@ patch_mtproxy_unit() {
 
 dashboard() {
   local key cert
-  [[ -t 0 ]] || die 'Живая панель требует интерактивный терминал.'
+  [[ -t 0 ]] || die 'Панель мониторинга требует интерактивный терминал.'
   while :; do
     clear
     printf 'Telegram Web Proxy — LIVE DASHBOARD (обновление 2 сек.)\n'
@@ -204,7 +204,7 @@ main() {
       while :; do
         clear
         echo 'Дополнительные возможности'
-        echo '1) Живая панель (службы, TLS, сеть, метрики)'
+        echo '1) Панель мониторинга (службы, TLS, сеть, метрики)'
         echo '2) Carrier mode и профили'
         echo '3) public_upstream'
         echo '4) Назад'
