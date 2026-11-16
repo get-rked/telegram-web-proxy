@@ -1541,7 +1541,7 @@ profile_storage_rebuild() {
         chown root:tproxy "$profile_dir/$name/profile.json"
         chmod 0640 "$profile_dir/$name/profile.json"
       done < <(jq -r '.profiles[].name' "$PROXY_CONFIG_DIR/profiles.json")
-    elif [[ ! -s "$PROXY_CONFIG_DIR/config.json" ]]; then
+    elif [[ ! -s "$PROXY_CONFIG_DIR/config.json" || "${MODE:-}" == "install" ]]; then
       # Fresh installation: there is no previous profile data to preserve.
       install -d -o root -g tproxy -m 0750 "$profile_dir/default"
       jq -n --arg s "$SECRET_ARG" --arg m "$CARRIER_MODE_ARG" \
@@ -2078,7 +2078,7 @@ run_config() {
 load_existing_config() {
   local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
-  [[ -r "$cfg" && -r "$profiles" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
+  [[ -r "$cfg" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
   command -v jq >/dev/null 2>&1 || die "Для чтения настроек нужен jq"
   profile_storage_rebuild
   v="$(jq -er '.public_hostname | select(type == "string" and length > 0)' "$cfg")" || die "Не удалось прочитать hostname"
