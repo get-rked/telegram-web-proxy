@@ -43,7 +43,7 @@ readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/b1f60a211aae042caf9adfd60b7c3d8ca23c759b/tproxy-advanced.sh"
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/8d73cfbf7263adacbfdd5344a5b1dc7bf749337c/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
