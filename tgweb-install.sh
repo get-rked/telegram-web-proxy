@@ -40,7 +40,10 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.0.1"
+readonly SCRIPT_VERSION="1.0.2"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/a6e31b42c1a90716385a6fed16171ca71ca54704/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -54,16 +57,21 @@ SECRET_PREFIX_MODE="plain"
 SECRET_PREFIX_MODE_SET=0
 BASE_PATH_ARG=""
 SITE_DIR="$SITE_DIR_DEFAULT"
+SITE_UPSTREAM_ARG=""
 INSTALL_SITE=1
 WORKERS_ARG=""
 MAXCONN_ARG=""
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
 RELAY_PORT=""
 ADMIN_PORT=""
+CARRIER_MODE_ARG="https"
+CARRIER_MODE_SET=0
 SKIP_TESTS="${SKIP_TESTS:-0}"
 KEEP_WEB_SERVER=0
 ASSUME_YES=0
 GO_BIN=""
+UPDATE_TRANSACTION_ACTIVE=0
+UPDATE_ROLLBACK_ARCHIVE=""
 
 # ----------------------------- утилиты --------------------------------------
 # Цветные статусы: цвет применяется только к ключу, текст сообщения не меняется.
@@ -131,6 +139,15 @@ status_word() {
   fi
 }
 
+# Redact credential-like values and request paths before displaying journal data.
+redact_sensitive_log() {
+  sed -E \
+    -e 's/(authorization[=: ]+)(Bearer[[:space:]]+)?[^[:space:]&",;]+/\1[REDACTED]/Ig' \
+    -e 's/((secret|token|password|bridge[_-]?token|api[_-]?key)[=: ]+)[^[:space:]&",;]+/\1[REDACTED]/Ig' \
+    -e 's/([?&](secret|token|hash)=)[^&[:space:]"]+/\1[REDACTED]/Ig' \
+    -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g'
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -146,6 +163,7 @@ Usage:
   --email EMAIL             Email для Let's Encrypt
   --secret SECRET           32 hex или dd + 32 hex
   --secret-prefix MODE       plain или dd (формат генерации)
+  --carrier-mode MODE        https|https-lanes|websocket|websocket-lanes
   config [--output PATH]     Показать текущие настройки (секреты скрыты)
   diagnostics                Диагностика: службы, порты, конфигурации и ошибки
   backup [ABSOLUTE_PATH]     Резервная копия конфигураций
@@ -391,6 +409,7 @@ parse_install_args() {
       --web-server)      [[ $# -ge 2 ]] || die "--web-server требует caddy|nginx"; WEB_SERVER="$2"; WEB_SERVER_SET=1; shift 2 ;;
       --email)           EMAIL_ARG="$2";     shift 2 ;;
       --secret)          [[ $# -ge 2 ]] || die "--secret требует значение"; SECRET_ARG="$2"; shift 2 ;;
+      --carrier-mode)    [[ $# -ge 2 ]] || die "--carrier-mode требует значение"; CARRIER_MODE_ARG="$2"; CARRIER_MODE_SET=1; shift 2 ;;
       --secret-prefix)   [[ $# -ge 2 ]] || die "--secret-prefix требует plain|dd"; SECRET_PREFIX_MODE="$2"; SECRET_PREFIX_MODE_SET=1; shift 2 ;;
       --base-path)       BASE_PATH_ARG="$2"; shift 2 ;;
       --site-dir)        SITE_DIR="$2";      shift 2 ;;
@@ -412,6 +431,7 @@ parse_install_args() {
   fi
   [[ "$WEB_SERVER" == "caddy" || "$WEB_SERVER" == "nginx" ]] || die "--web-server: допустимо caddy или nginx"
   [[ "$SECRET_PREFIX_MODE" == "plain" || "$SECRET_PREFIX_MODE" == "dd" ]] || die "--secret-prefix: допустимо plain или dd"
+  [[ "$CARRIER_MODE_ARG" == "https" || "$CARRIER_MODE_ARG" == "https-lanes" || "$CARRIER_MODE_ARG" == "websocket" || "$CARRIER_MODE_ARG" == "websocket-lanes" ]] || die "--carrier-mode: допустимо https, https-lanes, websocket или websocket-lanes"
   if [[ -n "$SECRET_ARG" ]]; then
     validate_secret "$SECRET_ARG" >/dev/null || die "невалидный --secret"
   fi
@@ -930,6 +950,46 @@ is_cloudflare_proxied_domain() {
   (( total > 0 && count == total ))
 }
 
+check_telegram_connectivity() {
+  info "Проверяю доступность Telegram до установки компонентов…"
+  local core_ok=0 dc_ok=0 dc_ip
+  local -a dc_ips=(149.154.175.50 149.154.167.51 149.154.175.100)
+
+  if getent ahosts core.telegram.org >/dev/null 2>&1; then
+    ok "DNS: core.telegram.org разрешается"
+  else
+    warn "DNS: не удалось разрешить core.telegram.org"
+  fi
+
+  if curl --fail --silent --show-error --location --max-time 12 \
+      --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      --output /dev/null https://core.telegram.org; then
+    core_ok=1
+    ok "HTTPS: core.telegram.org доступен"
+  else
+    warn "HTTPS: core.telegram.org недоступен"
+  fi
+
+  for dc_ip in "${dc_ips[@]}"; do
+    if timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/443"' _ "$dc_ip" 2>/dev/null; then
+      dc_ok=1
+      ok "Telegram DC: TCP 443 доступен через $dc_ip"
+      break
+    fi
+  done
+
+  if (( ! dc_ok )); then
+    warn "Не удалось установить TCP-соединение с проверенными адресами Telegram DC (порт 443). Работа MTProxy может быть невозможна."
+    if [[ "$NONINTERACTIVE" == "1" ]]; then
+      die "Проверка Telegram DC не пройдена; non-interactive установка остановлена"
+    fi
+    confirm "Продолжить несмотря на недоступность Telegram DC?" || die "установка отменена после проверки сети"
+  fi
+  if (( ! core_ok )); then
+    warn "core.telegram.org недоступен по HTTPS. Проверка DC прошла отдельно; проверь сетевые ограничения и DNS."
+  fi
+}
+
 check_dns() {
   info "Проверяю DNS для $HOSTNAME_ARG через системный DNS-резолвер…"
   local -a ips=()
@@ -1007,7 +1067,6 @@ install_caddy() {
     local archive dir
     archive="$(mktemp /tmp/caddy.XXXXXX.tar.gz)"
     dir="$(mktemp -d /tmp/caddy.XXXXXX)"
-    trap 'rm -f "$archive"; rm -rf "$dir"' EXIT
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
       --output "$archive" \
       "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
@@ -1016,7 +1075,6 @@ install_caddy() {
     tar -C "$dir" -xzf "$archive"
     install -m 0755 "$dir/caddy" /usr/local/bin/caddy
     rm -f "$archive"; rm -rf "$dir"
-    trap - EXIT
     ok "Caddy установлен"
   fi
   if ! id caddy >/dev/null 2>&1; then
@@ -1046,6 +1104,7 @@ install_nginx_config() {
 server {
  listen 80;
  server_name $HOSTNAME_ARG;
+ access_log off;
  location ^~ /.well-known/acme-challenge/ { root $ACME_WEBROOT; }
  location / { return 301 https://\$host\$request_uri; }
 }
@@ -1077,6 +1136,7 @@ server {
 server {
  listen 443 ssl;
  server_name $HOSTNAME_ARG;
+ access_log off;
  ssl_certificate $cert;
  ssl_certificate_key $key;
  ssl_protocols TLSv1.2 TLSv1.3;
@@ -1164,7 +1224,6 @@ ensure_go() {
   local archive dir
   archive="$(mktemp /tmp/go.XXXXXX.tar.gz)"
   dir="$(mktemp -d /tmp/go.XXXXXX)"
-  trap 'rm -f "$archive"; rm -rf "$dir"' EXIT
   curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
     --output "$archive" "https://go.dev/dl/go${GO_FALLBACK_VERSION}.linux-amd64.tar.gz"
   test "$(sha256sum "$archive" | awk '{print $1}')" = "$GO_FALLBACK_SHA256" \
@@ -1173,7 +1232,7 @@ ensure_go() {
   if [[ -e "/opt/go${GO_FALLBACK_VERSION}" ]]; then rm -rf "$dir/go"; else
     mv "$dir/go" "/opt/go${GO_FALLBACK_VERSION}"
   fi
-  rm -f "$archive"; rm -rf "$dir"; trap - EXIT
+  rm -f "$archive"; rm -rf "$dir"
   GO_BIN="/opt/go${GO_FALLBACK_VERSION}/bin/go"
   ok "Go: $("$GO_BIN" version)"
 }
@@ -1188,11 +1247,19 @@ build_tproxy() {
     warn "  go test пропущен (--skip-tests)"
   fi
   install -d -m 0755 "$BIN_DIR"
-  "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$BIN_DIR/tproxy-server" ./cmd/tproxy-server
-  chown root:root "$BIN_DIR/tproxy-server"
-  chmod 0755 "$BIN_DIR/tproxy-server"
+  local candidate="$BIN_DIR/tproxy-server.new.${BASHPID}"
+  rm -f -- "$candidate"
+  if ! "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$candidate" ./cmd/tproxy-server; then
+    rm -f -- "$candidate"
+    cd - >/dev/null
+    die "Сборка tproxy-server не удалась; установленный бинарник не изменён"
+  fi
+  chown root:root "$candidate"
+  chmod 0755 "$candidate"
+  # Same-filesystem rename promotes only a complete executable.
+  mv -f -- "$candidate" "$BIN_DIR/tproxy-server"
   cd - >/dev/null
-  ok "tproxy-server собран"
+  ok "tproxy-server собран и атомарно установлен"
 }
 
 install_stub_site() {
@@ -1428,6 +1495,104 @@ prepare_layout() {
   require_root
   remove_legacy_compat_links
   install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$CONFIG_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
+  if [[ ! -f "$SCRIPT_DIR/tproxy-advanced.sh" ]]; then
+    curl --fail --silent --show-error --location --proto "=https" --proto-redir "=https" --tlsv1.2 \
+      "$ADVANCED_SCRIPT_URL" -o "$BIN_DIR/tproxy-advanced" || die "Не удалось загрузить модуль дополнительных функций"
+  else
+    install -m 0750 "$SCRIPT_DIR/tproxy-advanced.sh" "$BIN_DIR/tproxy-advanced"
+  fi
+  chmod 0750 "$BIN_DIR/tproxy-advanced"
+}
+
+profile_manifest_valid() {
+  local file="${1:-$PROXY_CONFIG_DIR/profiles.json}"
+  [[ -s "$file" ]] && jq -e '
+    type == "object" and
+    (.profiles | type == "array" and length >= 1 and length <= 32) and
+    all(.profiles[];
+      type == "object" and
+      (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | (type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
+    ) and
+    ([.profiles[].name] | length == (unique | length))
+  ' "$file" >/dev/null 2>&1
+}
+
+profile_storage_rebuild() {
+  local profile_dir="$PROXY_CONFIG_DIR/profiles"
+  local count dir file name tmp
+  local -a profile_files=()
+
+  install -d -o root -g tproxy -m 0750 "$profile_dir"
+  count="$(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+
+  if (( count == 0 )); then
+    if profile_manifest_valid; then
+      # Migrate the legacy aggregate only when no per-profile source exists.
+      while IFS= read -r name; do
+        [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] ||
+          die "Недопустимое имя профиля в старом profiles.json"
+        install -d -o root -g tproxy -m 0750 "$profile_dir/$name"
+        jq --arg n "$name" '.profiles[] | select(.name == $n)' "$PROXY_CONFIG_DIR/profiles.json" > "$profile_dir/$name/profile.json" ||
+          die "Не удалось перенести профиль $name"
+        chown root:tproxy "$profile_dir/$name/profile.json"
+        chmod 0640 "$profile_dir/$name/profile.json"
+      done < <(jq -r '.profiles[].name' "$PROXY_CONFIG_DIR/profiles.json")
+    elif [[ ! -s "$PROXY_CONFIG_DIR/config.json" || "${MODE:-}" == "install" ]]; then
+      # Fresh installation: there is no previous profile data to preserve.
+      install -d -o root -g tproxy -m 0750 "$profile_dir/default"
+      jq -n --arg s "$SECRET_ARG" --arg m "$CARRIER_MODE_ARG" \
+        '{name:"default",secret:$s,backend:"127.0.0.1:2398",carrier_mode:$m}' \
+        > "$profile_dir/default/profile.json"
+      chown root:tproxy "$profile_dir/default/profile.json"
+      chmod 0640 "$profile_dir/default/profile.json"
+    else
+      die "profiles.json повреждён, а индивидуальных файлов профилей нет. Восстановление без исходных секретов невозможно."
+    fi
+  fi
+
+  while IFS= read -r -d '' dir; do
+    name="${dir##*/}"
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] ||
+      die "Недопустимое имя каталога профиля: $name"
+    [[ -s "$dir/profile.json" ]] ||
+      die "В каталоге профиля отсутствует profile.json: $dir"
+  done < <(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+
+  if [[ -s "$profile_dir/default/profile.json" ]]; then
+    profile_files+=("$profile_dir/default/profile.json")
+  fi
+  while IFS= read -r -d '' file; do
+    [[ "$file" == "$profile_dir/default/profile.json" ]] || profile_files+=("$file")
+  done < <(find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
+
+  (( ${#profile_files[@]} >= 1 && ${#profile_files[@]} <= 32 )) ||
+    die "В хранилище должно быть от 1 до 32 файлов профилей"
+
+  for file in "${profile_files[@]}"; do
+    dir="${file%/profile.json}"
+    name="${dir##*/}"
+    jq -e --arg n "$name" '
+      type == "object" and .name == $n and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | (type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
+    ' "$file" >/dev/null 2>&1 || die "Некорректный файл профиля: $file"
+  done
+
+  tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
+  if ! jq -s '{profiles: .}' "${profile_files[@]}" > "$tmp" ||
+     ! profile_manifest_valid "$tmp"; then
+    rm -f "$tmp"
+    die "Не удалось пересобрать profiles.json из индивидуальных файлов"
+  fi
+  chown root:tproxy "$tmp"
+  chmod 0400 "$tmp"
+  mv -f "$tmp" "$PROXY_CONFIG_DIR/profiles.json"
 }
 
 write_configs() {
@@ -1435,7 +1600,20 @@ write_configs() {
   sed -i "s#/etc/tproxy-server#$PROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/ensure-token-key.sh"
   bash "$REPO_DIR/deploy/ensure-token-key.sh"
 
-  cat > $PROXY_CONFIG_DIR/config.json <<EOF
+  if [[ -n "$SITE_UPSTREAM_ARG" ]]; then
+    cat > "$PROXY_CONFIG_DIR/config.json" <<EOF
+{
+  "public_hostname": "$HOSTNAME_ARG",
+  "base_path": "$BASE_PATH_ARG",
+  "listen": "127.0.0.1:$RELAY_PORT",
+  "admin_listen": "127.0.0.1:$ADMIN_PORT",
+  "public_upstream": "$SITE_UPSTREAM_ARG",
+  "static_routes": "exact",
+  "profiles_file": "/run/credentials/tproxy-server.service/profiles.json"
+}
+EOF
+  else
+    cat > "$PROXY_CONFIG_DIR/config.json" <<EOF
 {
   "public_hostname": "$HOSTNAME_ARG",
   "base_path": "$BASE_PATH_ARG",
@@ -1446,10 +1624,37 @@ write_configs() {
   "profiles_file": "/run/credentials/tproxy-server.service/profiles.json"
 }
 EOF
+  fi
 
-  cat > $PROXY_CONFIG_DIR/profiles.json <<EOF
-{"profiles":[{"name":"default","secret":"$SECRET_ARG","backend":"127.0.0.1:2398"}]}
-EOF
+  # Per-profile JSON files are authoritative. Read the selected profile,
+  # apply the installer choices, and write back only that profile object.
+  profile_storage_rebuild
+  local profile_dir="$PROXY_CONFIG_DIR/profiles" profile_name profile_tmp
+  profile_name="$(jq -r '.profiles[0].name' "$PROXY_CONFIG_DIR/profiles.json")"
+  [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя профиля: $profile_name"
+  install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
+  profile_tmp="$(mktemp "$profile_dir/$profile_name/profile.json.XXXXXX")"
+  if ! jq --arg n "$profile_name" --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" '
+      .profiles[] | select(.name == $n) |
+      .secret = $secret | .carrier_mode = $mode
+    ' "$PROXY_CONFIG_DIR/profiles.json" > "$profile_tmp" ||
+     ! jq -e --arg n "$profile_name" '
+      type == "object" and .name == $n and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+    ' "$profile_tmp" >/dev/null; then
+    rm -f "$profile_tmp"
+    die "Не удалось сформировать индивидуальный файл профиля $profile_name"
+  fi
+  chown root:tproxy "$profile_tmp"
+  chmod 0640 "$profile_tmp"
+  mv -f "$profile_tmp" "$profile_dir/$profile_name/profile.json"
+
+  # Rebuild the aggregate from validated per-profile objects. This prevents
+  # accidentally writing the whole {"profiles":[...]} wrapper into profile.json.
+  profile_storage_rebuild
   chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
   chmod 0640 $PROXY_CONFIG_DIR/config.json
   chmod 0400 $PROXY_CONFIG_DIR/profiles.json
@@ -1488,13 +1693,23 @@ write_mtproxy_env() {
   fi
 
   mkdir -p $MTPROXY_CONFIG_DIR
-  cat > $MTPROXY_CONFIG_DIR/mtproxy.env <<EOF
-MTPROXY_SECRET=$backend_secret
+  local mtproxy_secrets="" profile_secret
+  if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
+    while IFS= read -r profile_secret; do
+      [[ -n "$profile_secret" ]] || continue
+      profile_secret="${profile_secret#dd}"
+      if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
+      mtproxy_secrets+="$profile_secret"
+    done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
+  fi
+  [[ -n "$mtproxy_secrets" ]] || mtproxy_secrets="$backend_secret"
+  cat > "$MTPROXY_CONFIG_DIR/mtproxy.env" <<EOF
+MTPROXY_SECRETS="$mtproxy_secrets"
 MTPROXY_WORKERS=${WORKERS_ARG:-1}
 MTPROXY_MAX_CONNECTIONS=${MAXCONN_ARG:-4096}
 MTPROXY_NAT_ARGS=$mtproxy_nat_args
 EOF
-  chown root:mtproxy $MTPROXY_CONFIG_DIR/mtproxy.env
+  chown root:mtproxy "$MTPROXY_CONFIG_DIR/mtproxy.env"
   chmod 0640 $MTPROXY_CONFIG_DIR/mtproxy.env
   ok "mtproxy.env записан"
 }
@@ -1515,6 +1730,13 @@ install_units() {
       -e "s#/usr/local/bin/mtproxy#$BIN_DIR/mtproxy-proxy#g" \
       -e "s#/usr/local/sbin/refresh-mtproxy-config#$BIN_DIR/refresh-mtproxy-config#g" \
       -e "s#/srv/tproxy-site#$SITE_DIR#g" "$src" > "$dst"
+    if [[ "$name" == "mtproxy.service" ]]; then
+      sed -i 's/-S ${MTPROXY_SECRET}/-S $MTPROXY_SECRETS/' "$dst"
+    elif [[ "$name" == "tproxy-server.service" ]]; then
+      # Validate the exact systemd credential at service start. This catches
+      # credential-path/schema mismatches that a temporary-file check cannot.
+      sed -i "/^[[:space:]]*ExecStart=/i ExecStartPre=$BIN_DIR/tproxy-server -config $PROXY_CONFIG_DIR/config.json -check" "$dst"
+    fi
     chmod 0644 "$dst"
     ln -sfn "$dst" "/etc/systemd/system/$name"
   done
@@ -1572,11 +1794,68 @@ verify_site_permissions() {
 }
 
 validate_configs() {
+  local validation_profiles
   verify_site_permissions
-  info "Валидация config.json…"
-    "$BIN_DIR/tproxy-server" -config $PROXY_CONFIG_DIR/config.json \
-    -profiles-file $PROXY_CONFIG_DIR/profiles.json -check \
-    || die "tproxy-server -check упал"
+
+  [[ -s "$PROXY_CONFIG_DIR/config.json" ]] ||
+    die "config.json отсутствует или пуст"
+  [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] ||
+    die "profiles.json отсутствует или пуст"
+
+  jq -e 'type == "object" and has("profiles") == false' \
+    "$PROXY_CONFIG_DIR/config.json" >/dev/null ||
+    die "config.json имеет неверную структуру или содержит поле profiles"
+
+  # Use the same strict schema validator as profile storage/rebuild.
+  # On failure, print only structural metadata; never print secrets.
+  if ! profile_manifest_valid "$PROXY_CONFIG_DIR/profiles.json"; then
+    warn "Диагностика структуры profiles.json (значения секретов не выводятся):"
+    jq '{
+      root_type: type,
+      root_keys: (if type == "object" then keys else [] end),
+      profiles_type: (.profiles | type),
+      profiles_count: (if (.profiles | type) == "array" then (.profiles | length) else 0 end),
+      profiles: (if (.profiles | type) == "array" then
+        [.profiles | to_entries[] | {
+          index: .key,
+          item_type: (.value | type),
+          name_type: (.value.name | type),
+          name_nonempty: ((.value.name | type) == "string" and (.value.name | length) > 0),
+          secret_type: (.value.secret | type),
+          secret_nonempty: ((.value.secret | type) == "string" and (.value.secret | length) > 0),
+          backend_type: (.value.backend | type),
+          backend_nonempty: ((.value.backend | type) == "string" and (.value.backend | length) > 0),
+          carrier_mode_type: (.value.carrier_mode | type),
+          carrier_mode_value: (if (.value.carrier_mode | type) == "string" then .value.carrier_mode else null end)
+        }] else [] end)
+    }' "$PROXY_CONFIG_DIR/profiles.json" 2>/dev/null ||
+      warn "Файл profiles.json не удалось разобрать как JSON"
+    die "profiles.json не прошёл строгую проверку схемы; смотри безопасную диагностику выше"
+  fi
+
+  # Check the exact file passed to the binary, avoiding a race with replacement.
+  validation_profiles="$(mktemp "$PROXY_CONFIG_DIR/profiles.validate.XXXXXX")"
+  cp -- "$PROXY_CONFIG_DIR/profiles.json" "$validation_profiles"
+  chown root:root "$validation_profiles"
+  chmod 0400 "$validation_profiles"
+
+  info "Валидация config.json и profiles.json…"
+  if ! "$BIN_DIR/tproxy-server" \
+      -config "$PROXY_CONFIG_DIR/config.json" \
+      -profiles-file "$validation_profiles" \
+      -check; then
+    warn "Безопасная сводка profiles.json:"
+    jq '{
+      top_level_keys: (if type == "object" then keys else [] end),
+      profiles_type: (.profiles | type),
+      profiles_count: (.profiles | if type == "array" then length else 0 end),
+      first_profile_keys: (.profiles[0] // {} | if type == "object" then keys else [] end)
+    }' "$validation_profiles" 2>/dev/null || true
+    rm -f -- "$validation_profiles"
+    die "tproxy-server -check не прошёл; проверь config.json и profiles.json"
+  fi
+  rm -f -- "$validation_profiles"
+
   if [[ "$WEB_SERVER" == "caddy" ]]; then
     info "Валидация Caddyfile…"
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || die "caddy validate упал"
@@ -1584,8 +1863,8 @@ validate_configs() {
     info "Валидация Nginx…"
     nginx -t || die "nginx -t упал"
   fi
-  printf "%s\n" "$WEB_SERVER" > $PROXY_CONFIG_DIR/web-server
-  chmod 0640 $PROXY_CONFIG_DIR/web-server
+  printf "%s\\n" "$WEB_SERVER" > "$PROXY_CONFIG_DIR/web-server"
+  chmod 0640 "$PROXY_CONFIG_DIR/web-server"
   ok "Конфиги валидны"
 }
 
@@ -1606,21 +1885,25 @@ start_services() {
 }
 
 wait_ready() {
-  local attempt
-  info "Ждём readyz на 127.0.0.1:$ADMIN_PORT (до 30с)…"
+  local attempt health_ok ready_ok
+  info "Ждём healthz и readyz на 127.0.0.1:$ADMIN_PORT (до 30с)…"
   for (( attempt=0; attempt<30; attempt++ )); do
-    if curl --fail --silent --output /dev/null "http://127.0.0.1:$ADMIN_PORT/readyz"; then
-      ok "relay готов"
+    health_ok=0
+    ready_ok=0
+    curl --fail --silent --max-time 1 --output /dev/null "http://127.0.0.1:$ADMIN_PORT/healthz" && health_ok=1
+    curl --fail --silent --max-time 1 --output /dev/null "http://127.0.0.1:$ADMIN_PORT/readyz" && ready_ok=1
+    if (( health_ok && ready_ok )); then
+      ok "healthz и readyz отвечают; relay готов"
       return 0
     fi
     sleep 1
   done
-  warn "readyz не ответил за 30с"
+  warn "healthz/readyz не прошли проверку за 30с"
   echo
   echo "=== Диагностика ==="
   echo "--- tproxy-server ---"
   systemctl status tproxy-server --no-pager -l 2>/dev/null | head -20 || true
-  journalctl -u tproxy-server -n 20 --no-pager 2>/dev/null || true
+  journalctl -u tproxy-server -u mtproxy -n 20 --no-pager 2>/dev/null | redact_sensitive_log || true
   echo "--- mtproxy ---"
   systemctl status mtproxy --no-pager -l 2>/dev/null | head -15 || true
   echo "--- порты ---"
@@ -1677,11 +1960,11 @@ tproxy-server развёрнут
  Relay-порт:      127.0.0.1:$RELAY_PORT
  Admin-порт:      127.0.0.1:$ADMIN_PORT
 
- Internal secret: $SECRET_ARG
- Proxy server:    $client_address
- Proxy secret:    $proxy_secret
- Proxy link:      $proxy_link
- QR image:        $QR_DIR/proxy-qr.png
+ Секрет клиента:          $SECRET_ARG
+ Адрес прокси-сервера:    $client_address
+ Секрет прокси:            $proxy_secret
+ Ссылка для подключения:  $proxy_link
+ QR-код:                   $QR_DIR/proxy-qr.png
 
  Проверка:
    curl -fsS http://127.0.0.1:$ADMIN_PORT/healthz
@@ -1711,133 +1994,130 @@ run_config() {
   local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
   local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output=""
+  local public_upstream="" profile_name="" carrier_mode="" carrier_label="" count=0 index=0 choice=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --output) [[ $# -ge 2 ]] || die "--output требует путь"; output="$2"; shift 2 ;;
       *) die "Неизвестная опция config: $1" ;;
     esac
   done
-  if [[ -r "$cfg" ]] && command -v jq >/dev/null 2>&1; then
+  [[ -r "$profiles" ]] || die "Файл профилей не найден: $profiles"
+  command -v jq >/dev/null 2>&1 || die "Для просмотра конфигурации нужен jq"
+  count="$(jq '.profiles | length' "$profiles")"
+  (( count > 0 )) || die "Список профилей пуст"
+  if (( count > 1 )); then
+    echo
+    ui_header "Выбор профиля для просмотра"
+    while IFS=$'\t' read -r profile_name carrier_mode; do
+      index=$((index + 1))
+      ui_option "$index" "◆" "$profile_name · $carrier_mode"
+    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https")] | @tsv' "$profiles")
+    ui_option 0 "←" "Назад"
+    read -r -p "Выбери профиль [0-$count]: " choice || die "ввод прерван"
+    [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) || { info "Просмотр отменён"; return 0; }
+  fi
+  index=$((choice - 1))
+  profile_name="$(jq -r --argjson i "$index" '.profiles[$i].name' "$profiles")"
+  secret="$(jq -r --argjson i "$index" '.profiles[$i].secret // empty' "$profiles")"
+  backend="$(jq -r --argjson i "$index" '.profiles[$i].backend // empty' "$profiles")"
+  carrier_mode="$(jq -r --argjson i "$index" '.profiles[$i].carrier_mode // "https"' "$profiles")"
+  case "$carrier_mode" in
+    https) carrier_label="HTTPS" ;;
+    https-lanes) carrier_label="HTTPS с несколькими каналами" ;;
+    websocket) carrier_label="WebSocket" ;;
+    websocket-lanes) carrier_label="WebSocket с несколькими каналами" ;;
+    *) carrier_label="$carrier_mode (неизвестный режим)" ;;
+  esac
+  if [[ -r "$cfg" ]]; then
     host="$(jq -r '.public_hostname // empty' "$cfg")"
     base="$(jq -r '.base_path // empty' "$cfg")"
     relay="$(jq -r '.listen // empty' "$cfg")"
     admin="$(jq -r '.admin_listen // empty' "$cfg")"
     public_dir="$(jq -r '.public_dir // empty' "$cfg")"
+    public_upstream="$(jq -r '.public_upstream // empty' "$cfg")"
   fi
-  if [[ -r "$profiles" ]] && command -v jq >/dev/null 2>&1; then
-    secret="$(jq -r '.profiles[0].secret // empty' "$profiles")"
-    backend="$(jq -r '.profiles[0].backend // empty' "$profiles")"
-  fi
-  if [[ -r $PROXY_CONFIG_DIR/acme-email ]]; then
-    email="$(head -n1 $PROXY_CONFIG_DIR/acme-email | xargs || true)"
-  fi
+  if [[ -r "$PROXY_CONFIG_DIR/acme-email" ]]; then email="$(head -n1 "$PROXY_CONFIG_DIR/acme-email" | xargs || true)"; fi
   if [[ -z "$email" && -r /etc/systemd/system/caddy.service.d/tproxy.conf ]]; then
     email="$(sed -n 's/^Environment=ACME_EMAIL=//p' /etc/systemd/system/caddy.service.d/tproxy.conf | head -n1)"
   fi
   if [[ -z "$email" && -d /etc/letsencrypt/renewal ]]; then
     email="$(grep -RhoE '^[[:space:]]*email[[:space:]]*=[[:space:]]*[^[:space:]]+' /etc/letsencrypt/renewal 2>/dev/null | head -n1 | cut -d= -f2- | xargs || true)"
   fi
-  if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then
-    web_server="$(cat $PROXY_CONFIG_DIR/web-server)"
-  elif systemctl is-enabled --quiet nginx 2>/dev/null; then
-    web_server=nginx
-  else
-    web_server=caddy
-  fi
+  if [[ -r "$PROXY_CONFIG_DIR/web-server" ]]; then web_server="$(cat "$PROXY_CONFIG_DIR/web-server")"
+  elif systemctl is-enabled --quiet nginx 2>/dev/null; then web_server=nginx
+  else web_server=caddy; fi
   if [[ -r "$envf" ]]; then
     workers="$(sed -n 's/^MTPROXY_WORKERS=//p' "$envf" | head -n1)"
     maxconn="$(sed -n 's/^MTPROXY_MAX_CONNECTIONS=//p' "$envf" | head -n1)"
-
   fi
   if [[ -n "$host" && -n "$secret" ]]; then
     BASE_PATH_ARG="$base"; SECRET_ARG="$secret"
     proxy_secret="$(web_proxy_secret)"
-    server="$host"; if [[ -n "$base" ]]; then server="$host/$base"; fi
-    link="https://t.me/webproxy?server=${server//\//%2F}&secret=$proxy_secret"
+    server="$host"; [[ -z "$base" ]] || server="$host/$base"
+    server="$(printf '%s' "$server" | sed 's#/#%2F#g')"
+    link="https://t.me/webproxy?server=$server&secret=$proxy_secret"
     generate_proxy_qr "$link" >/dev/null
   fi
   local report
-  report="$(cat <<EOF
-==================== ТЕКУЩАЯ КОНФИГУРАЦИЯ ====================
-  Домен                    : ${host:-<не задан>}
-  Base path                : ${base:-<root / не задан>}
-  Публичный каталог        : ${public_dir:-<не задан>}
-  Каталог сайта            : ${public_dir:-$SITE_DIR_DEFAULT}
-  Конфигурация relay       : $cfg
-  Профили                  : $profiles
-  Переменные MTProxy       : $envf
-  Workers                  : ${workers:-<не задан>}
-  Max connections          : ${maxconn:-<не задан>}
-  E-mail для Let's Encrypt : ${email:-<не найден>}
-  Веб-сервер               : ${web_server:-<не определён>}
-  Формат секрета           : $(if [[ "$secret" == dd* ]]; then echo "dd + 32 hex"; elif [[ -n "$secret" ]]; then echo "32 hex"; else echo "<не задан>"; fi)
-  Секрет клиента           : ${secret:-<не задан>}
-
-Слушающие TCP-порты прокси:
-$(proxy_ports_table "$relay" "$admin" "$backend")
-
-Ссылки подключения:
-${link:-<не удалось сформировать: проверь config.json и profiles.json>}
-QR-код (PNG)          : ${link:+$QR_DIR/proxy-qr.png}
-==============================================================
-EOF
-)"
+  report="$(printf '%s\n' \
+    '==================== ТЕКУЩАЯ КОНФИГУРАЦИЯ ====================' \
+    "  Профиль                  : $profile_name" \
+    "  Carrier mode             : $carrier_label" \
+    "  Домен                    : $host" \
+    "  Base path                : $base" \
+    "  Публичный каталог        : $public_dir" \
+    "  Public upstream          : $public_upstream" \
+    "  Конфигурация relay       : $cfg" \
+    "  Каталог профиля          : $PROXY_CONFIG_DIR/profiles/$profile_name" \
+    "  Файл профиля             : $PROXY_CONFIG_DIR/profiles/$profile_name/profile.json" \
+    "  Общий список профилей    : $profiles" \
+    "  Переменные MTProxy       : $envf" \
+    "  Backend                  : $backend" \
+    "  Workers                  : $workers" \
+    "  Max connections          : $maxconn" \
+    "  E-mail для Let's Encrypt : $email" \
+    "  Веб-сервер               : $web_server" \
+    "  Формат секрета           : $(if [[ "$secret" == dd* ]]; then echo 'dd + 32 hex'; elif [[ -n "$secret" ]]; then echo '32 hex'; else echo '<не задан>'; fi)" \
+    "  Секрет клиента           : $secret" \
+    '' 'Слушающие TCP-порты прокси:' \
+    "$(proxy_ports_table "$relay" "$admin" "$backend")" \
+    '' 'Ссылка подключения:' "$link" \
+    "QR-код (PNG): $QR_DIR/proxy-qr.png" \
+    '==============================================================')"
   if [[ -n "$output" ]]; then
     install -m 0600 /dev/null "$output"
     printf '%s\n' "$report" | sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' > "$output"
     echo "Конфигурация сохранена: $output (0600)"
-  else
-    printf '%s\n' "$report"
-  fi
-
-  # Выводим состояния служб отдельно от многострочного отчёта,
-  # чтобы ANSI-цвета гарантированно доходили до терминала.
-  if [[ -n "$output" ]]; then
-    {
-      printf '\nСостояние служб:\n'
-      for s in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
-        state="$(systemctl is-active "$s" 2>/dev/null || true)"
-        if [[ "$state" == active ]]; then
-          mark='[✓]'
-        elif [[ "$state" == inactive || "$state" == failed ]]; then
-          mark='[✗]'
-        else
-          mark='[!]'
-        fi
-        printf '  %s %-28s %s\n' "$mark" "$s" "${state:-unknown}"
-      done
-    } >> "$output"
-  else
-    printf '\nСостояние служб:\n'
-    for s in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
-      state="$(systemctl is-active "$s" 2>/dev/null || true)"
-      if [[ "$state" == active ]]; then
-        mark="$(status_mark ok)"
-      elif [[ "$state" == inactive || "$state" == failed ]]; then
-        mark="$(status_mark fail)"
-      else
-        mark="$(status_mark warn)"
-      fi
-      printf '  %s %-28s %s\n' "$mark" "$s" "$(status_word "${state:-unknown}")"
-    done
-  fi
-  if [[ -n "$link" ]]; then print_proxy_qr_terminal "$link"; fi
+  else printf '%s\n' "$report"; fi
+  printf '\nСостояние служб:\n'
+  local service state mark
+  for service in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
+    state="$(systemctl is-active "$service" 2>/dev/null || true)"
+    if [[ "$state" == active ]]; then mark="$(status_mark ok)"
+    elif [[ "$state" == inactive || "$state" == failed ]]; then mark="$(status_mark fail)"
+    else mark="$(status_mark warn)"; fi
+    printf '  %s %-28s %s\n' "$mark" "$service" "$(status_word "$state")"
+  done
+  [[ -z "$link" ]] || print_proxy_qr_terminal "$link"
 }
 
 load_existing_config() {
   local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
-  [[ -r "$cfg" && -r "$profiles" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
+  [[ -r "$cfg" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
   command -v jq >/dev/null 2>&1 || die "Для чтения настроек нужен jq"
+  profile_storage_rebuild
   v="$(jq -er '.public_hostname | select(type == "string" and length > 0)' "$cfg")" || die "Не удалось прочитать hostname"
   [[ -n "$HOSTNAME_ARG" ]] || HOSTNAME_ARG="$v"
   v="$(jq -r '.base_path // "none"' "$cfg")"; [[ -n "$BASE_PATH_ARG" ]] || BASE_PATH_ARG="$v"
   v="$(jq -r '.listen // "" | split(":")[-1]' "$cfg")"; [[ -n "$RELAY_PORT" ]] || RELAY_PORT="$v"
   v="$(jq -r '.admin_listen // "" | split(":")[-1]' "$cfg")"; [[ -n "$ADMIN_PORT" ]] || ADMIN_PORT="$v"
   v="$(jq -r '.public_dir // empty' "$cfg")"; [[ -n "$v" ]] && SITE_DIR="$v"
+  SITE_UPSTREAM_ARG="$(jq -r '.public_upstream // empty' "$cfg")"
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
   v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
   [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
+  if [[ "$CARRIER_MODE_SET" -eq 0 ]]; then CARRIER_MODE_ARG="$(jq -r '.profiles[0].carrier_mode // "https"' "$profiles")"; fi
   if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
     if [[ "$SECRET_ARG" == dd* ]]; then SECRET_PREFIX_MODE="dd"; else SECRET_PREFIX_MODE="plain"; fi
   fi
@@ -1930,6 +2210,13 @@ interactive_update_fill() {
   prompt_update_port ADMIN_PORT "Admin-порт" "$ADMIN_PORT"
   [[ "$RELAY_PORT" != "$ADMIN_PORT" ]] || die "relay- и admin-порты должны различаться"
   prompt_update_secret
+  echo "Carrier mode: [1] https  [2] https-lanes  [3] websocket  [4] websocket-lanes"
+  read -r -p "Выбор (Enter — оставить: $CARRIER_MODE_ARG): " input || die "ввод прерван"
+  case "$input" in
+    1) CARRIER_MODE_ARG=https ;; 2) CARRIER_MODE_ARG=https-lanes ;;
+    3) CARRIER_MODE_ARG=websocket ;; 4) CARRIER_MODE_ARG=websocket-lanes ;;
+    "") : ;; *) die "Недопустимый carrier mode" ;;
+  esac
 
   local input
   while :; do
@@ -1969,6 +2256,8 @@ show_operation_overview() {
   Будут обновлены исходники и компоненты, пересобран tproxy-server,
   обновлены конфигурации и перезапущены службы.
   Текущие настройки будут предложены по умолчанию, каталог сайта сохранится.
+  Перед изменениями будет создана rollback-копия бинарника и конфигураций.
+  При неудачном health-check предыдущие файлы будут восстановлены автоматически.
 EOF
   else
     echo "  ПЕРЕД УСТАНОВКОЙ"
@@ -1998,6 +2287,81 @@ EOF
   echo
 }
 
+begin_update_transaction() {
+  [[ "$MODE" == "update" ]] || return 0
+  install -d -m 0700 "$BACKUP_DIR"
+  UPDATE_ROLLBACK_ARCHIVE="$BACKUP_DIR/update-rollback-$(date +%Y%m%d-%H%M%S)-${BASHPID}.tar.gz"
+  local -a snapshot_items=()
+  local path
+  for path in \
+    opt/telegram-web-proxy/bin/tproxy-server \
+    opt/telegram-web-proxy/bin/mtproxy-proxy \
+    opt/telegram-web-proxy/bin/refresh-mtproxy-config \
+    opt/telegram-web-proxy/bin/tproxy-advanced \
+    opt/telegram-web-proxy/src/mtproxy \
+    opt/telegram-web-proxy/config/proxy \
+    opt/telegram-web-proxy/config/mtproxy \
+    opt/telegram-web-proxy/systemd \
+    etc/systemd/system/tproxy-server.service \
+    etc/systemd/system/mtproxy.service \
+    etc/systemd/system/tproxy-firewall.service \
+    etc/systemd/system/refresh-mtproxy-config.service \
+    etc/systemd/system/refresh-mtproxy-config.timer \
+    etc/systemd/system/caddy.service \
+    etc/systemd/system/caddy.service.d/tproxy.conf \
+    etc/caddy/Caddyfile \
+    etc/nginx/sites-available/tproxy-server \
+    etc/nginx/sites-enabled/tproxy-server \
+    etc/nginx/conf.d/tproxy-websocket-map.conf; do
+    [[ -e "/$path" || -L "/$path" ]] && snapshot_items+=("$path")
+  done
+  (("${#snapshot_items[@]}")) || die "Не удалось создать rollback: установленные файлы не найдены"
+  tar -C / -czpf "$UPDATE_ROLLBACK_ARCHIVE" "${snapshot_items[@]}" ||
+    die "Не удалось создать резервную копию перед обновлением"
+  chmod 0600 "$UPDATE_ROLLBACK_ARCHIVE"
+  UPDATE_TRANSACTION_ACTIVE=1
+  info "Создана точка отката обновления: $UPDATE_ROLLBACK_ARCHIVE"
+}
+
+rollback_update_transaction() {
+  local archive="$UPDATE_ROLLBACK_ARCHIVE" old_web=""
+  [[ -n "$archive" && -s "$archive" ]] || { warn "Архив отката не найден; автоматическое восстановление невозможно."; return 1; }
+  warn "Обновление не прошло проверку. Возвращаю предыдущие бинарник и конфигурации…"
+  systemctl stop tproxy-server mtproxy tproxy-firewall 2>/dev/null || true
+  rm -f -- "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config"
+  rm -rf -- "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$SYSTEMD_DIR"
+  rm -f -- \
+    /etc/systemd/system/tproxy-server.service \
+    /etc/systemd/system/mtproxy.service \
+    /etc/systemd/system/tproxy-firewall.service \
+    /etc/systemd/system/refresh-mtproxy-config.service \
+    /etc/systemd/system/refresh-mtproxy-config.timer \
+    /etc/systemd/system/caddy.service \
+    /etc/systemd/system/caddy.service.d/tproxy.conf \
+    /etc/caddy/Caddyfile \
+    /etc/nginx/sites-available/tproxy-server \
+    /etc/nginx/sites-enabled/tproxy-server \
+    /etc/nginx/conf.d/tproxy-websocket-map.conf
+  tar -C / -xzpf "$archive" || { warn "Не удалось распаковать rollback-архив: $archive"; return 1; }
+  systemctl daemon-reload
+  systemctl restart mtproxy tproxy-firewall tproxy-server 2>/dev/null || true
+  old_web="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
+  case "$old_web" in
+    caddy) systemctl restart caddy 2>/dev/null || true ;;
+    nginx) systemctl restart nginx 2>/dev/null || true ;;
+  esac
+  UPDATE_TRANSACTION_ACTIVE=0
+  warn "Предыдущие файлы восстановлены. Проверь службы командой: diagnostics"
+}
+
+update_exit_handler() {
+  local exit_code="$1"
+  if (( exit_code != 0 )) && [[ "$UPDATE_TRANSACTION_ACTIVE" == "1" ]]; then
+    rollback_update_transaction || true
+  fi
+  return "$exit_code"
+}
+
 run_install() {
   require_root
   check_arch
@@ -2011,11 +2375,13 @@ run_install() {
   fi
   preflight_system
   # До завершения preflight не создаём каталоги и не удаляем legacy-ссылки.
+  begin_update_transaction
   prepare_layout
-  install -d -m 0755 $PROXY_CONFIG_DIR
-  printf '%s\n' "$EMAIL_ARG" > $PROXY_CONFIG_DIR/acme-email
-  chmod 0600 $PROXY_CONFIG_DIR/acme-email
+  install -d -m 0755 "$PROXY_CONFIG_DIR"
+  printf '%s\n' "$EMAIL_ARG" > "$PROXY_CONFIG_DIR/acme-email"
+  chmod 0600 "$PROXY_CONFIG_DIR/acme-email"
   install_deps
+  check_telegram_connectivity
   check_dns
   fetch_repo
   resolve_base_path
@@ -2055,7 +2421,11 @@ run_install() {
   fi
   validate_configs
   start_services
-  wait_ready || die "relay не стал ready"
+  wait_ready || die "relay не прошёл health-check"
+  UPDATE_TRANSACTION_ACTIVE=0
+  if [[ "$MODE" == "update" ]]; then
+    ok "Обновление прошло health-check; rollback-копия сохранена: $UPDATE_ROLLBACK_ARCHIVE"
+  fi
   print_summary
 }
 
@@ -2356,7 +2726,7 @@ diagnostics_command() {
           (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"),
           (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110])
         ] | join(" | ")
-      '
+      ' | redact_sensitive_log
     )
   else
     printf '  %s Ошибок уровня error в доступном журнале не найдено\n' "$(status_mark ok)"
@@ -2435,7 +2805,39 @@ restore_command() {
   confirm "Восстановить конфигурации из $archive?" || die "восстановление отменено"
   tar -C / -xzpf "$archive" || die "Ошибка распаковки резервной копии"
   systemctl daemon-reload
-  ok "Файлы восстановлены. Проверь конфигурацию веб-сервера и состояние служб."
+
+  # Перезапускаем восстановленные компоненты, чтобы процессы перечитали файлы.
+  local service web_server
+  local -a restored_services=(
+    mtproxy.service
+    tproxy-server.service
+    tproxy-firewall.service
+    refresh-mtproxy-config.timer
+  )
+  web_server="$(cat "$CONFIG_DIR/web-server" 2>/dev/null || true)"
+  case "$web_server" in
+    caddy) restored_services+=(caddy.service) ;;
+    nginx) restored_services+=(nginx.service) ;;
+    *)
+      if systemctl cat caddy.service >/dev/null 2>&1; then
+        restored_services+=(caddy.service)
+      elif systemctl cat nginx.service >/dev/null 2>&1; then
+        restored_services+=(nginx.service)
+      fi
+      ;;
+  esac
+
+  for service in "${restored_services[@]}"; do
+    if systemctl cat "$service" >/dev/null 2>&1; then
+      info "Перезапускаю $service..."
+      systemctl restart "$service" || die "Не удалось перезапустить $service после восстановления. Проверь: journalctl -u $service -n 50"
+      ok "$service перезапущена"
+    else
+      info "$service не установлена — пропускаю"
+    fi
+  done
+
+  ok "Конфигурации восстановлены, доступные службы перезапущены."
   info "Для проверки выполни: diagnostics"
 }
 
@@ -2479,6 +2881,72 @@ show_deletion_menu() {
     esac
   done
 }
+ensure_advanced_manager() {
+  require_root
+  install -d -m 0755 "$BIN_DIR"
+  local helper="$BIN_DIR/tproxy-advanced" tmp
+  # Always fetch the helper pinned to this installer revision. A valid but
+  # older local copy must not prevent users from receiving menu fixes.
+  tmp="$(mktemp "$BIN_DIR/.tproxy-advanced.XXXXXX")" || die "Не удалось создать временный файл модуля"
+  if ! curl --fail --silent --show-error --location --proto "=https" --proto-redir "=https" --tlsv1.2 \
+      "$ADVANCED_SCRIPT_URL" -o "$tmp"; then
+    rm -f "$tmp"
+    die "Не удалось загрузить модуль панели мониторинга и дополнительных функций"
+  fi
+  if ! bash -n "$tmp"; then
+    rm -f "$tmp"
+    die "Загруженный модуль дополнительных функций содержит синтаксическую ошибку"
+  fi
+  chmod 0750 "$tmp"
+  mv -f "$tmp" "$helper"
+  [[ -x "$helper" ]] || die "Не удалось установить модуль дополнительных функций"
+}
+
+restart_proxy_services() {
+  require_root
+  local unit failed=0 restarted=0 web_server
+  local -a units=(tproxy-firewall.service mtproxy.service tproxy-server.service)
+
+  web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
+  case "$web_server" in
+    nginx) units+=(nginx.service) ;;
+    caddy) units+=(caddy.service) ;;
+    *)
+      if systemctl cat nginx.service >/dev/null 2>&1; then units+=(nginx.service)
+      elif systemctl cat caddy.service >/dev/null 2>&1; then units+=(caddy.service)
+      fi
+      ;;
+  esac
+  units+=(refresh-mtproxy-config.timer)
+
+  echo
+  ui_header "Перезапуск служб прокси"
+  for unit in "${units[@]}"; do
+    if ! systemctl cat "$unit" >/dev/null 2>&1; then
+      printf '  [—] %-36s не установлена, пропуск\n' "$unit"
+      continue
+    fi
+    if systemctl restart "$unit"; then
+      printf '  [OK] %s перезапущена\n' "$unit"
+      restarted=$((restarted + 1))
+    else
+      printf '  [ОШИБКА] Не удалось перезапустить %s\n' "$unit"
+      failed=1
+    fi
+  done
+  echo
+  if (( failed )); then
+    warn "Перезапуск завершён с ошибками. Проверь состояние служб: systemctl --failed"
+    return 1
+  elif (( restarted == 0 )); then
+    warn "Не найдено установленных служб прокси для перезапуска."
+    return 1
+  else
+    ok "Перезапущено служб/таймеров: $restarted"
+    return 0
+  fi
+}
+
 show_tools_menu() {
   local choice archive
   while true; do
@@ -2486,15 +2954,19 @@ show_tools_menu() {
     ui_option 1 "⌕" "Диагностика и поиск неисправностей"
     ui_option 2 "▤" "Создать резервную копию"
     ui_option 3 "↻" "Восстановить резервную копию"
-    ui_option 4 "↩" "Назад"
+    ui_option 4 "◉" "Carrier mode, профили, public upstream"
+    ui_option 5 "⟳" "Перезапустить все службы прокси"
+    ui_option 6 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-4]: " choice
+    read -r -p "Выбор [1-6]: " choice
     case "$choice" in
       1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
       2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
       3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
-      4) return 0 ;;
-      *) warn "Выбери пункт от 1 до 4." ;;
+      4) ensure_advanced_manager; "$BIN_DIR/tproxy-advanced" menu ;;
+      5) restart_proxy_services || true; read -r -p "Enter — назад..." _ ;;
+      6) return 0 ;;
+      *) warn "Выбери пункт от 1 до 6." ;;
     esac
   done
 }
@@ -2511,7 +2983,7 @@ show_menu() {
   read -r -p "Выбор [1-6]: " choice
   case "$choice" in
     1) MODE=install ;;
-    2) MODE=update; SKIP_TESTS=1 ;;
+    2) MODE=update ;;
     3) MODE=delete ;;
     4) MODE=config ;;
     5) MODE=tools ;;
@@ -2564,7 +3036,7 @@ main() {
   MODE="$1"; shift
   case "$MODE" in
     install)   parse_install_args "$@"; run_install ;;
-    update)    SKIP_TESTS=1; parse_install_args "$@"; run_install ;;
+    update)    parse_install_args "$@"; run_install ;;
     uninstall) parse_uninstall_args "$@"; run_uninstall ;;
     purge)     parse_uninstall_args "$@"; run_purge ;;
     config)    require_root; run_config "$@" ;;
@@ -2577,4 +3049,7 @@ main() {
 }
 
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  trap 'update_exit_handler "$?"' EXIT
+  main "$@"
+fi
