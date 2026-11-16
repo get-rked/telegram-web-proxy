@@ -28,14 +28,17 @@ valid_name() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; }
 valid_mode() { [[ $1 == https || $1 == https-lanes || $1 == websocket || $1 == websocket-lanes ]]; }
 
 write_mtproxy_secrets() {
-  local secrets args tmp
+  local secrets args tmp seen="" canonical
   secrets="$(jq -r '.profiles[].secret' "$PROFILES_FILE")"
   [[ -n $secrets ]] || die 'Список профилей пуст.'
   args=
   while IFS= read -r secret; do
     valid_secret "$secret" || die 'Обнаружен секрет с недопустимым форматом.'
+    canonical="${secret#dd}"
+    case "$seen" in *" $canonical "*) die 'Два профиля используют одинаковый backend secret (учитывая dd-префикс).' ;; esac
+    seen+=" $canonical "
     if [[ -n $args ]]; then args+=' -S '; fi
-    args+="$secret"
+    args+="$canonical"
   done <<< "$secrets"
   tmp="$(mktemp "${MT_ENV}.XXXXXX")"
   awk '!/^MTPROXY_SECRET=|^MTPROXY_SECRETS=/' "$MT_ENV" > "$tmp"
@@ -110,7 +113,7 @@ profile_menu() {
         echo "Все профили используют общий backend $backend и одну политику MTProxy."
         read -r -s -p 'Новый секрет (32 hex, опционально dd): ' secret; echo
         valid_secret "$secret" || { echo 'Недопустимый секрет'; read -r -p 'Enter...' _; continue; }
-        if jq -e --arg s "$secret" '.profiles[] | select(.secret == $s)' "$PROFILES_FILE" >/dev/null; then echo 'Секрет уже используется'; read -r -p 'Enter...' _; continue; fi
+        if jq -e --arg s "$secret" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then echo 'Секрет уже используется (включая dd-префикс)'; read -r -p 'Enter...' _; continue; fi
         echo 'Carrier mode: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
         read -r -p 'Выбор [1-4]: ' choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo 'Неверный режим'; continue ;; esac
@@ -153,7 +156,7 @@ profile_menu() {
 }
 
 upstream_menu() {
-  local current port answer tmp
+  local current port answer tmp backup
   current="$(jq -r '.public_upstream // empty' "$CONFIG_FILE")"
   if [[ -n $current ]]; then
     echo "Текущий режим: public_upstream=$current"
@@ -172,10 +175,11 @@ upstream_menu() {
     jq --arg u "http://127.0.0.1:$port" 'del(.public_dir) | .public_upstream = $u' "$CONFIG_FILE" > "$tmp"
   fi
   chown root:tproxy "$tmp"; chmod 0640 "$tmp"
-  cp -a "$CONFIG_FILE" "${CONFIG_FILE}.before-upstream.$(date +%Y%m%d-%H%M%S)"
+  backup="${CONFIG_FILE}.before-upstream.$(date +%Y%m%d-%H%M%S)"
+  cp -a "$CONFIG_FILE" "$backup"
   mv -f "$tmp" "$CONFIG_FILE"
   if ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then
-    cp -a "${CONFIG_FILE}.before-upstream."* "$CONFIG_FILE" 2>/dev/null || true
+    cp -a "$backup" "$CONFIG_FILE"
     die 'Проверка конфигурации не пройдена; проверь config.json.'
   fi
   systemctl restart tproxy-server
