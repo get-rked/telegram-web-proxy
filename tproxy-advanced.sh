@@ -92,14 +92,15 @@ profile_manifest_sync() {
   while IFS= read -r -d '' dir; do
     file="$dir/profile.json"
     expected_name="${dir##*/}"
+    valid_name "$expected_name" || die "Недопустимое имя каталога профиля: $expected_name"
     [[ -s "$file" ]] || die "В каталоге профиля отсутствует profile.json: $dir"
     jq -e --arg n "$expected_name" '
       type == "object" and
       .name == $n and
       (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
       (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
-      (.carrier_mode | type == "string" and
-        . == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")
+      (.carrier_mode | (type == "string" and
+        (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
     ' "$file" >/dev/null || die "Некорректная структура файла профиля: $file"
   done < <(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
 
