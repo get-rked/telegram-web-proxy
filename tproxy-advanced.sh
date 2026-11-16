@@ -27,6 +27,27 @@ valid_secret() { [[ $1 =~ ^(dd)?[0-9a-f]{32}$ ]]; }
 valid_name() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; }
 valid_mode() { [[ $1 == https || $1 == https-lanes || $1 == websocket || $1 == websocket-lanes ]]; }
 
+ui_header() {
+  local title="$1"
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '\\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n'
+    printf '  \\033[1;34m◆\\033[0m %s\\n' "$title"
+    printf '\\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n'
+  else
+    printf '%s\\n' '============================================================'
+    printf '  %s\\n' "$title"
+    printf '%s\\n' '============================================================'
+  fi
+}
+ui_option() {
+  local number="$1" icon="$2" label="$3"
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '  \\033[1;34m%s)\\033[0m %s %s\\n' "$number" "$icon" "$label"
+  else
+    printf '  %s) %s %s\\n' "$number" "$icon" "$label"
+  fi
+}
+
 write_mtproxy_secrets() {
   local secrets args tmp seen="" canonical secret count backend
   count="$(jq '.profiles | length' "$PROFILES_FILE")"
@@ -162,42 +183,95 @@ profile_menu() {
 }
 
 upstream_menu() {
-  local current port answer tmp backup
+  local current answer tmp backup port http_code selected=0
+  local -a ports=() codes=()
   current="$(jq -r '.public_upstream // empty' "$CONFIG_FILE")"
-  if [[ -n $current ]]; then
-    echo "Текущий режим: public_upstream=$current"
-    read -r -p 'Отключить upstream и вернуться к локальному public_dir? [y/N]: ' answer
-    [[ $answer =~ ^[Yy]$ ]] || return 0
-    read -r -p 'Каталог сайта (абсолютный путь): ' answer
-    [[ $answer == /* && -d $answer ]] || die 'Каталог не найден или путь не абсолютный.'
-    tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
-    jq --arg d "$answer" 'del(.public_upstream) | .public_dir = $d' "$CONFIG_FILE" > "$tmp"
-  else
-    echo 'Режим public_upstream использует существующее HTTP-приложение на loopback.'
-    read -r -p 'Порт локального сайта (например 3000): ' port
-    [[ $port =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || die 'Недопустимый порт.'
-    local http_code
-    http_code="$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null || true)"
-    if [[ ! $http_code =~ ^[1-5][0-9]{2}$ ]]; then
-      printf '[ОШИБКА] На 127.0.0.1:%s нет HTTP-ответа. Запусти приложение и повтори настройку.\n' "$port"
-      read -r -p 'Нажми Enter, чтобы вернуться в меню...' _
-      return 0
+
+  while :; do
+    clear
+    ui_header "Публичный сайт · public_upstream"
+    if [[ -n $current ]]; then
+      printf '  Текущий источник: %s\\n\\n' "$current"
+      ui_option 1 "↩" "Отключить upstream и выбрать каталог сайта"
+      ui_option 2 "↻" "Обновить список локальных приложений"
+      ui_option 3 "←" "Назад"
+      echo
+      read -r -p "Выбор [1-3]: " answer
+      case "$answer" in
+        1)
+          read -r -e -p "Каталог сайта [абсолютный путь]: " answer
+          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\\n'; read -r -p 'Enter — продолжить...' _; return 0; }
+          tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
+          jq --arg d "$answer" 'del(.public_upstream) | .public_dir = $d' "$CONFIG_FILE" > "$tmp"
+          break
+          ;;
+        2) current="";;
+        3|"") return 0 ;;
+        *) printf '  Выбери пункт от 1 до 3.\\n'; sleep 1 ;;
+      esac
+      [[ -n $current ]] && continue
     fi
-    tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
-    jq --arg u "http://127.0.0.1:$port" 'del(.public_dir) | .public_upstream = $u' "$CONFIG_FILE" > "$tmp"
-  fi
-  chown root:tproxy "$tmp"; chmod 0640 "$tmp"
+
+    clear
+    ui_header "Выбор локального HTTP-приложения"
+    printf '  Поиск работающих HTTP-сервисов на localhost...\\n\\n'
+    ports=()
+    codes=()
+    while IFS= read -r port; do
+      [[ $port =~ ^[0-9]+$ ]] || continue
+      [[ $port != "$ADMIN_PORT" && $port != "8080" ]] || continue
+      http_code="$(curl -sS --connect-timeout 0.4 --max-time 1 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null || true)"
+      if [[ $http_code =~ ^[1-5][0-9]{2}$ ]]; then
+        ports+=("$port")
+        codes+=("$http_code")
+      fi
+    done < <(ss -H -lnt 2>/dev/null | awk '{print $4}' | sed 's/.*://' | grep -E '^[0-9]+$' | sort -nu)
+
+    if (( ${#ports[@]} == 0 )); then
+      printf '  [!] Не найдено доступных HTTP-приложений на 127.0.0.1.\\n'
+      printf '  Запусти приложение и повтори поиск.\\n\\n'
+      ui_option 1 "↻" "Повторить поиск"
+      ui_option 2 "←" "Назад"
+      echo
+      read -r -p "Выбор [1-2]: " answer
+      case "$answer" in 1) continue ;; *) return 0 ;; esac
+    fi
+
+    printf '  Найденные приложения:\\n'
+    for ((i=0; i<${#ports[@]}; i++)); do
+      printf '  \\033[1;34m%s)\\033[0m http://127.0.0.1:%s  [HTTP %s]\\n' "$((i+1))" "${ports[$i]}" "${codes[$i]}"
+    done
+    printf '\\n'
+    ui_option "$((${#ports[@]}+1))" "↻" "Обновить список"
+    ui_option "$((${#ports[@]}+2))" "←" "Назад"
+    echo
+    read -r -p "Выбери приложение [1-$((${#ports[@]}+2))]: " answer
+    if [[ $answer == "$((${#ports[@]}+1))" ]]; then continue; fi
+    if [[ $answer == "$((${#ports[@]}+2))" || -z $answer ]]; then return 0; fi
+    if [[ $answer =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#ports[@]} )); then
+      selected=$((answer-1))
+      port="${ports[$selected]}"
+      tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
+      jq --arg u "http://127.0.0.1:$port" 'del(.public_dir) | .public_upstream = $u' "$CONFIG_FILE" > "$tmp"
+      break
+    fi
+    printf '  [!] Неверный выбор.\\n'
+    sleep 1
+  done
+
+  chown root:tproxy "$tmp"
+  chmod 0640 "$tmp"
   backup="${CONFIG_FILE}.before-upstream.$(date +%Y%m%d-%H%M%S)"
   cp -a "$CONFIG_FILE" "$backup"
   mv -f "$tmp" "$CONFIG_FILE"
   if ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then
     cp -a "$backup" "$CONFIG_FILE"
-    die 'Проверка конфигурации не пройдена; проверь config.json.'
+    die 'Проверка конфигурации не пройдена; исходная конфигурация восстановлена.'
   fi
   systemctl restart tproxy-server
-  echo 'Режим публичного сайта обновлён.'
+  printf '\\n[OK] Публичный сайт настроен.\\n'
+  read -r -p 'Нажми Enter, чтобы вернуться в меню...' _
 }
-
 main() {
   need_root
   need_files
@@ -209,13 +283,14 @@ main() {
       local choice
       while :; do
         clear
-        echo 'Дополнительные возможности'
-        echo '1) Панель мониторинга (службы, TLS, сеть, метрики)'
-        echo '2) Carrier mode и профили'
-        echo '3) public_upstream'
-        echo '4) Назад'
-        read -r -p 'Выбор: ' choice
-        case "$choice" in 1) dashboard ;; 2) profile_menu ;; 3) upstream_menu ;; 4) break ;; *) echo 'Неверный выбор'; sleep 1 ;; esac
+        ui_header "Дополнительные возможности"
+        ui_option 1 "◉" "Панель мониторинга"
+        ui_option 2 "▤" "Carrier mode и профили"
+        ui_option 3 "⇄" "Публичный сайт (public_upstream)"
+        ui_option 4 "←" "Назад"
+        echo
+        read -r -p "Выбор [1-4]: " choice
+        case "$choice" in 1) dashboard ;; 2) profile_menu ;; 3) upstream_menu ;; 4|"") break ;; *) echo 'Неверный выбор'; sleep 1 ;; esac
       done ;;
     *) die 'Использование: tproxy-advanced.sh [dashboard|profiles|upstream|menu]' ;;
   esac
