@@ -1825,14 +1825,42 @@ EOF
 run_config() {
   local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
-  local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output="" public_upstream=""
+  local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output=""
+  local public_upstream="" profile_name="" carrier_mode="" carrier_label="" count=0 index=0 choice=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --output) [[ $# -ge 2 ]] || die "--output требует путь"; output="$2"; shift 2 ;;
       *) die "Неизвестная опция config: $1" ;;
     esac
   done
-  if [[ -r "$cfg" ]] && command -v jq >/dev/null 2>&1; then
+  [[ -r "$profiles" ]] || die "Файл профилей не найден: $profiles"
+  command -v jq >/dev/null 2>&1 || die "Для просмотра конфигурации нужен jq"
+  count="$(jq '.profiles | length' "$profiles")"
+  (( count > 0 )) || die "Список профилей пуст"
+  if (( count > 1 )); then
+    echo
+    ui_header "Выбор профиля для просмотра"
+    while IFS=$'\t' read -r profile_name carrier_mode; do
+      index=$((index + 1))
+      ui_option "$index" "◆" "$profile_name · $carrier_mode"
+    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https")] | @tsv' "$profiles")
+    ui_option 0 "←" "Назад"
+    read -r -p "Выбери профиль [0-$count]: " choice || die "ввод прерван"
+    [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) || { info "Просмотр отменён"; return 0; }
+  fi
+  index=$((choice - 1))
+  profile_name="$(jq -r --argjson i "$index" '.profiles[$i].name' "$profiles")"
+  secret="$(jq -r --argjson i "$index" '.profiles[$i].secret // empty' "$profiles")"
+  backend="$(jq -r --argjson i "$index" '.profiles[$i].backend // empty' "$profiles")"
+  carrier_mode="$(jq -r --argjson i "$index" '.profiles[$i].carrier_mode // "https"' "$profiles")"
+  case "$carrier_mode" in
+    https) carrier_label="HTTPS" ;;
+    https-lanes) carrier_label="HTTPS с несколькими каналами" ;;
+    websocket) carrier_label="WebSocket" ;;
+    websocket-lanes) carrier_label="WebSocket с несколькими каналами" ;;
+    *) carrier_label="$carrier_mode (неизвестный режим)" ;;
+  esac
+  if [[ -r "$cfg" ]]; then
     host="$(jq -r '.public_hostname // empty' "$cfg")"
     base="$(jq -r '.base_path // empty' "$cfg")"
     relay="$(jq -r '.listen // empty' "$cfg")"
@@ -1840,105 +1868,69 @@ run_config() {
     public_dir="$(jq -r '.public_dir // empty' "$cfg")"
     public_upstream="$(jq -r '.public_upstream // empty' "$cfg")"
   fi
-  if [[ -r "$profiles" ]] && command -v jq >/dev/null 2>&1; then
-    secret="$(jq -r '.profiles[0].secret // empty' "$profiles")"
-    backend="$(jq -r '.profiles[0].backend // empty' "$profiles")"
-  fi
-  if [[ -r $PROXY_CONFIG_DIR/acme-email ]]; then
-    email="$(head -n1 $PROXY_CONFIG_DIR/acme-email | xargs || true)"
-  fi
+  if [[ -r "$PROXY_CONFIG_DIR/acme-email" ]]; then email="$(head -n1 "$PROXY_CONFIG_DIR/acme-email" | xargs || true)"; fi
   if [[ -z "$email" && -r /etc/systemd/system/caddy.service.d/tproxy.conf ]]; then
     email="$(sed -n 's/^Environment=ACME_EMAIL=//p' /etc/systemd/system/caddy.service.d/tproxy.conf | head -n1)"
   fi
   if [[ -z "$email" && -d /etc/letsencrypt/renewal ]]; then
     email="$(grep -RhoE '^[[:space:]]*email[[:space:]]*=[[:space:]]*[^[:space:]]+' /etc/letsencrypt/renewal 2>/dev/null | head -n1 | cut -d= -f2- | xargs || true)"
   fi
-  if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then
-    web_server="$(cat $PROXY_CONFIG_DIR/web-server)"
-  elif systemctl is-enabled --quiet nginx 2>/dev/null; then
-    web_server=nginx
-  else
-    web_server=caddy
-  fi
+  if [[ -r "$PROXY_CONFIG_DIR/web-server" ]]; then web_server="$(cat "$PROXY_CONFIG_DIR/web-server")"
+  elif systemctl is-enabled --quiet nginx 2>/dev/null; then web_server=nginx
+  else web_server=caddy; fi
   if [[ -r "$envf" ]]; then
     workers="$(sed -n 's/^MTPROXY_WORKERS=//p' "$envf" | head -n1)"
     maxconn="$(sed -n 's/^MTPROXY_MAX_CONNECTIONS=//p' "$envf" | head -n1)"
-
   fi
   if [[ -n "$host" && -n "$secret" ]]; then
     BASE_PATH_ARG="$base"; SECRET_ARG="$secret"
     proxy_secret="$(web_proxy_secret)"
-    server="$host"; if [[ -n "$base" ]]; then server="$host/$base"; fi
-    link="https://t.me/webproxy?server=${server//\//%2F}&secret=$proxy_secret"
+    server="$host"; [[ -z "$base" ]] || server="$host/$base"
+    server="$(printf '%s' "$server" | sed 's#/#%2F#g')"
+    link="https://t.me/webproxy?server=$server&secret=$proxy_secret"
     generate_proxy_qr "$link" >/dev/null
   fi
   local report
-  report="$(cat <<EOF
-==================== ТЕКУЩАЯ КОНФИГУРАЦИЯ ====================
-  Домен                    : ${host:-<не задан>}
-  Base path                : ${base:-<root / не задан>}
-  Публичный каталог        : ${public_dir:-<не задан>}
-  Public upstream          : ${public_upstream:-<не используется>}
-  Каталог сайта            : ${public_dir:-$SITE_DIR_DEFAULT}
-  Конфигурация relay       : $cfg
-  Профили                  : $profiles
-  Переменные MTProxy       : $envf
-  Workers                  : ${workers:-<не задан>}
-  Max connections          : ${maxconn:-<не задан>}
-  E-mail для Let's Encrypt : ${email:-<не найден>}
-  Веб-сервер               : ${web_server:-<не определён>}
-  Формат секрета           : $(if [[ "$secret" == dd* ]]; then echo "dd + 32 hex"; elif [[ -n "$secret" ]]; then echo "32 hex"; else echo "<не задан>"; fi)
-  Секрет клиента           : ${secret:-<не задан>}
-
-Слушающие TCP-порты прокси:
-$(proxy_ports_table "$relay" "$admin" "$backend")
-
-Ссылки подключения:
-${link:-<не удалось сформировать: проверь config.json и profiles.json>}
-QR-код (PNG)          : ${link:+$QR_DIR/proxy-qr.png}
-==============================================================
-EOF
-)"
+  report="$(printf '%s\n' \
+    '==================== ТЕКУЩАЯ КОНФИГУРАЦИЯ ====================' \
+    "  Профиль                  : $profile_name" \
+    "  Carrier mode             : $carrier_label" \
+    "  Домен                    : $host" \
+    "  Base path                : $base" \
+    "  Публичный каталог        : $public_dir" \
+    "  Публичное приложение     : $public_upstream" \
+    "  Конфигурация relay       : $cfg" \
+    "  Каталог профиля          : $PROXY_CONFIG_DIR/profiles/$profile_name" \
+    "  Файл профиля             : $PROXY_CONFIG_DIR/profiles/$profile_name/profile.json" \
+    "  Общий список профилей    : $profiles" \
+    "  Переменные MTProxy       : $envf" \
+    "  Backend                  : $backend" \
+    "  Workers                  : $workers" \
+    "  Max connections          : $maxconn" \
+    "  E-mail для Let's Encrypt : $email" \
+    "  Веб-сервер               : $web_server" \
+    "  Формат секрета           : $(if [[ "$secret" == dd* ]]; then echo 'dd + 32 hex'; elif [[ -n "$secret" ]]; then echo '32 hex'; else echo '<не задан>'; fi)" \
+    "  Секрет клиента           : $secret" \
+    '' 'Слушающие TCP-порты прокси:' \
+    "$(proxy_ports_table "$relay" "$admin" "$backend")" \
+    '' 'Ссылка подключения:' "$link" \
+    "QR-код (PNG): $QR_DIR/proxy-qr.png" \
+    '==============================================================')"
   if [[ -n "$output" ]]; then
     install -m 0600 /dev/null "$output"
     printf '%s\n' "$report" | sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' > "$output"
     echo "Конфигурация сохранена: $output (0600)"
-  else
-    printf '%s\n' "$report"
-  fi
-
-  # Выводим состояния служб отдельно от многострочного отчёта,
-  # чтобы ANSI-цвета гарантированно доходили до терминала.
-  if [[ -n "$output" ]]; then
-    {
-      printf '\nСостояние служб:\n'
-      for s in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
-        state="$(systemctl is-active "$s" 2>/dev/null || true)"
-        if [[ "$state" == active ]]; then
-          mark='[✓]'
-        elif [[ "$state" == inactive || "$state" == failed ]]; then
-          mark='[✗]'
-        else
-          mark='[!]'
-        fi
-        printf '  %s %-28s %s\n' "$mark" "$s" "${state:-unknown}"
-      done
-    } >> "$output"
-  else
-    printf '\nСостояние служб:\n'
-    for s in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
-      state="$(systemctl is-active "$s" 2>/dev/null || true)"
-      if [[ "$state" == active ]]; then
-        mark="$(status_mark ok)"
-      elif [[ "$state" == inactive || "$state" == failed ]]; then
-        mark="$(status_mark fail)"
-      else
-        mark="$(status_mark warn)"
-      fi
-      printf '  %s %-28s %s\n' "$mark" "$s" "$(status_word "${state:-unknown}")"
-    done
-  fi
-  if [[ -n "$link" ]]; then print_proxy_qr_terminal "$link"; fi
+  else printf '%s\n' "$report"; fi
+  printf '\nСостояние служб:\n'
+  local service state mark
+  for service in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
+    state="$(systemctl is-active "$service" 2>/dev/null || true)"
+    if [[ "$state" == active ]]; then mark="$(status_mark ok)"
+    elif [[ "$state" == inactive || "$state" == failed ]]; then mark="$(status_mark fail)"
+    else mark="$(status_mark warn)"; fi
+    printf '  %s %-28s %s\n' "$mark" "$service" "$(status_word "$state")"
+  done
+  [[ -z "$link" ]] || print_proxy_qr_terminal "$link"
 }
 
 load_existing_config() {
