@@ -606,6 +606,7 @@ preflight_basics() {
 NGINX_EXISTING_LINK=""
 inspect_existing_site() {
   local parser output rc source root caddy_bin
+  command -v python3 >/dev/null 2>&1 || die "Для безопасного анализа конфигурации занятого веб-сервера требуется python3. Установи python3 и повтори запуск."
   parser="$(mktemp)" || die "Не удалось создать временный файл анализатора веб-конфигурации"
   cat > "$parser" <<'PYTHON'
 import json, re, sys
@@ -643,9 +644,12 @@ if kind == 'nginx':
         if not ports: continue
         names=[]
         for v in re.findall(r'(?m)^\s*server_name\s+([^;]+);',b): names += [x for x in v.split() if x not in ('_', '')]
-        if not names: continue
-        if any(x.startswith('$') for x in names) or any(x != host for x in names): fail('another domain shares ports 80/443')
         roots=re.findall(r'(?m)^\s*root\s+([^;]+);',b)
+        if not names:
+            if roots or re.search(r'(?m)^\s*(proxy_pass|fastcgi_pass|uwsgi_pass|grpc_pass)\s+',b):
+                fail('nginx default/catch-all site is configured on ports 80/443')
+            continue
+        if any(x.startswith('$') for x in names) or any(x != host for x in names): fail('another domain shares ports 80/443')
         if re.search(r'(?m)^\s*(alias|proxy_pass|fastcgi_pass|uwsgi_pass|grpc_pass)\s+',b): fail('matching nginx site is not a simple static-root site')
         if roots:
             if len(set(roots)) != 1: fail('multiple roots in matching nginx server block')
@@ -674,8 +678,8 @@ elif kind == 'caddy':
             if x.get('handler')=='vars' and 'root' in x and local:
                 if any(h != host for h in local): fail('another domain is configured in Caddy')
                 found=True; roots.append(x['root'])
-            if x.get('handler')=='file_server' and not local:
-                fail('Caddy catch-all file_server route is ambiguous')
+            if x.get('handler') in ('file_server','reverse_proxy') and not local:
+                fail('Caddy catch-all route is ambiguous')
             if x.get('handler')=='file_server' and local:
                 if any(h != host for h in local): fail('another domain is configured in Caddy')
                 found=True
