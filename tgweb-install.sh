@@ -57,6 +57,7 @@ SECRET_PREFIX_MODE="plain"
 SECRET_PREFIX_MODE_SET=0
 BASE_PATH_ARG=""
 SITE_DIR="$SITE_DIR_DEFAULT"
+SITE_UPSTREAM_ARG=""
 INSTALL_SITE=1
 WORKERS_ARG=""
 MAXCONN_ARG=""
@@ -1508,7 +1509,20 @@ write_configs() {
   sed -i "s#/etc/tproxy-server#$PROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/ensure-token-key.sh"
   bash "$REPO_DIR/deploy/ensure-token-key.sh"
 
-  cat > "$PROXY_CONFIG_DIR/config.json" <<EOF
+  if [[ -n "$SITE_UPSTREAM_ARG" ]]; then
+    cat > "$PROXY_CONFIG_DIR/config.json" <<EOF
+{
+  "public_hostname": "$HOSTNAME_ARG",
+  "base_path": "$BASE_PATH_ARG",
+  "listen": "127.0.0.1:$RELAY_PORT",
+  "admin_listen": "127.0.0.1:$ADMIN_PORT",
+  "public_upstream": "$SITE_UPSTREAM_ARG",
+  "static_routes": "exact",
+  "profiles_file": "/run/credentials/tproxy-server.service/profiles.json"
+}
+EOF
+  else
+    cat > "$PROXY_CONFIG_DIR/config.json" <<EOF
 {
   "public_hostname": "$HOSTNAME_ARG",
   "base_path": "$BASE_PATH_ARG",
@@ -1519,6 +1533,7 @@ write_configs() {
   "profiles_file": "/run/credentials/tproxy-server.service/profiles.json"
 }
 EOF
+  fi
 
   if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
     local profiles_tmp
@@ -1810,7 +1825,7 @@ EOF
 run_config() {
   local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
-  local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output=""
+  local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output="" public_upstream=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --output) [[ $# -ge 2 ]] || die "--output требует путь"; output="$2"; shift 2 ;;
@@ -1823,6 +1838,7 @@ run_config() {
     relay="$(jq -r '.listen // empty' "$cfg")"
     admin="$(jq -r '.admin_listen // empty' "$cfg")"
     public_dir="$(jq -r '.public_dir // empty' "$cfg")"
+    public_upstream="$(jq -r '.public_upstream // empty' "$cfg")"
   fi
   if [[ -r "$profiles" ]] && command -v jq >/dev/null 2>&1; then
     secret="$(jq -r '.profiles[0].secret // empty' "$profiles")"
@@ -1862,6 +1878,7 @@ run_config() {
   Домен                    : ${host:-<не задан>}
   Base path                : ${base:-<root / не задан>}
   Публичный каталог        : ${public_dir:-<не задан>}
+  Public upstream          : ${public_upstream:-<не используется>}
   Каталог сайта            : ${public_dir:-$SITE_DIR_DEFAULT}
   Конфигурация relay       : $cfg
   Профили                  : $profiles
@@ -1935,6 +1952,7 @@ load_existing_config() {
   v="$(jq -r '.listen // "" | split(":")[-1]' "$cfg")"; [[ -n "$RELAY_PORT" ]] || RELAY_PORT="$v"
   v="$(jq -r '.admin_listen // "" | split(":")[-1]' "$cfg")"; [[ -n "$ADMIN_PORT" ]] || ADMIN_PORT="$v"
   v="$(jq -r '.public_dir // empty' "$cfg")"; [[ -n "$v" ]] && SITE_DIR="$v"
+  SITE_UPSTREAM_ARG="$(jq -r '.public_upstream // empty' "$cfg")"
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
   v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
   [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
