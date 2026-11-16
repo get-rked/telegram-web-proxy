@@ -1759,12 +1759,31 @@ install_caddyfile() {
     ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
   fi
 
+  # Render the upstream unit with this installation's actual site directory.
+  # The upstream template defaults to /srv/tproxy-site, while this installer
+  # stores the decoy site under SITE_DIR (normally /opt/telegram-web-proxy/data/website).
+  local caddy_unit_tmp
+  caddy_unit_tmp="$(mktemp)"
+  if ! awk -v site_dir="$SITE_DIR" '
+    $0 == "ReadOnlyPaths=/srv/tproxy-site" {
+      print "ReadOnlyPaths=" site_dir
+      replaced = 1
+      next
+    }
+    { print }
+    END { if (!replaced) exit 42 }
+  ' "$REPO_DIR/deploy/caddy.service" > "$caddy_unit_tmp"; then
+    rm -f "$caddy_unit_tmp"
+    die "Не удалось адаптировать ReadOnlyPaths в caddy.service: шаблон изменился или не содержит ожидаемую директиву"
+  fi
+
   if [[ -e /etc/systemd/system/caddy.service ]] && \
-     ! cmp -s /etc/systemd/system/caddy.service "$REPO_DIR/deploy/caddy.service"; then
+     ! cmp -s /etc/systemd/system/caddy.service "$caddy_unit_tmp"; then
     cp -a /etc/systemd/system/caddy.service \
       "/etc/systemd/system/caddy.service.before-tproxy.$(date +%Y%m%d%H%M%S)"
   fi
-  install -m 0644 "$REPO_DIR/deploy/caddy.service" /etc/systemd/system/caddy.service
+  install -m 0644 "$caddy_unit_tmp" /etc/systemd/system/caddy.service
+  rm -f "$caddy_unit_tmp"
   install -d -m 0755 /etc/systemd/system/caddy.service.d
   cat > /etc/systemd/system/caddy.service.d/tproxy.conf <<EOF
 [Service]
