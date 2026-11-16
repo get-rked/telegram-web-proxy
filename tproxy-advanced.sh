@@ -139,8 +139,8 @@ profile_manifest_valid() {
         (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and
         (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
         (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
-        (.carrier_mode | type == "string" and
-          (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+        (.carrier_mode | (type == "string" and
+          (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
       ) and
       ([.profiles[].name] | length == (unique | length))
     ' "$PROFILES_FILE" >/dev/null 2>&1
