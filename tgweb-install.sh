@@ -1728,6 +1728,10 @@ install_units() {
       -e "s#/srv/tproxy-site#$SITE_DIR#g" "$src" > "$dst"
     if [[ "$name" == "mtproxy.service" ]]; then
       sed -i 's/-S ${MTPROXY_SECRET}/-S $MTPROXY_SECRETS/' "$dst"
+    elif [[ "$name" == "tproxy-server.service" ]]; then
+      # Validate the exact systemd credential at service start. This catches
+      # credential-path/schema mismatches that a temporary-file check cannot.
+      sed -i "/^[[:space:]]*ExecStart=/i ExecStartPre=$BIN_DIR/tproxy-server -config $PROXY_CONFIG_DIR/config.json -check" "$dst"
     fi
     chmod 0644 "$dst"
     ln -sfn "$dst" "/etc/systemd/system/$name"
