@@ -43,7 +43,7 @@ readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/85fc1d22af3aad5d9334c51ed9d1e0adfbafec65/tproxy-advanced.sh"
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/8e108bfc0cc83cefa7c2e45979a19321ee8b862e/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -1571,10 +1571,17 @@ EOF
     "$PROXY_CONFIG_DIR/profiles.json" > "$profile_dir/$profile_name/profile.json"
   chown root:tproxy "$profile_dir/$profile_name/profile.json"
   chmod 0640 "$profile_dir/$profile_name/profile.json"
-  local profiles_tmp
+  local profiles_tmp profile_file
+  local -a profile_files=()
+  if [[ -s "$profile_dir/default/profile.json" ]]; then
+    profile_files+=("$profile_dir/default/profile.json")
+  fi
+  while IFS= read -r -d '' profile_file; do
+    [[ "$profile_file" == "$profile_dir/default/profile.json" ]] || profile_files+=("$profile_file")
+  done < <(find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
+  (( \${#profile_files[@]} > 0 )) || die "Не найдено файлов профилей для сборки profiles.json"
   profiles_tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
-  find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 |
-    sort -z | xargs -0 -r jq -s '{profiles: .}' > "$profiles_tmp" ||
+  jq -s '{profiles: .}' "\${profile_files[@]}" > "$profiles_tmp" ||
     die "Не удалось собрать общий profiles.json из файлов профилей"
   chown root:tproxy "$profiles_tmp"; chmod 0400 "$profiles_tmp"
   mv -f "$profiles_tmp" "$PROXY_CONFIG_DIR/profiles.json"
