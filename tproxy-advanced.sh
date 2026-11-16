@@ -87,16 +87,25 @@ PROFILE_NAME=""
 PROFILE_SECRET=""
 
 profile_manifest_sync() {
-  local tmp
+  local tmp dir file
+  local -a profile_files=()
+  while IFS= read -r -d '' dir; do
+    [[ -s "$dir/profile.json" ]] || die "В каталоге профиля отсутствует profile.json: $dir"
+  done < <(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
+  if [[ -s "$PROFILE_DIR/default/profile.json" ]]; then
+    profile_files+=("$PROFILE_DIR/default/profile.json")
+  fi
+  while IFS= read -r -d '' file; do
+    [[ "$file" == "$PROFILE_DIR/default/profile.json" ]] || profile_files+=("$file")
+  done < <(find "$PROFILE_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
+  (( \${#profile_files[@]} > 0 )) || die "В каталогах не найдено ни одного профиля."
   tmp="$(mktemp "$PROFILES_FILE.XXXXXX")"
-  find "$PROFILE_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 |
-    sort -z | xargs -0 -r jq -s '{profiles: .}' > "$tmp" ||
+  jq -s '{profiles: .}' "\${profile_files[@]}" > "$tmp" ||
     { rm -f "$tmp"; die "Не удалось собрать общий список профилей."; }
   jq -e '.profiles | length >= 1 and length <= 32' "$tmp" >/dev/null ||
     { rm -f "$tmp"; die "В хранилище должно быть от 1 до 32 профилей."; }
   chown root:tproxy "$tmp"; chmod 0400 "$tmp"; mv -f "$tmp" "$PROFILES_FILE"
 }
-
 profile_storage_init() {
   install -d -o root -g tproxy -m 0750 "$PROFILE_DIR"
   local count name file
@@ -104,6 +113,7 @@ profile_storage_init() {
   if (( count == 0 )); then
     while IFS= read -r name; do
       [[ -n "$name" ]] || continue
+      valid_name "$name" || die "Недопустимое имя профиля в старой конфигурации: $name"
       install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$name"
       jq --arg n "$name" '.profiles[] | select(.name == $n)' "$PROFILES_FILE" > "$PROFILE_DIR/$name/profile.json" ||
         die "Не удалось перенести профиль $name."
