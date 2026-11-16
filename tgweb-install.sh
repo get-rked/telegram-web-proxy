@@ -2904,7 +2904,7 @@ ensure_advanced_manager() {
 
 restart_proxy_services() {
   require_root
-  local unit result failed=0 restarted=0 web_server
+  local unit failed=0 restarted=0 web_server
   local -a units=(tproxy-firewall.service mtproxy.service tproxy-server.service)
 
   web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
