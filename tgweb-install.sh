@@ -1058,7 +1058,6 @@ install_caddy() {
     local archive dir
     archive="$(mktemp /tmp/caddy.XXXXXX.tar.gz)"
     dir="$(mktemp -d /tmp/caddy.XXXXXX)"
-    trap 'rm -f "$archive"; rm -rf "$dir"' EXIT
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
       --output "$archive" \
       "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
@@ -1067,7 +1066,6 @@ install_caddy() {
     tar -C "$dir" -xzf "$archive"
     install -m 0755 "$dir/caddy" /usr/local/bin/caddy
     rm -f "$archive"; rm -rf "$dir"
-    trap - EXIT
     ok "Caddy установлен"
   fi
   if ! id caddy >/dev/null 2>&1; then
@@ -1217,7 +1215,6 @@ ensure_go() {
   local archive dir
   archive="$(mktemp /tmp/go.XXXXXX.tar.gz)"
   dir="$(mktemp -d /tmp/go.XXXXXX)"
-  trap 'rm -f "$archive"; rm -rf "$dir"' EXIT
   curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
     --output "$archive" "https://go.dev/dl/go${GO_FALLBACK_VERSION}.linux-amd64.tar.gz"
   test "$(sha256sum "$archive" | awk '{print $1}')" = "$GO_FALLBACK_SHA256" \
@@ -1226,7 +1223,7 @@ ensure_go() {
   if [[ -e "/opt/go${GO_FALLBACK_VERSION}" ]]; then rm -rf "$dir/go"; else
     mv "$dir/go" "/opt/go${GO_FALLBACK_VERSION}"
   fi
-  rm -f "$archive"; rm -rf "$dir"; trap - EXIT
+  rm -f "$archive"; rm -rf "$dir"
   GO_BIN="/opt/go${GO_FALLBACK_VERSION}/bin/go"
   ok "Go: $("$GO_BIN" version)"
 }
