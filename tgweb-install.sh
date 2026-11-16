@@ -64,6 +64,8 @@ SKIP_TESTS="${SKIP_TESTS:-0}"
 KEEP_WEB_SERVER=0
 ASSUME_YES=0
 GO_BIN=""
+UPDATE_TRANSACTION_ACTIVE=0
+UPDATE_ROLLBACK_ARCHIVE=""
 
 # ----------------------------- утилиты --------------------------------------
 # Цветные статусы: цвет применяется только к ключу, текст сообщения не меняется.
@@ -129,6 +131,14 @@ status_word() {
   else
     printf '%s' "$state"
   fi
+}
+
+# Redact credential-like values and request paths before displaying journal data.
+redact_sensitive_log() {
+  sed -E \
+    -e 's/((secret|token|authorization|password|bridge[_-]?token|api[_-]?key)[=: ]+)[^[:space:]&",;]+/\1[REDACTED]/Ig' \
+    -e 's/([?&](secret|token|hash)=)[^&[:space:]"]+/\1[REDACTED]/Ig' \
+    -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g'
 }
 
 usage() {
@@ -930,6 +940,46 @@ is_cloudflare_proxied_domain() {
   (( total > 0 && count == total ))
 }
 
+check_telegram_connectivity() {
+  info "Проверяю доступность Telegram до установки компонентов…"
+  local core_ok=0 dc_ok=0 dc_ip
+  local -a dc_ips=(149.154.175.50 149.154.167.51 149.154.175.100)
+
+  if getent ahosts core.telegram.org >/dev/null 2>&1; then
+    ok "DNS: core.telegram.org разрешается"
+  else
+    warn "DNS: не удалось разрешить core.telegram.org"
+  fi
+
+  if curl --fail --silent --show-error --location --max-time 12 \
+      --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      --output /dev/null https://core.telegram.org; then
+    core_ok=1
+    ok "HTTPS: core.telegram.org доступен"
+  else
+    warn "HTTPS: core.telegram.org недоступен"
+  fi
+
+  for dc_ip in "${dc_ips[@]}"; do
+    if timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/443"' _ "$dc_ip" 2>/dev/null; then
+      dc_ok=1
+      ok "Telegram DC: TCP 443 доступен через $dc_ip"
+      break
+    fi
+  done
+
+  if (( ! dc_ok )); then
+    warn "Не удалось установить TCP-соединение с проверенными адресами Telegram DC (порт 443). Работа MTProxy может быть невозможна."
+    if [[ "$NONINTERACTIVE" == "1" ]]; then
+      die "Проверка Telegram DC не пройдена; non-interactive установка остановлена"
+    fi
+    confirm "Продолжить несмотря на недоступность Telegram DC?" || die "установка отменена после проверки сети"
+  fi
+  if (( ! core_ok )); then
+    warn "core.telegram.org недоступен по HTTPS. Проверка DC прошла отдельно; проверь сетевые ограничения и DNS."
+  fi
+}
+
 check_dns() {
   info "Проверяю DNS для $HOSTNAME_ARG через системный DNS-резолвер…"
   local -a ips=()
@@ -1188,11 +1238,19 @@ build_tproxy() {
     warn "  go test пропущен (--skip-tests)"
   fi
   install -d -m 0755 "$BIN_DIR"
-  "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$BIN_DIR/tproxy-server" ./cmd/tproxy-server
-  chown root:root "$BIN_DIR/tproxy-server"
-  chmod 0755 "$BIN_DIR/tproxy-server"
+  local candidate="$BIN_DIR/tproxy-server.new.$"
+  rm -f -- "$candidate"
+  if ! "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$candidate" ./cmd/tproxy-server; then
+    rm -f -- "$candidate"
+    cd - >/dev/null
+    die "Сборка tproxy-server не удалась; установленный бинарник не изменён"
+  fi
+  chown root:root "$candidate"
+  chmod 0755 "$candidate"
+  # Same-filesystem rename promotes only a complete executable.
+  mv -f -- "$candidate" "$BIN_DIR/tproxy-server"
   cd - >/dev/null
-  ok "tproxy-server собран"
+  ok "tproxy-server собран и атомарно установлен"
 }
 
 install_stub_site() {
@@ -1606,16 +1664,20 @@ start_services() {
 }
 
 wait_ready() {
-  local attempt
-  info "Ждём readyz на 127.0.0.1:$ADMIN_PORT (до 30с)…"
+  local attempt health_ok ready_ok
+  info "Ждём healthz и readyz на 127.0.0.1:$ADMIN_PORT (до 30с)…"
   for (( attempt=0; attempt<30; attempt++ )); do
-    if curl --fail --silent --output /dev/null "http://127.0.0.1:$ADMIN_PORT/readyz"; then
-      ok "relay готов"
+    health_ok=0
+    ready_ok=0
+    curl --fail --silent --max-time 1 --output /dev/null "http://127.0.0.1:$ADMIN_PORT/healthz" && health_ok=1
+    curl --fail --silent --max-time 1 --output /dev/null "http://127.0.0.1:$ADMIN_PORT/readyz" && ready_ok=1
+    if (( health_ok && ready_ok )); then
+      ok "healthz и readyz отвечают; relay готов"
       return 0
     fi
     sleep 1
   done
-  warn "readyz не ответил за 30с"
+  warn "healthz/readyz не прошли проверку за 30с"
   echo
   echo "=== Диагностика ==="
   echo "--- tproxy-server ---"
@@ -1969,6 +2031,8 @@ show_operation_overview() {
   Будут обновлены исходники и компоненты, пересобран tproxy-server,
   обновлены конфигурации и перезапущены службы.
   Текущие настройки будут предложены по умолчанию, каталог сайта сохранится.
+  Перед изменениями будет создана rollback-копия бинарника и конфигураций.
+  При неудачном health-check предыдущие файлы будут восстановлены автоматически.
 EOF
   else
     echo "  ПЕРЕД УСТАНОВКОЙ"
@@ -1998,6 +2062,75 @@ EOF
   echo
 }
 
+begin_update_transaction() {
+  [[ "$MODE" == "update" ]] || return 0
+  install -d -m 0700 "$BACKUP_DIR"
+  UPDATE_ROLLBACK_ARCHIVE="$BACKUP_DIR/update-rollback-$(date +%Y%m%d-%H%M%S)-$.tar.gz"
+  local -a snapshot_items=()
+  local path
+  for path in \
+    opt/telegram-web-proxy/bin/tproxy-server \
+    opt/telegram-web-proxy/config/proxy \
+    opt/telegram-web-proxy/config/mtproxy \
+    opt/telegram-web-proxy/systemd \
+    etc/systemd/system/tproxy-server.service \
+    etc/systemd/system/mtproxy.service \
+    etc/systemd/system/tproxy-firewall.service \
+    etc/systemd/system/refresh-mtproxy-config.service \
+    etc/systemd/system/refresh-mtproxy-config.timer \
+    etc/systemd/system/caddy.service.d/tproxy.conf \
+    etc/caddy/Caddyfile \
+    etc/nginx/sites-available/tproxy-server \
+    etc/nginx/sites-enabled/tproxy-server \
+    etc/nginx/conf.d/tproxy-websocket-map.conf; do
+    [[ -e "/$path" || -L "/$path" ]] && snapshot_items+=("$path")
+  done
+  (("${#snapshot_items[@]}")) || die "Не удалось создать rollback: установленные файлы не найдены"
+  tar -C / -czpf "$UPDATE_ROLLBACK_ARCHIVE" "${snapshot_items[@]}" ||
+    die "Не удалось создать резервную копию перед обновлением"
+  chmod 0600 "$UPDATE_ROLLBACK_ARCHIVE"
+  UPDATE_TRANSACTION_ACTIVE=1
+  info "Создана точка отката обновления: $UPDATE_ROLLBACK_ARCHIVE"
+}
+
+rollback_update_transaction() {
+  local archive="$UPDATE_ROLLBACK_ARCHIVE" old_web=""
+  [[ -n "$archive" && -s "$archive" ]] || { warn "Архив отката не найден; автоматическое восстановление невозможно."; return 1; }
+  warn "Обновление не прошло проверку. Возвращаю предыдущие бинарник и конфигурации…"
+  systemctl stop tproxy-server mtproxy tproxy-firewall 2>/dev/null || true
+  rm -f -- "$BIN_DIR/tproxy-server"
+  rm -rf -- "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$SYSTEMD_DIR"
+  rm -f -- \
+    /etc/systemd/system/tproxy-server.service \
+    /etc/systemd/system/mtproxy.service \
+    /etc/systemd/system/tproxy-firewall.service \
+    /etc/systemd/system/refresh-mtproxy-config.service \
+    /etc/systemd/system/refresh-mtproxy-config.timer \
+    /etc/systemd/system/caddy.service.d/tproxy.conf \
+    /etc/caddy/Caddyfile \
+    /etc/nginx/sites-available/tproxy-server \
+    /etc/nginx/sites-enabled/tproxy-server \
+    /etc/nginx/conf.d/tproxy-websocket-map.conf
+  tar -C / -xzpf "$archive" || { warn "Не удалось распаковать rollback-архив: $archive"; return 1; }
+  systemctl daemon-reload
+  systemctl restart mtproxy tproxy-firewall tproxy-server 2>/dev/null || true
+  old_web="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
+  case "$old_web" in
+    caddy) systemctl restart caddy 2>/dev/null || true ;;
+    nginx) systemctl restart nginx 2>/dev/null || true ;;
+  esac
+  UPDATE_TRANSACTION_ACTIVE=0
+  warn "Предыдущие файлы восстановлены. Проверь службы командой: diagnostics"
+}
+
+update_exit_handler() {
+  local exit_code="$1"
+  if (( exit_code != 0 )) && [[ "$UPDATE_TRANSACTION_ACTIVE" == "1" ]]; then
+    rollback_update_transaction || true
+  fi
+  return "$exit_code"
+}
+
 run_install() {
   require_root
   check_arch
@@ -2011,11 +2144,13 @@ run_install() {
   fi
   preflight_system
   # До завершения preflight не создаём каталоги и не удаляем legacy-ссылки.
+  begin_update_transaction
   prepare_layout
-  install -d -m 0755 $PROXY_CONFIG_DIR
-  printf '%s\n' "$EMAIL_ARG" > $PROXY_CONFIG_DIR/acme-email
-  chmod 0600 $PROXY_CONFIG_DIR/acme-email
+  install -d -m 0755 "$PROXY_CONFIG_DIR"
+  printf '%s\n' "$EMAIL_ARG" > "$PROXY_CONFIG_DIR/acme-email"
+  chmod 0600 "$PROXY_CONFIG_DIR/acme-email"
   install_deps
+  check_telegram_connectivity
   check_dns
   fetch_repo
   resolve_base_path
@@ -2055,7 +2190,11 @@ run_install() {
   fi
   validate_configs
   start_services
-  wait_ready || die "relay не стал ready"
+  wait_ready || die "relay не прошёл health-check"
+  UPDATE_TRANSACTION_ACTIVE=0
+  if [[ "$MODE" == "update" ]]; then
+    ok "Обновление прошло health-check; rollback-копия сохранена: $UPDATE_ROLLBACK_ARCHIVE"
+  fi
   print_summary
 }
 
@@ -2356,7 +2495,7 @@ diagnostics_command() {
           (._SYSTEMD_UNIT // .SYSLOG_IDENTIFIER // "service"),
           (.MESSAGE // "" | gsub("[\\r\\n\\t]+"; " ") | .[0:110])
         ] | join(" | ")
-      '
+      ' | redact_sensitive_log
     )
   else
     printf '  %s Ошибок уровня error в доступном журнале не найдено\n' "$(status_mark ok)"
@@ -2577,4 +2716,7 @@ main() {
 }
 
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  trap 'update_exit_handler "$?"' EXIT
+  main "$@"
+fi
