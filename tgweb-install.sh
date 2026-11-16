@@ -1720,11 +1720,58 @@ verify_site_permissions() {
 }
 
 validate_configs() {
+  local validation_profiles
   verify_site_permissions
-  info "Валидация config.json…"
-    "$BIN_DIR/tproxy-server" -config $PROXY_CONFIG_DIR/config.json \
-    -profiles-file $PROXY_CONFIG_DIR/profiles.json -check \
-    || die "tproxy-server -check упал"
+
+  [[ -s "$PROXY_CONFIG_DIR/config.json" ]] ||
+    die "config.json отсутствует или пуст"
+  [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] ||
+    die "profiles.json отсутствует или пуст"
+
+  # Проверяем структуру до запуска Go-бинарника. В диагностике выводим
+  # только имена полей и количество профилей — без секретов.
+  jq -e '
+    type == "object" and
+    (.profiles | type == "array" and length >= 1 and length <= 32) and
+    all(.profiles[];
+      type == "object" and
+      (.name | type == "string" and length > 0) and
+      (.secret | type == "string" and length > 0) and
+      (.backend | type == "string" and length > 0) and
+      (.carrier_mode | type == "string")
+    )
+  ' "$PROXY_CONFIG_DIR/profiles.json" >/dev/null ||
+    die "profiles.json имеет неверную JSON-структуру"
+
+  jq -e 'type == "object" and has("profiles") == false' \
+    "$PROXY_CONFIG_DIR/config.json" >/dev/null ||
+    die "config.json имеет неверную структуру или содержит поле profiles"
+
+  # Проверяем неизменяемую копию агрегата: так бинарник получает ровно те
+  # байты, структуру которых мы только что проверили, даже если исходный
+  # файл будет заменён параллельным процессом.
+  validation_profiles="$(mktemp "$PROXY_CONFIG_DIR/profiles.validate.XXXXXX")"
+  cp -- "$PROXY_CONFIG_DIR/profiles.json" "$validation_profiles"
+  chown root:root "$validation_profiles"
+  chmod 0400 "$validation_profiles"
+
+  info "Валидация config.json и profiles.json…"
+  if ! "$BIN_DIR/tproxy-server" \
+      -config "$PROXY_CONFIG_DIR/config.json" \
+      -profiles-file "$validation_profiles" \
+      -check; then
+    warn "Безопасная сводка profiles.json:"
+    jq '{
+      top_level_keys: keys,
+      profiles_type: (.profiles | type),
+      profiles_count: (.profiles | if type == "array" then length else 0 end),
+      first_profile_keys: (.profiles[0] // {} | keys)
+    }' "$validation_profiles" 2>/dev/null || true
+    rm -f -- "$validation_profiles"
+    die "tproxy-server -check не прошёл; проверь config.json и profiles.json"
+  fi
+  rm -f -- "$validation_profiles"
+
   if [[ "$WEB_SERVER" == "caddy" ]]; then
     info "Валидация Caddyfile…"
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || die "caddy validate упал"
