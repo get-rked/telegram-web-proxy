@@ -67,7 +67,7 @@ proxy.example.com → ПУБЛИЧНЫЙ_IP_СЕРВЕРА
 ### 2. Скачайте скрипт
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/get-rked/tgproxy/main/tgweb-install.sh -o tgweb-install.sh
+curl -fsSL https://raw.githubusercontent.com/get-rked/telegram-web-proxy/main/tgweb-install.sh -o tgweb-install.sh
 chmod +x tgweb-install.sh
 ```
 
