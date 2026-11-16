@@ -1282,6 +1282,7 @@ prepare_layout() {
 
 write_configs() {
   install -d -o root -g tproxy -m 0750 $PROXY_CONFIG_DIR
+  sed -i "s#/etc/tproxy-server#$PROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/ensure-token-key.sh"
   bash "$REPO_DIR/deploy/ensure-token-key.sh"
 
   cat > $PROXY_CONFIG_DIR/config.json <<EOF
@@ -1955,7 +1956,7 @@ run_uninstall() {
 
   nft delete table inet tproxy_backend 2>/dev/null || true
 
-  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproto-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
+  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
   info "Каталог сайта $SITE_DIR сохранён."
 
   userdel -r tproxy 2>/dev/null || true
@@ -2227,6 +2228,7 @@ backup_command() {
   local p
   for p in \
     opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website \
+    opt/telegram-web-proxy/bin opt/telegram-web-proxy/src \
     etc/caddy/Caddyfile etc/caddy/Caddyfile.d \
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
     etc/nginx/conf.d/tproxy-websocket-map.conf \
