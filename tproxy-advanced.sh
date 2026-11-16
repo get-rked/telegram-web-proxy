@@ -16,7 +16,7 @@ HOSTNAME_VALUE=
 die() { printf '[ОШИБКА] %s\n' "$*" >&2; exit 1; }
 need_root() { [[ $EUID -eq 0 ]] || die 'Запусти команду через sudo.'; }
 need_files() {
-  [[ -r $CONFIG_FILE && -r $PROFILES_FILE && -r $MT_ENV ]] || die 'Не найдена установленная конфигурация.';
+  [[ -r $CONFIG_FILE && -r $MT_ENV ]] || die 'Не найдена установленная конфигурация.';
   command -v jq >/dev/null 2>&1 || die 'Требуется jq.';
   ADMIN_PORT="$(jq -r '.admin_listen | split(":")[-1]' "$CONFIG_FILE")"
   HOSTNAME_VALUE="$(jq -r '.public_hostname // empty' "$CONFIG_FILE")"
@@ -85,42 +85,92 @@ PROFILE_NAME=""
 PROFILE_SECRET=""
 
 profile_manifest_sync() {
-  local tmp dir file
+  local tmp dir file expected_name
   local -a profile_files=()
+  [[ -d "$PROFILE_DIR" ]] || die "Не найден каталог профилей: $PROFILE_DIR"
+
   while IFS= read -r -d '' dir; do
-    [[ -s "$dir/profile.json" ]] || die "В каталоге профиля отсутствует profile.json: $dir"
+    file="$dir/profile.json"
+    expected_name="${dir##*/}"
+    [[ -s "$file" ]] || die "В каталоге профиля отсутствует profile.json: $dir"
+    jq -e --arg n "$expected_name" '
+      type == "object" and
+      .name == $n and
+      (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+      (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+      (.carrier_mode | type == "string" and
+        . == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")
+    ' "$file" >/dev/null || die "Некорректная структура файла профиля: $file"
   done < <(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
+
   if [[ -s "$PROFILE_DIR/default/profile.json" ]]; then
     profile_files+=("$PROFILE_DIR/default/profile.json")
   fi
   while IFS= read -r -d '' file; do
     [[ "$file" == "$PROFILE_DIR/default/profile.json" ]] || profile_files+=("$file")
   done < <(find "$PROFILE_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
+
   (( ${#profile_files[@]} > 0 )) || die "В каталогах не найдено ни одного профиля."
+  (( ${#profile_files[@]} <= 32 )) || die "В хранилище не может быть более 32 профилей."
+
   tmp="$(mktemp "$PROFILES_FILE.XXXXXX")"
-  jq -s '{profiles: .}' "${profile_files[@]}" > "$tmp" ||
-    { rm -f "$tmp"; die "Не удалось собрать общий список профилей."; }
-  jq -e '.profiles | length >= 1 and length <= 32' "$tmp" >/dev/null ||
-    { rm -f "$tmp"; die "В хранилище должно быть от 1 до 32 профилей."; }
-  chown root:tproxy "$tmp"; chmod 0400 "$tmp"; mv -f "$tmp" "$PROFILES_FILE"
+  if ! jq -s '{profiles: .}' "${profile_files[@]}" > "$tmp" ||
+     ! jq -e '
+       type == "object" and
+       (.profiles | type == "array" and length >= 1 and length <= 32) and
+       ([.profiles[].name] | length == (unique | length))
+     ' "$tmp" >/dev/null; then
+    rm -f "$tmp"
+    die "Не удалось собрать корректный общий список профилей."
+  fi
+  chown root:tproxy "$tmp"
+  chmod 0400 "$tmp"
+  mv -f "$tmp" "$PROFILES_FILE"
 }
+
+profile_manifest_valid() {
+  [[ -s "$PROFILES_FILE" ]] &&
+    jq -e '
+      type == "object" and
+      (.profiles | type == "array" and length >= 1 and length <= 32) and
+      all(.profiles[];
+        type == "object" and
+        (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and
+        (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
+        (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
+        (.carrier_mode | type == "string" and
+          (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))
+      ) and
+      ([.profiles[].name] | length == (unique | length))
+    ' "$PROFILES_FILE" >/dev/null 2>&1
+}
+
 profile_storage_init() {
   install -d -o root -g tproxy -m 0750 "$PROFILE_DIR"
   local count name file
   count="$(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+
   if (( count == 0 )); then
-    while IFS= read -r name; do
-      [[ -n "$name" ]] || continue
-      valid_name "$name" || die "Недопустимое имя профиля в старой конфигурации: $name"
-      install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$name"
-      jq --arg n "$name" '.profiles[] | select(.name == $n)' "$PROFILES_FILE" > "$PROFILE_DIR/$name/profile.json" ||
-        die "Не удалось перенести профиль $name."
-      chown root:tproxy "$PROFILE_DIR/$name/profile.json"; chmod 0640 "$PROFILE_DIR/$name/profile.json"
-    done < <(jq -r '.profiles[].name' "$PROFILES_FILE")
+    if profile_manifest_valid; then
+      # One-time migration from the legacy aggregate into per-profile files.
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        valid_name "$name" || die "Недопустимое имя профиля в старой конфигурации: $name"
+        install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$name"
+        jq --arg n "$name" '.profiles[] | select(.name == $n)' "$PROFILES_FILE" > "$PROFILE_DIR/$name/profile.json" ||
+          die "Не удалось перенести профиль $name."
+        chown root:tproxy "$PROFILE_DIR/$name/profile.json"
+        chmod 0640 "$PROFILE_DIR/$name/profile.json"
+      done < <(jq -r '.profiles[].name' "$PROFILES_FILE")
+    else
+      die "profiles.json повреждён, а индивидуальных файлов профилей нет. Автоматическое восстановление невозможно без исходных секретов."
+    fi
   fi
+
+  # Per-profile files are authoritative. Always rebuild the aggregate,
+  # repairing a missing, malformed, or outdated profiles.json in-place.
   profile_manifest_sync
 }
-
 profile_choose() {
   local count choice i name
   count="$(jq '.profiles | length' "$PROFILES_FILE")"
