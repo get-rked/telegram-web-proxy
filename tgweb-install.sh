@@ -2070,6 +2070,9 @@ begin_update_transaction() {
   local path
   for path in \
     opt/telegram-web-proxy/bin/tproxy-server \
+    opt/telegram-web-proxy/bin/mtproxy-proxy \
+    opt/telegram-web-proxy/bin/refresh-mtproxy-config \
+    opt/telegram-web-proxy/src/mtproxy \
     opt/telegram-web-proxy/config/proxy \
     opt/telegram-web-proxy/config/mtproxy \
     opt/telegram-web-proxy/systemd \
@@ -2099,8 +2102,8 @@ rollback_update_transaction() {
   [[ -n "$archive" && -s "$archive" ]] || { warn "Архив отката не найден; автоматическое восстановление невозможно."; return 1; }
   warn "Обновление не прошло проверку. Возвращаю предыдущие бинарник и конфигурации…"
   systemctl stop tproxy-server mtproxy tproxy-firewall 2>/dev/null || true
-  rm -f -- "$BIN_DIR/tproxy-server"
-  rm -rf -- "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$SYSTEMD_DIR"
+  rm -f -- "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config"
+  rm -rf -- "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$SYSTEMD_DIR"
   rm -f -- \
     /etc/systemd/system/tproxy-server.service \
     /etc/systemd/system/mtproxy.service \
