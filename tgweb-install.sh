@@ -1611,9 +1611,6 @@ run_config() {
 ==================== ТЕКУЩАЯ КОНФИГУРАЦИЯ ====================
   Домен                    : ${host:-<не задан>}
   Base path                : ${base:-<root / не задан>}
-  Relay listen             : ${relay:-<не задан>}
-  Admin listen             : ${admin:-<не задан>}
-  MTProxy backend          : ${backend:-<не задан>}
   Публичный каталог        : ${public_dir:-<не задан>}
   Каталог сайта            : ${public_dir:-$SITE_DIR_DEFAULT}
   Конфигурация relay       : $cfg
