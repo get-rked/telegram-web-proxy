@@ -40,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.2.0"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -553,7 +553,7 @@ preflight_basics() {
   echo
   printf '  %-30s %s\n' "Основной компонент" "Состояние"
   printf '  %-30s %s\n' "------------------------------" "------------------------------"
-  if [[ -x "$BIN_DIR/tproxy-server" || -x /usr/local/bin/tproxy-server ]]; then
+  if [[ -x "$BIN_DIR/tproxy-server" || -x $BIN_DIR/tproxy-server ]]; then
     printf '  %-30s %s\n' "tproxy-server" "$(status_mark ok) бинарный файл найден"
   else
     printf '  %-30s %s\n' "tproxy-server" "$(status_mark warn) потребуется установить/собрать"
@@ -640,14 +640,14 @@ preflight_system() {
   else
     printf '  %-24s %s\n' "Каталог сайта" "$(status_mark info) будет создан: $SITE_DIR"
   fi
-  if [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" && -r "$MTPROXY_DIR/.tproxy-commit" ]] && grep -Fxq "$MTPROXY_COMMIT" "$MTPROXY_DIR/.tproxy-commit" && [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+  if [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" && -r "$MTPROXY_DIR/.tproxy-commit" ]] && grep -Fxq "$MTPROXY_COMMIT" "$MTPROXY_DIR/.tproxy-commit" && [[ -s $MTPROXY_CONFIG_DIR/proxy-secret && -s $MTPROXY_CONFIG_DIR/proxy-multi.conf ]]; then
     printf '  %-24s %s\n' "MTProxy" "$(status_mark ok) нужная сборка уже установлена"
   elif [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" ]]; then
     printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) найдена другая/неполная сборка; установщик создаст резервную копию и обновит её"
   else
     printf '  %-24s %s\n' "MTProxy" "$(status_mark warn) потребуется собрать"
   fi
-  if [[ "$MODE" == "install" ]] && { [[ -s /etc/tproxy-server/config.json ]] || systemctl is-active --quiet tproxy-server 2>/dev/null || [[ -x /usr/local/bin/tproxy-server ]]; }; then
+  if [[ "$MODE" == "install" ]] && { [[ -s $PROXY_CONFIG_DIR/config.json ]] || systemctl is-active --quiet tproxy-server 2>/dev/null || [[ -x $BIN_DIR/tproxy-server ]]; }; then
     die "Обнаружена существующая установка tproxy-server. Для неё выбери «Обновить», чтобы не перезаписать текущую конфигурацию."
   fi
   local other_web="" switching_webserver=0
@@ -834,9 +834,9 @@ fetch_repo() {
 resolve_base_path() {
   if [[ "$BASE_PATH_ARG" == "none" ]]; then BASE_PATH_ARG=""; return 0; fi
   if [[ -n "$BASE_PATH_ARG" ]]; then return 0; fi
-  if [[ -f /etc/tproxy-server/config.json ]]; then
+  if [[ -f $PROXY_CONFIG_DIR/config.json ]]; then
     BASE_PATH_ARG="$(sed -n 's/.*"base_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-      /etc/tproxy-server/config.json | head -n1)"
+      $PROXY_CONFIG_DIR/config.json | head -n1)"
     if [[ -n "$BASE_PATH_ARG" ]]; then
       info "Сохраняю существующий base_path: $BASE_PATH_ARG"
     fi
@@ -988,17 +988,17 @@ remove_nginx() {
 install_mtproxy_backend() {
   if [[ -x "$MTPROXY_DIR/objs/bin/mtproto-proxy" && -r "$MTPROXY_DIR/.tproxy-commit" ]] &&
      grep -Fxq "$MTPROXY_COMMIT" "$MTPROXY_DIR/.tproxy-commit" &&
-     [[ -s /etc/mtproxy/proxy-secret && -s /etc/mtproxy/proxy-multi.conf ]]; then
+     [[ -s $MTPROXY_CONFIG_DIR/proxy-secret && -s $MTPROXY_CONFIG_DIR/proxy-multi.conf ]]; then
     ok "MTProxy нужной версии уже установлен — сборка и обновление Telegram-конфигурации пропущены"
     return 0
   fi
   info "Собираю официальный MTProxy…"
-  sed -i -e "s#/opt/MTProxy#$MTPROXY_DIR#g" -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/install-mtproxy.sh"
+  sed -i -e "s#/opt/MTProxy#$MTPROXY_DIR#g" -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" -e "s#/usr/local/bin/mtproxy#$BIN_DIR/mtproxy-proxy#g" "$REPO_DIR/deploy/install-mtproxy.sh"
   sed -i "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/refresh-mtproxy-config.sh"
   "$REPO_DIR/deploy/install-mtproxy.sh"
-  ln -sfn "$MTPROXY_DIR" /opt/MTProxy
-  ln -sfn "$MTPROXY_DIR/objs/bin/mtproto-proxy" "$BIN_DIR/mtproto-proxy"
-  ln -sfn "$BIN_DIR/mtproto-proxy" /usr/local/bin/mtproxy
+  ln -sfn "$MTPROXY_DIR" $MTPROXY_DIR
+  ln -sfn "$MTPROXY_DIR/objs/bin/mtproto-proxy" "$BIN_DIR/mtproxy-proxy"
+  ln -sfn "$BIN_DIR/mtproxy-proxy" $BIN_DIR/mtproxy-proxy
   ok "MTProxy собран"
 }
 
@@ -1043,7 +1043,7 @@ build_tproxy() {
   "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$BIN_DIR/tproxy-server" ./cmd/tproxy-server
   chown root:root "$BIN_DIR/tproxy-server"
   chmod 0755 "$BIN_DIR/tproxy-server"
-  ln -sfn "$BIN_DIR/tproxy-server" /usr/local/bin/tproxy-server
+  ln -sfn "$BIN_DIR/tproxy-server" $BIN_DIR/tproxy-server
   cd - >/dev/null
   ok "tproxy-server собран"
 }
@@ -1249,26 +1249,45 @@ ensure_tproxy_user() {
   fi
 }
 
-prepare_layout() {
-  require_root
-  local legacy
-  for legacy in /etc/tproxy-server /etc/mtproxy /opt/tproxy-server /opt/MTProxy; do
-    if [[ -e "$legacy" && ! -L "$legacy" ]]; then
-      die "Обнаружен старый каталог $legacy. Сначала выполни отдельный скрипт миграции в $BASE_DIR, затем повтори команду."
+remove_legacy_compat_links() {
+  local legacy target actual item
+  local -a links=(
+    "/etc/tproxy-server|$PROXY_CONFIG_DIR"
+    "/etc/mtproxy|$MTPROXY_CONFIG_DIR"
+    "/opt/tproxy-server|$REPO_DIR"
+    "/opt/MTProxy|$MTPROXY_DIR"
+    "/usr/local/bin/tproxy-server|$BIN_DIR/tproxy-server"
+    "/usr/local/bin/mtproxy|$BIN_DIR/mtproxy-proxy"
+    "/usr/local/sbin/refresh-mtproxy-config|$BIN_DIR/refresh-mtproxy-config"
+  )
+  for item in "${links[@]}"; do
+    legacy="${item%%|*}"
+    target="${item#*|}"
+    if [[ -L "$legacy" ]]; then
+      actual="$(readlink "$legacy" 2>/dev/null || true)"
+      if [[ "$actual" == "$target" ]]; then
+        rm -f -- "$legacy"
+        info "Удалена устаревшая совместимая ссылка: $legacy"
+      else
+        die "Ссылка $legacy указывает не на ожидаемый путь ($actual); не удаляю её автоматически."
+      fi
+    elif [[ -e "$legacy" ]]; then
+      die "Обнаружен старый объект $legacy. Перенеси его отдельным скриптом миграции и повтори запуск."
     fi
   done
-  install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
-  ln -sfn "$PROXY_CONFIG_DIR" /etc/tproxy-server
-  ln -sfn "$MTPROXY_CONFIG_DIR" /etc/mtproxy
-  ln -sfn "$REPO_DIR" /opt/tproxy-server
-  ln -sfn "$MTPROXY_DIR" /opt/MTProxy
+}
+
+prepare_layout() {
+  require_root
+  remove_legacy_compat_links
+  install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$CONFIG_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
 }
 
 write_configs() {
-  install -d -o root -g tproxy -m 0750 /etc/tproxy-server
+  install -d -o root -g tproxy -m 0750 $PROXY_CONFIG_DIR
   bash "$REPO_DIR/deploy/ensure-token-key.sh"
 
-  cat > /etc/tproxy-server/config.json <<EOF
+  cat > $PROXY_CONFIG_DIR/config.json <<EOF
 {
   "public_hostname": "$HOSTNAME_ARG",
   "base_path": "$BASE_PATH_ARG",
@@ -1280,12 +1299,12 @@ write_configs() {
 }
 EOF
 
-  cat > /etc/tproxy-server/profiles.json <<EOF
+  cat > $PROXY_CONFIG_DIR/profiles.json <<EOF
 {"profiles":[{"name":"default","secret":"$SECRET_ARG","backend":"127.0.0.1:2398"}]}
 EOF
-  chown root:tproxy /etc/tproxy-server/config.json /etc/tproxy-server/profiles.json
-  chmod 0640 /etc/tproxy-server/config.json
-  chmod 0400 /etc/tproxy-server/profiles.json
+  chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
+  chmod 0640 $PROXY_CONFIG_DIR/config.json
+  chmod 0400 $PROXY_CONFIG_DIR/profiles.json
   ok "config.json и profiles.json записаны (порты $RELAY_PORT / $ADMIN_PORT)"
 }
 
@@ -1320,15 +1339,15 @@ write_mtproxy_env() {
     warn "Если MTProxy будет молчать — задай MTPROXY_NAT_ARGS в $MTPROXY_CONFIG_DIR/mtproxy.env"
   fi
 
-  mkdir -p /etc/mtproxy
-  cat > /etc/mtproxy/mtproxy.env <<EOF
+  mkdir -p $MTPROXY_CONFIG_DIR
+  cat > $MTPROXY_CONFIG_DIR/mtproxy.env <<EOF
 MTPROXY_SECRET=$backend_secret
 MTPROXY_WORKERS=${WORKERS_ARG:-1}
 MTPROXY_MAX_CONNECTIONS=${MAXCONN_ARG:-4096}
 MTPROXY_NAT_ARGS=$mtproxy_nat_args
 EOF
-  chown root:mtproxy /etc/mtproxy/mtproxy.env
-  chmod 0640 /etc/mtproxy/mtproxy.env
+  chown root:mtproxy $MTPROXY_CONFIG_DIR/mtproxy.env
+  chmod 0640 $MTPROXY_CONFIG_DIR/mtproxy.env
   ok "mtproxy.env записан"
 }
 
@@ -1345,6 +1364,7 @@ install_units() {
       -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" \
       -e "s#/opt/MTProxy#$MTPROXY_DIR#g" \
       -e "s#/usr/local/bin/tproxy-server#$BIN_DIR/tproxy-server#g" \
+      -e "s#/usr/local/bin/mtproxy#$BIN_DIR/mtproxy-proxy#g" \
       -e "s#/usr/local/sbin/refresh-mtproxy-config#$BIN_DIR/refresh-mtproxy-config#g" \
       -e "s#/srv/tproxy-site#$SITE_DIR#g" "$src" > "$dst"
     chmod 0644 "$dst"
@@ -1353,7 +1373,7 @@ install_units() {
   install -m 0644 "$REPO_DIR/deploy/firewall.nft" "$PROXY_CONFIG_DIR/firewall.nft"
   sed -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/refresh-mtproxy-config.sh" > "$BIN_DIR/refresh-mtproxy-config"
   chmod 0755 "$BIN_DIR/refresh-mtproxy-config"
-  ln -sfn "$BIN_DIR/refresh-mtproxy-config" /usr/local/sbin/refresh-mtproxy-config
+  ln -sfn "$BIN_DIR/refresh-mtproxy-config" $BIN_DIR/refresh-mtproxy-config
   ok "Файлы служб размещены в $SYSTEMD_DIR и подключены через системные ссылки"
 }
 install_caddyfile() {
@@ -1407,8 +1427,8 @@ verify_site_permissions() {
 validate_configs() {
   verify_site_permissions
   info "Валидация config.json…"
-    "$BIN_DIR/tproxy-server" -config /etc/tproxy-server/config.json \
-    -profiles-file /etc/tproxy-server/profiles.json -check \
+    "$BIN_DIR/tproxy-server" -config $PROXY_CONFIG_DIR/config.json \
+    -profiles-file $PROXY_CONFIG_DIR/profiles.json -check \
     || die "tproxy-server -check упал"
   if [[ "$WEB_SERVER" == "caddy" ]]; then
     info "Валидация Caddyfile…"
@@ -1417,8 +1437,8 @@ validate_configs() {
     info "Валидация Nginx…"
     nginx -t || die "nginx -t упал"
   fi
-  printf "%s\n" "$WEB_SERVER" > /etc/tproxy-server/web-server
-  chmod 0640 /etc/tproxy-server/web-server
+  printf "%s\n" "$WEB_SERVER" > $PROXY_CONFIG_DIR/web-server
+  chmod 0640 $PROXY_CONFIG_DIR/web-server
   ok "Конфиги валидны"
 }
 
@@ -1561,8 +1581,8 @@ run_config() {
     secret="$(jq -r '.profiles[0].secret // empty' "$profiles")"
     backend="$(jq -r '.profiles[0].backend // empty' "$profiles")"
   fi
-  if [[ -r /etc/tproxy-server/acme-email ]]; then
-    email="$(head -n1 /etc/tproxy-server/acme-email | xargs || true)"
+  if [[ -r $PROXY_CONFIG_DIR/acme-email ]]; then
+    email="$(head -n1 $PROXY_CONFIG_DIR/acme-email | xargs || true)"
   fi
   if [[ -z "$email" && -r /etc/systemd/system/caddy.service.d/tproxy.conf ]]; then
     email="$(sed -n 's/^Environment=ACME_EMAIL=//p' /etc/systemd/system/caddy.service.d/tproxy.conf | head -n1)"
@@ -1570,8 +1590,8 @@ run_config() {
   if [[ -z "$email" && -d /etc/letsencrypt/renewal ]]; then
     email="$(grep -RhoE '^[[:space:]]*email[[:space:]]*=[[:space:]]*[^[:space:]]+' /etc/letsencrypt/renewal 2>/dev/null | head -n1 | cut -d= -f2- | xargs || true)"
   fi
-  if [[ -r /etc/tproxy-server/web-server ]]; then
-    web_server="$(cat /etc/tproxy-server/web-server)"
+  if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then
+    web_server="$(cat $PROXY_CONFIG_DIR/web-server)"
   elif systemctl is-enabled --quiet nginx 2>/dev/null; then
     web_server=nginx
   else
@@ -1672,7 +1692,7 @@ load_existing_config() {
   v="$(jq -r '.listen // "" | split(":")[-1]' "$cfg")"; [[ -n "$RELAY_PORT" ]] || RELAY_PORT="$v"
   v="$(jq -r '.admin_listen // "" | split(":")[-1]' "$cfg")"; [[ -n "$ADMIN_PORT" ]] || ADMIN_PORT="$v"
   v="$(jq -r '.public_dir // empty' "$cfg")"; [[ -n "$v" ]] && SITE_DIR="$v"
-  if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r /etc/tproxy-server/web-server ]]; then WEB_SERVER="$(< /etc/tproxy-server/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
+  if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
   v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
   [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
   if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
@@ -1680,8 +1700,8 @@ load_existing_config() {
   fi
   v="$(sed -n 's/^MTPROXY_WORKERS=//p' "$envf" | head -n1)"; [[ -n "$WORKERS_ARG" ]] || WORKERS_ARG="${v:-1}"
   v="$(sed -n 's/^MTPROXY_MAX_CONNECTIONS=//p' "$envf" | head -n1)"; [[ -n "$MAXCONN_ARG" ]] || MAXCONN_ARG="${v:-4096}"
-  if [[ -r /etc/tproxy-server/acme-email ]]; then
-    v="$(head -n1 /etc/tproxy-server/acme-email | xargs || true)"
+  if [[ -r $PROXY_CONFIG_DIR/acme-email ]]; then
+    v="$(head -n1 $PROXY_CONFIG_DIR/acme-email | xargs || true)"
     [[ -n "$EMAIL_ARG" ]] || EMAIL_ARG="$v"
   fi
   if [[ -z "$EMAIL_ARG" && -r "$dropin" ]]; then
@@ -1700,9 +1720,9 @@ load_existing_config() {
   fi
   validate_hostname "$HOSTNAME_ARG" >/dev/null || die "Некорректный текущий hostname"
   validate_email "$EMAIL_ARG" >/dev/null || die "Некорректный текущий email"
-  install -d -m 0755 /etc/tproxy-server
-  printf '%s\n' "$EMAIL_ARG" > /etc/tproxy-server/acme-email
-  chmod 0600 /etc/tproxy-server/acme-email
+  install -d -m 0755 $PROXY_CONFIG_DIR
+  printf '%s\n' "$EMAIL_ARG" > $PROXY_CONFIG_DIR/acme-email
+  chmod 0600 $PROXY_CONFIG_DIR/acme-email
   validate_port "$RELAY_PORT" >/dev/null || die "Некорректный текущий relay-порт"
   validate_port "$ADMIN_PORT" >/dev/null || die "Некорректный текущий admin-порт"
   validate_secret "$SECRET_ARG" >/dev/null || die "Некорректный текущий секрет"
@@ -1848,16 +1868,16 @@ run_install() {
     interactive_fill
   fi
   preflight_system
-  install -d -m 0755 /etc/tproxy-server
-  printf '%s\n' "$EMAIL_ARG" > /etc/tproxy-server/acme-email
-  chmod 0600 /etc/tproxy-server/acme-email
+  install -d -m 0755 $PROXY_CONFIG_DIR
+  printf '%s\n' "$EMAIL_ARG" > $PROXY_CONFIG_DIR/acme-email
+  chmod 0600 $PROXY_CONFIG_DIR/acme-email
   install_deps
   check_dns
   fetch_repo
   resolve_base_path
   ensure_tproxy_user
   local previous_web_server=""
-  previous_web_server="$(cat /etc/tproxy-server/web-server 2>/dev/null || true)"
+  previous_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
   # Останавливаем конкурирующий веб-сервер ДО проверки/перезапуска выбранного:
   # иначе он продолжит занимать 80/443 (особенно при установке без marker-файла).
   if [[ "$WEB_SERVER" == "caddy" ]]; then
@@ -1901,8 +1921,9 @@ run_install() {
 
 run_uninstall() {
   require_root
+  remove_legacy_compat_links
   local installed_web_server
-  installed_web_server="$(cat /etc/tproxy-server/web-server 2>/dev/null || true)"
+  installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
   # Совместимость со старыми установками без marker-файла.
   if [[ "$installed_web_server" != "caddy" && "$installed_web_server" != "nginx" ]]; then
     if systemctl is-active --quiet caddy.service || systemctl is-enabled --quiet caddy.service 2>/dev/null || \
@@ -1934,13 +1955,12 @@ run_uninstall() {
   rm -f /etc/systemd/system/tproxy-server.service /etc/systemd/system/mtproxy.service /etc/systemd/system/tproxy-firewall.service /etc/systemd/system/refresh-mtproxy-config.service /etc/systemd/system/refresh-mtproxy-config.timer
   rm -f "$SYSTEMD_DIR"/tproxy-server.service "$SYSTEMD_DIR"/mtproxy.service "$SYSTEMD_DIR"/tproxy-firewall.service "$SYSTEMD_DIR"/refresh-mtproxy-config.service "$SYSTEMD_DIR"/refresh-mtproxy-config.timer
   rm -rf /etc/systemd/system/tproxy-server.service.d
-  rm -f /etc/tproxy-server/web-server
   systemctl daemon-reload
 
   nft delete table inet tproxy_backend 2>/dev/null || true
 
   rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproto-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
-  rm -f /etc/tproxy-server /etc/mtproxy /opt/MTProxy /opt/tproxy-server /usr/local/bin/tproxy-server /usr/local/bin/mtproxy /usr/local/sbin/refresh-mtproxy-config
+  rm -f $PROXY_CONFIG_DIR $MTPROXY_CONFIG_DIR $MTPROXY_DIR $REPO_DIR $BIN_DIR/tproxy-server $BIN_DIR/mtproxy-proxy $BIN_DIR/refresh-mtproxy-config
   info "Каталог сайта $SITE_DIR сохранён."
 
   userdel -r tproxy 2>/dev/null || true
@@ -1956,8 +1976,8 @@ run_uninstall() {
 remove_decoy_site() {
   require_root
   local configured_site=""
-  if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
-    configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
+  if command -v jq >/dev/null 2>&1 && [[ -r $PROXY_CONFIG_DIR/config.json ]]; then
+    configured_site="$(jq -r '.public_dir // empty' $PROXY_CONFIG_DIR/config.json 2>/dev/null || true)"
   fi
   if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
 
@@ -1976,7 +1996,7 @@ remove_decoy_site() {
 remove_web_server_interactive() {
   require_root
   local installed_web_server
-  installed_web_server="$(cat /etc/tproxy-server/web-server 2>/dev/null || true)"
+  installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
   if [[ "$installed_web_server" != caddy && "$installed_web_server" != nginx ]]; then
     if systemctl is-active --quiet nginx.service || command -v nginx >/dev/null 2>&1; then installed_web_server=nginx
     elif systemctl is-active --quiet caddy.service || [[ -x /usr/local/bin/caddy || -x /usr/bin/caddy ]]; then installed_web_server=caddy
@@ -1993,8 +2013,8 @@ remove_web_server_interactive() {
 
 run_purge() {
   local configured_site=""
-  if command -v jq >/dev/null 2>&1 && [[ -r /etc/tproxy-server/config.json ]]; then
-    configured_site="$(jq -r '.public_dir // empty' /etc/tproxy-server/config.json 2>/dev/null || true)"
+  if command -v jq >/dev/null 2>&1 && [[ -r $PROXY_CONFIG_DIR/config.json ]]; then
+    configured_site="$(jq -r '.public_dir // empty' $PROXY_CONFIG_DIR/config.json 2>/dev/null || true)"
   fi
   if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
   KEEP_WEB_SERVER=0
@@ -2212,7 +2232,6 @@ backup_command() {
   local p
   for p in \
     opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website \
-    etc/tproxy-server etc/mtproxy \
     etc/caddy/Caddyfile etc/caddy/Caddyfile.d \
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
     etc/nginx/conf.d/tproxy-websocket-map.conf \
@@ -2252,7 +2271,7 @@ restore_command() {
     [[ "$normalized" != /* ]] || die "Небезопасный абсолютный путь в архиве: $entry"
     [[ ! "/$normalized/" =~ /\.\./ ]] || die "Небезопасный путь в архиве: $entry"
     case "$normalized" in
-      opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|etc/tproxy-server|etc/tproxy-server/*|etc/mtproxy|etc/mtproxy/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
+      opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
       *) die "В архиве обнаружен путь вне разрешённого списка: $entry" ;;
     esac
   done < <(tar -tzf "$archive")
