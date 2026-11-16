@@ -2066,7 +2066,7 @@ run_config() {
     "  Домен                    : $host" \
     "  Base path                : $base" \
     "  Публичный каталог        : $public_dir" \
-    "  Публичное приложение     : $public_upstream" \
+    "  Public upstream          : $public_upstream" \
     "  Конфигурация relay       : $cfg" \
     "  Каталог профиля          : $PROXY_CONFIG_DIR/profiles/$profile_name" \
     "  Файл профиля             : $PROXY_CONFIG_DIR/profiles/$profile_name/profile.json" \
@@ -2954,7 +2954,7 @@ show_tools_menu() {
     ui_option 1 "⌕" "Диагностика и поиск неисправностей"
     ui_option 2 "▤" "Создать резервную копию"
     ui_option 3 "↻" "Восстановить резервную копию"
-    ui_option 4 "◉" "Carrier mode, профили, public_upstream"
+    ui_option 4 "◉" "Carrier mode, профили, public upstream"
     ui_option 5 "⟳" "Перезапустить все службы прокси"
     ui_option 6 "↩" "Назад"
     echo
