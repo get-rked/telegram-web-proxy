@@ -2688,6 +2688,29 @@ show_deletion_menu() {
     esac
   done
 }
+ensure_advanced_manager() {
+  require_root
+  install -d -m 0755 "$BIN_DIR"
+  local helper="$BIN_DIR/tproxy-advanced" tmp
+  if [[ -x "$helper" ]] && bash -n "$helper" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  tmp="$(mktemp "$BIN_DIR/.tproxy-advanced.XXXXXX")" || die "Не удалось создать временный файл модуля"
+  if ! curl --fail --silent --show-error --location --proto "=https" --proto-redir "=https" --tlsv1.2 \
+      "$ADVANCED_SCRIPT_URL" -o "$tmp"; then
+    rm -f "$tmp"
+    die "Не удалось загрузить модуль панели мониторинга и дополнительных функций"
+  fi
+  if ! bash -n "$tmp"; then
+    rm -f "$tmp"
+    die "Загруженный модуль дополнительных функций содержит синтаксическую ошибку"
+  fi
+  chmod 0750 "$tmp"
+  mv -f "$tmp" "$helper"
+  [[ -x "$helper" ]] || die "Не удалось установить модуль дополнительных функций"
+}
+
 show_tools_menu() {
   local choice archive
   while true; do
@@ -2695,7 +2718,7 @@ show_tools_menu() {
     ui_option 1 "⌕" "Диагностика и поиск неисправностей"
     ui_option 2 "▤" "Создать резервную копию"
     ui_option 3 "↻" "Восстановить резервную копию"
-    ui_option 4 "◉" "Живая панель, carrier mode, профили, public_upstream"
+    ui_option 4 "◉" "Панель мониторинга, carrier mode, профили, public_upstream"
     ui_option 5 "↩" "Назад"
     echo
     read -r -p "Выбор [1-5]: " choice
@@ -2703,7 +2726,7 @@ show_tools_menu() {
       1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
       2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
       3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
-      4) "$BIN_DIR/tproxy-advanced" menu ;;
+      4) ensure_advanced_manager; "$BIN_DIR/tproxy-advanced" menu ;;
       5) return 0 ;;
       *) warn "Выбери пункт от 1 до 5." ;;
     esac
