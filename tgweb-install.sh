@@ -646,9 +646,7 @@ if kind == 'nginx':
         for v in re.findall(r'(?m)^\s*server_name\s+([^;]+);',b): names += [x for x in v.split() if x not in ('_', '')]
         roots=re.findall(r'(?m)^\s*root\s+([^;]+);',b)
         if not names:
-            if roots or re.search(r'(?m)^\s*(proxy_pass|fastcgi_pass|uwsgi_pass|grpc_pass)\s+',b):
-                fail('nginx default/catch-all site is configured on ports 80/443')
-            continue
+            fail('nginx default/catch-all server is configured on ports 80/443')
         if any(x.startswith('$') for x in names) or any(x != host for x in names): fail('another domain shares ports 80/443')
         if re.search(r'(?m)^\s*(alias|proxy_pass|fastcgi_pass|uwsgi_pass|grpc_pass)\s+',b): fail('matching nginx site is not a simple static-root site')
         if roots:
