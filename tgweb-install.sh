@@ -136,7 +136,8 @@ status_word() {
 # Redact credential-like values and request paths before displaying journal data.
 redact_sensitive_log() {
   sed -E \
-    -e 's/((secret|token|authorization|password|bridge[_-]?token|api[_-]?key)[=: ]+)[^[:space:]&",;]+/\1[REDACTED]/Ig' \
+    -e 's/(authorization[=: ]+)(Bearer[[:space:]]+)?[^[:space:]&",;]+/\1[REDACTED]/Ig' \
+    -e 's/((secret|token|password|bridge[_-]?token|api[_-]?key)[=: ]+)[^[:space:]&",;]+/\1[REDACTED]/Ig' \
     -e 's/([?&](secret|token|hash)=)[^&[:space:]"]+/\1[REDACTED]/Ig' \
     -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g'
 }
