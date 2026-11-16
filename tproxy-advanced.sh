@@ -96,9 +96,9 @@ profile_manifest_sync() {
   while IFS= read -r -d '' file; do
     [[ "$file" == "$PROFILE_DIR/default/profile.json" ]] || profile_files+=("$file")
   done < <(find "$PROFILE_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
-  (( \${#profile_files[@]} > 0 )) || die "В каталогах не найдено ни одного профиля."
+  (( ${#profile_files[@]} > 0 )) || die "В каталогах не найдено ни одного профиля."
   tmp="$(mktemp "$PROFILES_FILE.XXXXXX")"
-  jq -s '{profiles: .}' "\${profile_files[@]}" > "$tmp" ||
+  jq -s '{profiles: .}' "${profile_files[@]}" > "$tmp" ||
     { rm -f "$tmp"; die "Не удалось собрать общий список профилей."; }
   jq -e '.profiles | length >= 1 and length <= 32' "$tmp" >/dev/null ||
     { rm -f "$tmp"; die "В хранилище должно быть от 1 до 32 профилей."; }
