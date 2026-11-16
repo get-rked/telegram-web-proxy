@@ -1960,11 +1960,11 @@ tproxy-server развёрнут
  Relay-порт:      127.0.0.1:$RELAY_PORT
  Admin-порт:      127.0.0.1:$ADMIN_PORT
 
- Internal secret: $SECRET_ARG
- Proxy server:    $client_address
- Proxy secret:    $proxy_secret
- Proxy link:      $proxy_link
- QR image:        $QR_DIR/proxy-qr.png
+ Секрет клиента:          $SECRET_ARG
+ Адрес прокси-сервера:    $client_address
+ Секрет прокси:            $proxy_secret
+ Ссылка для подключения:  $proxy_link
+ QR-код:                   $QR_DIR/proxy-qr.png
 
  Проверка:
    curl -fsS http://127.0.0.1:$ADMIN_PORT/healthz
