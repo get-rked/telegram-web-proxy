@@ -814,10 +814,12 @@ preflight_system() {
          [[ -L "$NGINX_ENABLED" ]] &&
          grep -Fq "server_name $HOSTNAME_ARG;" "$NGINX_SITE" &&
          grep -Fq 'proxy_pass http://127.0.0.1:' "$NGINX_SITE"; then
+        nginx_config_compatible || die "Текущая конфигурация Nginx для этого домена изменилась. Не перезаписываю занятый сайт автоматически; сначала проверь vhost вручную."
         managed_tproxy=1
       elif [[ "$WEB_SERVER" == "caddy" ]] &&
            grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile &&
            grep -Fq 'reverse_proxy 127.0.0.1:' /etc/caddy/Caddyfile; then
+        caddy_config_compatible || die "Текущая конфигурация Caddy для этого домена изменилась. Не перезаписываю занятый сайт автоматически; сначала проверь Caddyfile вручную."
         managed_tproxy=1
       fi
     fi
