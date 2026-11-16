@@ -30,21 +30,21 @@ valid_mode() { [[ $1 == https || $1 == https-lanes || $1 == websocket || $1 == w
 ui_header() {
   local title="$1"
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '\\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n'
-    printf '  \\033[1;34m◆\\033[0m %s\\n' "$title"
-    printf '\\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n'
+    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+    printf '  \033[1;34m◆\033[0m %s\n' "$title"
+    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
   else
-    printf '%s\\n' '============================================================'
-    printf '  %s\\n' "$title"
-    printf '%s\\n' '============================================================'
+    printf '%s\n' '============================================================'
+    printf '  %s\n' "$title"
+    printf '%s\n' '============================================================'
   fi
 }
 ui_option() {
   local number="$1" icon="$2" label="$3"
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '  \\033[1;34m%s)\\033[0m %s %s\\n' "$number" "$icon" "$label"
+    printf '  \033[1;34m%s)\033[0m %s %s\n' "$number" "$icon" "$label"
   else
-    printf '  %s) %s %s\\n' "$number" "$icon" "$label"
+    printf '  %s) %s %s\n' "$number" "$icon" "$label"
   fi
 }
 
@@ -183,7 +183,7 @@ profile_menu() {
 }
 
 upstream_menu() {
-  local current answer tmp backup port http_code selected=0
+  local current answer tmp backup port http_code selected=0 i
   local -a ports=() codes=()
   current="$(jq -r '.public_upstream // empty' "$CONFIG_FILE")"
 
@@ -191,7 +191,7 @@ upstream_menu() {
     clear
     ui_header "Публичный сайт · public_upstream"
     if [[ -n $current ]]; then
-      printf '  Текущий источник: %s\\n\\n' "$current"
+      printf '  Текущий источник: %s\n\n' "$current"
       ui_option 1 "↩" "Отключить upstream и выбрать каталог сайта"
       ui_option 2 "↻" "Обновить список локальных приложений"
       ui_option 3 "←" "Назад"
@@ -200,21 +200,21 @@ upstream_menu() {
       case "$answer" in
         1)
           read -r -e -p "Каталог сайта [абсолютный путь]: " answer
-          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\\n'; read -r -p 'Enter — продолжить...' _; return 0; }
+          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\n'; read -r -p 'Enter — продолжить...' _; return 0; }
           tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
           jq --arg d "$answer" 'del(.public_upstream) | .public_dir = $d' "$CONFIG_FILE" > "$tmp"
           break
           ;;
         2) current="";;
         3|"") return 0 ;;
-        *) printf '  Выбери пункт от 1 до 3.\\n'; sleep 1 ;;
+        *) printf '  Выбери пункт от 1 до 3.\n'; sleep 1 ;;
       esac
       [[ -n $current ]] && continue
     fi
 
     clear
     ui_header "Выбор локального HTTP-приложения"
-    printf '  Поиск работающих HTTP-сервисов на localhost...\\n\\n'
+    printf '  Поиск работающих HTTP-сервисов на localhost...\n\n'
     ports=()
     codes=()
     while IFS= read -r port; do
@@ -228,8 +228,8 @@ upstream_menu() {
     done < <(ss -H -lnt 2>/dev/null | awk '{print $4}' | sed 's/.*://' | grep -E '^[0-9]+$' | sort -nu)
 
     if (( ${#ports[@]} == 0 )); then
-      printf '  [!] Не найдено доступных HTTP-приложений на 127.0.0.1.\\n'
-      printf '  Запусти приложение и повтори поиск.\\n\\n'
+      printf '  [!] Не найдено доступных HTTP-приложений на 127.0.0.1.\n'
+      printf '  Запусти приложение и повтори поиск.\n\n'
       ui_option 1 "↻" "Повторить поиск"
       ui_option 2 "←" "Назад"
       echo
@@ -237,11 +237,11 @@ upstream_menu() {
       case "$answer" in 1) continue ;; *) return 0 ;; esac
     fi
 
-    printf '  Найденные приложения:\\n'
+    printf '  Найденные приложения:\n'
     for ((i=0; i<${#ports[@]}; i++)); do
-      printf '  \\033[1;34m%s)\\033[0m http://127.0.0.1:%s  [HTTP %s]\\n' "$((i+1))" "${ports[$i]}" "${codes[$i]}"
+      ui_option "$((i+1))" "●" "http://127.0.0.1:${ports[$i]}  [HTTP ${codes[$i]}]"
     done
-    printf '\\n'
+    printf '\n'
     ui_option "$((${#ports[@]}+1))" "↻" "Обновить список"
     ui_option "$((${#ports[@]}+2))" "←" "Назад"
     echo
@@ -255,7 +255,7 @@ upstream_menu() {
       jq --arg u "http://127.0.0.1:$port" 'del(.public_dir) | .public_upstream = $u' "$CONFIG_FILE" > "$tmp"
       break
     fi
-    printf '  [!] Неверный выбор.\\n'
+    printf '  [!] Неверный выбор.\n'
     sleep 1
   done
 
@@ -269,7 +269,7 @@ upstream_menu() {
     die 'Проверка конфигурации не пройдена; исходная конфигурация восстановлена.'
   fi
   systemctl restart tproxy-server
-  printf '\\n[OK] Публичный сайт настроен.\\n'
+  printf '\n[OK] Публичный сайт настроен.\n'
   read -r -p 'Нажми Enter, чтобы вернуться в меню...' _
 }
 main() {
