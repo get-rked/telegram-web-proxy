@@ -1798,28 +1798,38 @@ validate_configs() {
   [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] ||
     die "profiles.json отсутствует или пуст"
 
-  # Проверяем структуру до запуска Go-бинарника. В диагностике выводим
-  # только имена полей и количество профилей — без секретов.
-  jq -e '
-    type == "object" and
-    (.profiles | type == "array" and length >= 1 and length <= 32) and
-    all(.profiles[];
-      type == "object" and
-      (.name | type == "string" and length > 0) and
-      (.secret | type == "string" and length > 0) and
-      (.backend | type == "string" and length > 0) and
-      (.carrier_mode | type == "string")
-    )
-  ' "$PROXY_CONFIG_DIR/profiles.json" >/dev/null ||
-    die "profiles.json имеет неверную JSON-структуру"
-
   jq -e 'type == "object" and has("profiles") == false' \
     "$PROXY_CONFIG_DIR/config.json" >/dev/null ||
     die "config.json имеет неверную структуру или содержит поле profiles"
 
-  # Проверяем неизменяемую копию агрегата: так бинарник получает ровно те
-  # байты, структуру которых мы только что проверили, даже если исходный
-  # файл будет заменён параллельным процессом.
+  # Use the same strict schema validator as profile storage/rebuild.
+  # On failure, print only structural metadata; never print secrets.
+  if ! profile_manifest_valid "$PROXY_CONFIG_DIR/profiles.json"; then
+    warn "Диагностика структуры profiles.json (значения секретов не выводятся):"
+    jq '{
+      root_type: type,
+      root_keys: (if type == "object" then keys else [] end),
+      profiles_type: (.profiles | type),
+      profiles_count: (if (.profiles | type) == "array" then (.profiles | length) else 0 end),
+      profiles: (if (.profiles | type) == "array" then
+        [.profiles | to_entries[] | {
+          index: .key,
+          item_type: (.value | type),
+          name_type: (.value.name | type),
+          name_nonempty: ((.value.name | type) == "string" and (.value.name | length) > 0),
+          secret_type: (.value.secret | type),
+          secret_nonempty: ((.value.secret | type) == "string" and (.value.secret | length) > 0),
+          backend_type: (.value.backend | type),
+          backend_nonempty: ((.value.backend | type) == "string" and (.value.backend | length) > 0),
+          carrier_mode_type: (.value.carrier_mode | type),
+          carrier_mode_value: (if (.value.carrier_mode | type) == "string" then .value.carrier_mode else null end)
+        }] else [] end)
+    }' "$PROXY_CONFIG_DIR/profiles.json" 2>/dev/null ||
+      warn "Файл profiles.json не удалось разобрать как JSON"
+    die "profiles.json не прошёл строгую проверку схемы; смотри безопасную диагностику выше"
+  fi
+
+  # Check the exact file passed to the binary, avoiding a race with replacement.
   validation_profiles="$(mktemp "$PROXY_CONFIG_DIR/profiles.validate.XXXXXX")"
   cp -- "$PROXY_CONFIG_DIR/profiles.json" "$validation_profiles"
   chown root:root "$validation_profiles"
@@ -1832,10 +1842,10 @@ validate_configs() {
       -check; then
     warn "Безопасная сводка profiles.json:"
     jq '{
-      top_level_keys: keys,
+      top_level_keys: (if type == "object" then keys else [] end),
       profiles_type: (.profiles | type),
       profiles_count: (.profiles | if type == "array" then length else 0 end),
-      first_profile_keys: (.profiles[0] // {} | keys)
+      first_profile_keys: (.profiles[0] // {} | if type == "object" then keys else [] end)
     }' "$validation_profiles" 2>/dev/null || true
     rm -f -- "$validation_profiles"
     die "tproxy-server -check не прошёл; проверь config.json и profiles.json"
@@ -1849,8 +1859,8 @@ validate_configs() {
     info "Валидация Nginx…"
     nginx -t || die "nginx -t упал"
   fi
-  printf "%s\n" "$WEB_SERVER" > $PROXY_CONFIG_DIR/web-server
-  chmod 0640 $PROXY_CONFIG_DIR/web-server
+  printf "%s\\n" "$WEB_SERVER" > "$PROXY_CONFIG_DIR/web-server"
+  chmod 0640 "$PROXY_CONFIG_DIR/web-server"
   ok "Конфиги валидны"
 }
 
