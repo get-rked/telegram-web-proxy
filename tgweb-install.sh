@@ -2068,7 +2068,7 @@ EOF
 begin_update_transaction() {
   [[ "$MODE" == "update" ]] || return 0
   install -d -m 0700 "$BACKUP_DIR"
-  UPDATE_ROLLBACK_ARCHIVE="$BACKUP_DIR/update-rollback-$(date +%Y%m%d-%H%M%S)-$.tar.gz"
+  UPDATE_ROLLBACK_ARCHIVE="$BACKUP_DIR/update-rollback-$(date +%Y%m%d-%H%M%S)-${BASHPID}.tar.gz"
   local -a snapshot_items=()
   local path
   for path in \
