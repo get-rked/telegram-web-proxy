@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   shell:
+    name: Bash, ShellCheck and installer tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,3 +35,31 @@ jobs:
 
       - name: Installer unit tests
         run: bash tests/test_installer.sh
+
+  upstream-go:
+    name: Pinned tproxy-server tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout installer
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+
+      - name: Fetch pinned upstream source
+        env:
+          UPSTREAM_COMMIT: c8adb8b7c6b7fc46c12ae3acb68be9070c26a8e8
+        run: |
+          git clone --filter=blob:none https://github.com/telegramdesktop/tproxy-server.git upstream
+          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
+          test "$(git -C upstream rev-parse HEAD)" = "$UPSTREAM_COMMIT"
+
+      - name: Go tests
+        working-directory: upstream
+        run: go test ./...
+
+      - name: Build tproxy-server
+        working-directory: upstream
+        run: go build -trimpath -ldflags="-s -w" -o tproxy-server ./cmd/tproxy-server
