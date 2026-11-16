@@ -43,7 +43,7 @@ readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/26ce94d26e46d06bf8c98b663695f8a075f832d6/tproxy-advanced.sh"
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/85fc1d22af3aad5d9334c51ed9d1e0adfbafec65/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -1548,6 +1548,36 @@ EOF
 {"profiles":[{"name":"default","secret":"$SECRET_ARG","backend":"127.0.0.1:2398","carrier_mode":"$CARRIER_MODE_ARG"}]}
 EOF
   fi
+  # Individual profile files are the source of truth; profiles.json remains
+  # the aggregate consumed by the pinned tproxy-server runtime.
+  local profile_dir="$PROXY_CONFIG_DIR/profiles" profile_count profile_name profile_json
+  install -d -o root -g tproxy -m 0750 "$profile_dir"
+  profile_count="$(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+  if (( profile_count == 0 )); then
+    while IFS= read -r profile_json; do
+      profile_name="$(jq -r '.name' <<< "$profile_json")"
+      [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя существующего профиля: $profile_name"
+      install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
+      printf '%s\n' "$profile_json" | jq . > "$profile_dir/$profile_name/profile.json"
+      chown root:tproxy "$profile_dir/$profile_name/profile.json"
+      chmod 0640 "$profile_dir/$profile_name/profile.json"
+    done < <(jq -c '.profiles[]' "$PROXY_CONFIG_DIR/profiles.json")
+  fi
+  profile_name="$(jq -r '.profiles[0].name' "$PROXY_CONFIG_DIR/profiles.json")"
+  [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя профиля: $profile_name"
+  install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
+  jq --arg n "$profile_name" --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" \
+    '(.profiles[] | select(.name == $n)).secret = $secret | (.profiles[] | select(.name == $n)).carrier_mode = $mode' \
+    "$PROXY_CONFIG_DIR/profiles.json" > "$profile_dir/$profile_name/profile.json"
+  chown root:tproxy "$profile_dir/$profile_name/profile.json"
+  chmod 0640 "$profile_dir/$profile_name/profile.json"
+  local profiles_tmp
+  profiles_tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
+  find "$profile_dir" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 |
+    sort -z | xargs -0 -r jq -s '{profiles: .}' > "$profiles_tmp" ||
+    die "Не удалось собрать общий profiles.json из файлов профилей"
+  chown root:tproxy "$profiles_tmp"; chmod 0400 "$profiles_tmp"
+  mv -f "$profiles_tmp" "$PROXY_CONFIG_DIR/profiles.json"
   chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
   chmod 0640 $PROXY_CONFIG_DIR/config.json
   chmod 0400 $PROXY_CONFIG_DIR/profiles.json
