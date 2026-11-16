@@ -43,7 +43,7 @@ readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/feature/stage2-dashboard-stage3-profiles/tproxy-advanced.sh"
+readonly ADVANCED_SCRIPT_URL="https://raw.githubusercontent.com/get-rked/telegram-web-proxy/462618309fbe768eee29672fb2cec40fca6d9d7c/tproxy-advanced.sh"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -2692,10 +2692,8 @@ ensure_advanced_manager() {
   require_root
   install -d -m 0755 "$BIN_DIR"
   local helper="$BIN_DIR/tproxy-advanced" tmp
-  if [[ -x "$helper" ]] && bash -n "$helper" >/dev/null 2>&1; then
-    return 0
-  fi
-
+  # Always fetch the helper pinned to this installer revision. A valid but
+  # older local copy must not prevent users from receiving menu fixes.
   tmp="$(mktemp "$BIN_DIR/.tproxy-advanced.XXXXXX")" || die "Не удалось создать временный файл модуля"
   if ! curl --fail --silent --show-error --location --proto "=https" --proto-redir "=https" --tlsv1.2 \
       "$ADVANCED_SCRIPT_URL" -o "$tmp"; then
