@@ -1241,7 +1241,7 @@ build_tproxy() {
     warn "  go test пропущен (--skip-tests)"
   fi
   install -d -m 0755 "$BIN_DIR"
-  local candidate="$BIN_DIR/tproxy-server.new.$"
+  local candidate="$BIN_DIR/tproxy-server.new.${BASHPID}"
   rm -f -- "$candidate"
   if ! "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$candidate" ./cmd/tproxy-server; then
     rm -f -- "$candidate"
