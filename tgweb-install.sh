@@ -1710,7 +1710,7 @@ EOF
 run_config() {
   local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
-  local backend="" secret="" workers="" maxconn="" nat="" proxy_secret="" server="" link="" output=""
+  local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --output) [[ $# -ge 2 ]] || die "--output требует путь"; output="$2"; shift 2 ;;
@@ -1747,7 +1747,7 @@ run_config() {
   if [[ -r "$envf" ]]; then
     workers="$(sed -n 's/^MTPROXY_WORKERS=//p' "$envf" | head -n1)"
     maxconn="$(sed -n 's/^MTPROXY_MAX_CONNECTIONS=//p' "$envf" | head -n1)"
-    nat="$(sed -n 's/^MTPROXY_NAT_ARGS=//p' "$envf" | head -n1)"
+
   fi
   if [[ -n "$host" && -n "$secret" ]]; then
     BASE_PATH_ARG="$base"; SECRET_ARG="$secret"
