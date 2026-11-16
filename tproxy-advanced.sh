@@ -82,17 +82,23 @@ patch_mtproxy_unit() {
 }
 
 profile_menu() {
-  local choice name secret mode backend count
+  local choice name secret mode backend count index profile_name profile_mode profile_backend
   while :; do
     clear
-    echo 'Профили и режим подключения'
-    jq -r '.profiles | to_entries[] | "  \(.key + 1). \(.value.name) | \(.value.carrier_mode // "https") | backend \(.value.backend)"' "$PROFILES_FILE"
+    ui_header "Профили и carrier mode"
+    printf '  Текущие профили:\n'
+    index=0
+    while IFS=$'\t' read -r profile_name profile_mode profile_backend; do
+      index=$((index + 1))
+      printf '  %2d. %-20s | %-16s | backend %s\n' "$index" "$profile_name" "$profile_mode" "$profile_backend"
+    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
     echo
-    echo '1) Добавить профиль'
-    echo '2) Изменить режим подключения профиля'
-    echo '3) Удалить дополнительный профиль'
-    echo '4) Назад'
-    read -r -p 'Выбор: ' choice
+    ui_option 1 "＋" "Добавить профиль"
+    ui_option 2 "↻" "Изменить carrier mode профиля"
+    ui_option 3 "✖" "Удалить дополнительный профиль"
+    ui_option 4 "←" "Назад"
+    echo
+    read -r -p 'Выбор [1-4]: ' choice
     case "$choice" in
       1)
         count="$(jq '.profiles | length' "$PROFILES_FILE")"
@@ -105,7 +111,7 @@ profile_menu() {
         read -r -s -p 'Новый секрет (32 hex, опционально dd): ' secret; echo
         valid_secret "$secret" || { echo 'Недопустимый секрет'; read -r -p 'Enter...' _; continue; }
         if jq -e --arg s "$secret" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then echo 'Секрет уже используется (включая dd-префикс)'; read -r -p 'Enter...' _; continue; fi
-        echo 'Режим подключения: 1) HTTPS  2) HTTPS с несколькими каналами  3) WebSocket  4) WebSocket с несколькими каналами'
+        echo 'Carrier mode: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
         read -r -p 'Выбор [1-4]: ' choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo 'Неверный режим'; continue ;; esac
         local tmp; tmp="$(mktemp "${PROFILES_FILE}.XXXXXX")"
@@ -118,14 +124,14 @@ profile_menu() {
       2)
         read -r -p 'Имя профиля: ' name
         jq -e --arg n "$name" '.profiles[] | select(.name == $n)' "$PROFILES_FILE" >/dev/null || { echo 'Профиль не найден'; read -r -p 'Enter...' _; continue; }
-        echo 'Режим подключения: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
+        echo 'Carrier mode: 1) https  2) https-lanes  3) websocket  4) websocket-lanes'
         read -r -p 'Выбор [1-4]: ' choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo 'Неверный режим'; continue ;; esac
         local tmp; tmp="$(mktemp "${PROFILES_FILE}.XXXXXX")"
         jq --arg n "$name" --arg m "$mode" '(.profiles[] | select(.name == $n)).carrier_mode = $m' "$PROFILES_FILE" > "$tmp"
         chown root:tproxy "$tmp"; chmod 0400 "$tmp"; mv -f "$tmp" "$PROFILES_FILE"
         systemctl restart tproxy-server
-        echo "Режим подключения профиля $name изменён."
+        echo "Carrier mode профиля $name изменён."
         read -r -p 'Enter...' _ ;;
       3)
         count="$(jq '.profiles | length' "$PROFILES_FILE")"
@@ -153,10 +159,10 @@ upstream_menu() {
 
   while :; do
     clear
-    ui_header "Настройка публичного сайта"
+    ui_header "Публичный сайт · public_upstream"
     if [[ -n $current ]]; then
       printf '  Текущий источник: %s\n\n' "$current"
-      ui_option 1 "↩" "Отключить приложение и выбрать каталог сайта"
+      ui_option 1 "↩" "Отключить upstream и выбрать каталог сайта"
       ui_option 2 "↻" "Обновить список локальных приложений"
       ui_option 3 "←" "Назад"
       echo
@@ -177,7 +183,7 @@ upstream_menu() {
     fi
 
     clear
-    ui_header "Выбор локального веб-приложения"
+    ui_header "Выбор локального HTTP-приложения"
     printf '  Поиск работающих HTTP-сервисов на localhost...\n\n'
     ports=()
     codes=()
@@ -246,9 +252,9 @@ main() {
       local choice
       while :; do
         clear
-        ui_header "Дополнительные настройки"
-        ui_option 1 "▤" "Профили и режимы подключения"
-        ui_option 2 "⇄" "Публичный сайт"
+        ui_header "Дополнительные возможности"
+        ui_option 1 "▤" "Carrier mode и профили"
+        ui_option 2 "⇄" "Публичный сайт (public_upstream)"
         ui_option 3 "←" "Назад"
         echo
         read -r -p "Выбор [1-3]: " choice
