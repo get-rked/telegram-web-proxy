@@ -176,7 +176,13 @@ upstream_menu() {
     echo 'Режим public_upstream использует существующее HTTP-приложение на loopback.'
     read -r -p 'Порт локального сайта (например 3000): ' port
     [[ $port =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || die 'Недопустимый порт.'
-    curl -fsS --max-time 2 "http://127.0.0.1:$port/" >/dev/null || die 'На указанном loopback-порту нет HTTP-ответа.'
+    local http_code
+    http_code="$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null || true)"
+    if [[ ! $http_code =~ ^[1-5][0-9]{2}$ ]]; then
+      printf '[ОШИБКА] На 127.0.0.1:%s нет HTTP-ответа. Запусти приложение и повтори настройку.\n' "$port"
+      read -r -p 'Нажми Enter, чтобы вернуться в меню...' _
+      return 0
+    fi
     tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
     jq --arg u "http://127.0.0.1:$port" 'del(.public_dir) | .public_upstream = $u' "$CONFIG_FILE" > "$tmp"
   fi
