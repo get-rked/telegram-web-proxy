@@ -996,9 +996,7 @@ install_mtproxy_backend() {
   sed -i -e "s#/opt/MTProxy#$MTPROXY_DIR#g" -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" -e "s#/usr/local/bin/mtproxy#$BIN_DIR/mtproxy-proxy#g" "$REPO_DIR/deploy/install-mtproxy.sh"
   sed -i "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/refresh-mtproxy-config.sh"
   "$REPO_DIR/deploy/install-mtproxy.sh"
-  ln -sfn "$MTPROXY_DIR" $MTPROXY_DIR
   ln -sfn "$MTPROXY_DIR/objs/bin/mtproto-proxy" "$BIN_DIR/mtproxy-proxy"
-  ln -sfn "$BIN_DIR/mtproxy-proxy" $BIN_DIR/mtproxy-proxy
   ok "MTProxy собран"
 }
 
@@ -1043,7 +1041,6 @@ build_tproxy() {
   "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$BIN_DIR/tproxy-server" ./cmd/tproxy-server
   chown root:root "$BIN_DIR/tproxy-server"
   chmod 0755 "$BIN_DIR/tproxy-server"
-  ln -sfn "$BIN_DIR/tproxy-server" $BIN_DIR/tproxy-server
   cd - >/dev/null
   ok "tproxy-server собран"
 }
@@ -1373,7 +1370,6 @@ install_units() {
   install -m 0644 "$REPO_DIR/deploy/firewall.nft" "$PROXY_CONFIG_DIR/firewall.nft"
   sed -e "s#/etc/mtproxy#$MTPROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/refresh-mtproxy-config.sh" > "$BIN_DIR/refresh-mtproxy-config"
   chmod 0755 "$BIN_DIR/refresh-mtproxy-config"
-  ln -sfn "$BIN_DIR/refresh-mtproxy-config" $BIN_DIR/refresh-mtproxy-config
   ok "Файлы служб размещены в $SYSTEMD_DIR и подключены через системные ссылки"
 }
 install_caddyfile() {
@@ -1940,7 +1936,7 @@ run_uninstall() {
   echo "Будет удалено:"
   echo "  - сервисы: tproxy-server, mtproxy, tproxy-firewall, refresh-mtproxy-config"
   echo "  - каталоги: $REPO_DIR, $PROXY_CONFIG_DIR, $MTPROXY_CONFIG_DIR, $MTPROXY_DIR; сайт $SITE_DIR сохраняется"
-  echo "  - бинарники: $BIN_DIR/tproxy-server, $BIN_DIR/mtproto-proxy"
+  echo "  - бинарники: $BIN_DIR/tproxy-server, $BIN_DIR/mtproxy-proxy"
   echo "  - nftables: inet tproxy_backend"
   echo "  - пользователи: tproxy, mtproxy"
   if [[ $KEEP_WEB_SERVER -eq 0 ]]; then echo "  - веб-сервер: будет спрошено отдельно"; else echo "  - веб-сервер: НЕ будет удалён (--keep-web-server)"; fi
@@ -1960,7 +1956,6 @@ run_uninstall() {
   nft delete table inet tproxy_backend 2>/dev/null || true
 
   rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproto-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
-  rm -f $PROXY_CONFIG_DIR $MTPROXY_CONFIG_DIR $MTPROXY_DIR $REPO_DIR $BIN_DIR/tproxy-server $BIN_DIR/mtproxy-proxy $BIN_DIR/refresh-mtproxy-config
   info "Каталог сайта $SITE_DIR сохранён."
 
   userdel -r tproxy 2>/dev/null || true
