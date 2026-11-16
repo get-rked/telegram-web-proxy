@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../tgweb-install.sh
+# shellcheck source=./tgweb-install.sh
 source "$ROOT_DIR/tgweb-install.sh"
 
 assert_valid() {
