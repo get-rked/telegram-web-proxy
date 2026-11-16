@@ -158,12 +158,26 @@ profile_secret_prompt() {
 }
 
 profile_menu() {
-  local choice name mode mode_label backend count file tmp selected
+  local choice name mode mode_label backend count file tmp selected profile_row
   while :; do
     clear
     ui_header "Профили подключений"
     printf '  Общий домен: %s\n' "$HOSTNAME_VALUE"
-    while IFS= "＋" "Добавить профиль"
+    while IFS= read -r profile_row; do
+      name="$(cut -f1 <<< "$profile_row")"
+      mode="$(cut -f2 <<< "$profile_row")"
+      backend="$(cut -f3 <<< "$profile_row")"
+      case "$mode" in
+        https) mode_label="HTTPS" ;;
+        https-lanes) mode_label="HTTPS · несколько каналов" ;;
+        websocket) mode_label="WebSocket" ;;
+        websocket-lanes) mode_label="WebSocket · несколько каналов" ;;
+        *) mode_label="$mode" ;;
+      esac
+      printf '  ◆ %-20s | %-28s | backend %s\n' "$name" "$mode_label" "$backend"
+    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
+    echo
+    ui_option 1 "＋" "Добавить профиль"
     ui_option 2 "↻" "Изменить Carrier mode"
     ui_option 3 "✖" "Удалить дополнительный профиль"
     ui_option 4 "←" "Назад"
