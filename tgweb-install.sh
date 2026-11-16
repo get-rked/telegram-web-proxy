@@ -1750,6 +1750,7 @@ run_config() {
   Переменные MTProxy       : $envf
   Workers                  : ${workers:-<не задан>}
   Max connections          : ${maxconn:-<не задан>}
+  NAT-параметры             : ${nat:-<не заданы>}
   E-mail для Let's Encrypt : ${email:-<не найден>}
   Веб-сервер               : ${web_server:-<не определён>}
   Формат секрета           : $(if [[ "$secret" == dd* ]]; then echo "dd + 32 hex"; elif [[ -n "$secret" ]]; then echo "32 hex"; else echo "<не задан>"; fi)
