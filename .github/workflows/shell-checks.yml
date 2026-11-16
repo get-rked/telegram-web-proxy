@@ -1,18 +1,36 @@
 name: Shell checks
+
 on:
   push:
-    branches: [main, "hardening/**", "feature/**"]
+    branches:
+      - main
+      - "hardening/**"
+      - "feature/**"
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+
       - name: Bash syntax
-        run: bash -n tgweb-install.sh
+        run: |
+          bash -n tgweb-install.sh
+          bash -n tests/test_installer.sh
+
       - name: ShellCheck
-        uses: ludeeus/action-shellcheck@master
-        with:
-          scandir: .
-          severity: warning
+        run: shellcheck --severity=warning --shell=bash tgweb-install.sh tests/test_installer.sh
+
+      - name: Installer unit tests
+        run: bash tests/test_installer.sh
