@@ -41,6 +41,7 @@ readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -60,6 +61,7 @@ MAXCONN_ARG=""
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
 RELAY_PORT=""
 ADMIN_PORT=""
+CARRIER_MODE_ARG="https"
 SKIP_TESTS="${SKIP_TESTS:-0}"
 KEEP_WEB_SERVER=0
 ASSUME_YES=0
@@ -157,6 +159,7 @@ Usage:
   --email EMAIL             Email для Let's Encrypt
   --secret SECRET           32 hex или dd + 32 hex
   --secret-prefix MODE       plain или dd (формат генерации)
+  --carrier-mode MODE        https|https-lanes|websocket|websocket-lanes
   config [--output PATH]     Показать текущие настройки (секреты скрыты)
   diagnostics                Диагностика: службы, порты, конфигурации и ошибки
   backup [ABSOLUTE_PATH]     Резервная копия конфигураций
@@ -1486,6 +1489,8 @@ prepare_layout() {
   require_root
   remove_legacy_compat_links
   install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$CONFIG_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
+  [[ -f "$SCRIPT_DIR/tproxy-advanced.sh" ]] || die "Не найден tproxy-advanced.sh рядом с установщиком"
+  install -m 0750 "$SCRIPT_DIR/tproxy-advanced.sh" "$BIN_DIR/tproxy-advanced"
 }
 
 write_configs() {
@@ -1493,7 +1498,7 @@ write_configs() {
   sed -i "s#/etc/tproxy-server#$PROXY_CONFIG_DIR#g" "$REPO_DIR/deploy/ensure-token-key.sh"
   bash "$REPO_DIR/deploy/ensure-token-key.sh"
 
-  cat > $PROXY_CONFIG_DIR/config.json <<EOF
+  cat > "$PROXY_CONFIG_DIR/config.json" <<EOF
 {
   "public_hostname": "$HOSTNAME_ARG",
   "base_path": "$BASE_PATH_ARG",
@@ -1505,9 +1510,19 @@ write_configs() {
 }
 EOF
 
-  cat > $PROXY_CONFIG_DIR/profiles.json <<EOF
-{"profiles":[{"name":"default","secret":"$SECRET_ARG","backend":"127.0.0.1:2398"}]}
+  if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
+    local profiles_tmp
+    profiles_tmp="$(mktemp "$PROXY_CONFIG_DIR/profiles.json.XXXXXX")"
+    jq --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" \
+      '.profiles[0].secret = $secret | .profiles[0].carrier_mode = $mode' \
+      "$PROXY_CONFIG_DIR/profiles.json" > "$profiles_tmp" || die "Не удалось обновить profiles.json"
+    chown root:tproxy "$profiles_tmp"; chmod 0400 "$profiles_tmp"
+    mv -f "$profiles_tmp" "$PROXY_CONFIG_DIR/profiles.json"
+  else
+    cat > "$PROXY_CONFIG_DIR/profiles.json" <<EOF
+{"profiles":[{"name":"default","secret":"$SECRET_ARG","backend":"127.0.0.1:2398","carrier_mode":"$CARRIER_MODE_ARG"}]}
 EOF
+  fi
   chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
   chmod 0640 $PROXY_CONFIG_DIR/config.json
   chmod 0400 $PROXY_CONFIG_DIR/profiles.json
@@ -1546,13 +1561,22 @@ write_mtproxy_env() {
   fi
 
   mkdir -p $MTPROXY_CONFIG_DIR
-  cat > $MTPROXY_CONFIG_DIR/mtproxy.env <<EOF
-MTPROXY_SECRET=$backend_secret
+  local mtproxy_secrets="" profile_secret
+  if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
+    while IFS= read -r profile_secret; do
+      [[ -n "$profile_secret" ]] || continue
+      if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
+      mtproxy_secrets+="$profile_secret"
+    done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
+  fi
+  [[ -n "$mtproxy_secrets" ]] || mtproxy_secrets="$backend_secret"
+  cat > "$MTPROXY_CONFIG_DIR/mtproxy.env" <<EOF
+MTPROXY_SECRETS="$mtproxy_secrets"
 MTPROXY_WORKERS=${WORKERS_ARG:-1}
 MTPROXY_MAX_CONNECTIONS=${MAXCONN_ARG:-4096}
 MTPROXY_NAT_ARGS=$mtproxy_nat_args
 EOF
-  chown root:mtproxy $MTPROXY_CONFIG_DIR/mtproxy.env
+  chown root:mtproxy "$MTPROXY_CONFIG_DIR/mtproxy.env"
   chmod 0640 $MTPROXY_CONFIG_DIR/mtproxy.env
   ok "mtproxy.env записан"
 }
@@ -1573,6 +1597,9 @@ install_units() {
       -e "s#/usr/local/bin/mtproxy#$BIN_DIR/mtproxy-proxy#g" \
       -e "s#/usr/local/sbin/refresh-mtproxy-config#$BIN_DIR/refresh-mtproxy-config#g" \
       -e "s#/srv/tproxy-site#$SITE_DIR#g" "$src" > "$dst"
+    if [[ "$name" == "mtproxy.service" ]]; then
+      sed -i 's/-S ${MTPROXY_SECRET}/-S $MTPROXY_SECRETS/' "$dst"
+    fi
     chmod 0644 "$dst"
     ln -sfn "$dst" "/etc/systemd/system/$name"
   done
@@ -1900,6 +1927,7 @@ load_existing_config() {
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
   v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
   [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
+  CARRIER_MODE_ARG="$(jq -r '.profiles[0].carrier_mode // "https"' "$profiles")"
   if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
     if [[ "$SECRET_ARG" == dd* ]]; then SECRET_PREFIX_MODE="dd"; else SECRET_PREFIX_MODE="plain"; fi
   fi
@@ -1992,6 +2020,13 @@ interactive_update_fill() {
   prompt_update_port ADMIN_PORT "Admin-порт" "$ADMIN_PORT"
   [[ "$RELAY_PORT" != "$ADMIN_PORT" ]] || die "relay- и admin-порты должны различаться"
   prompt_update_secret
+  echo "Carrier mode: [1] https  [2] https-lanes  [3] websocket  [4] websocket-lanes"
+  read -r -p "Выбор (Enter — оставить: $CARRIER_MODE_ARG): " input || die "ввод прерван"
+  case "$input" in
+    1) CARRIER_MODE_ARG=https ;; 2) CARRIER_MODE_ARG=https-lanes ;;
+    3) CARRIER_MODE_ARG=websocket ;; 4) CARRIER_MODE_ARG=websocket-lanes ;;
+    "") : ;; *) die "Недопустимый carrier mode" ;;
+  esac
 
   local input
   while :; do
@@ -2072,6 +2107,7 @@ begin_update_transaction() {
     opt/telegram-web-proxy/bin/tproxy-server \
     opt/telegram-web-proxy/bin/mtproxy-proxy \
     opt/telegram-web-proxy/bin/refresh-mtproxy-config \
+    opt/telegram-web-proxy/bin/tproxy-advanced \
     opt/telegram-web-proxy/src/mtproxy \
     opt/telegram-web-proxy/config/proxy \
     opt/telegram-web-proxy/config/mtproxy \
@@ -2630,15 +2666,17 @@ show_tools_menu() {
     ui_option 1 "⌕" "Диагностика и поиск неисправностей"
     ui_option 2 "▤" "Создать резервную копию"
     ui_option 3 "↻" "Восстановить резервную копию"
-    ui_option 4 "↩" "Назад"
+    ui_option 4 "◉" "Живая панель, carrier mode, профили, public_upstream"
+    ui_option 5 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-4]: " choice
+    read -r -p "Выбор [1-5]: " choice
     case "$choice" in
       1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
       2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
       3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
-      4) return 0 ;;
-      *) warn "Выбери пункт от 1 до 4." ;;
+      4) "$BIN_DIR/tproxy-advanced" menu ;;
+      5) return 0 ;;
+      *) warn "Выбери пункт от 1 до 5." ;;
     esac
   done
 }
