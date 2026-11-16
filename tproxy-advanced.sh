@@ -12,7 +12,6 @@ MT_ENV=$MTPROXY_CONFIG_DIR/mtproxy.env
 UNIT_FILE=$BASE_DIR/systemd/mtproxy.service
 ADMIN_PORT=8081
 HOSTNAME_VALUE=
-WEB_SERVER=caddy
 
 die() { printf '[ОШИБКА] %s\n' "$*" >&2; exit 1; }
 need_root() { [[ $EUID -eq 0 ]] || die 'Запусти команду через sudo.'; }
@@ -21,7 +20,6 @@ need_files() {
   command -v jq >/dev/null 2>&1 || die 'Требуется jq.';
   ADMIN_PORT="$(jq -r '.admin_listen | split(":")[-1]' "$CONFIG_FILE")"
   HOSTNAME_VALUE="$(jq -r '.public_hostname // empty' "$CONFIG_FILE")"
-  WEB_SERVER="$(cat "$CONFIG_DIR/web-server" 2>/dev/null || echo caddy)"
   profile_storage_init
 }
 valid_secret() { [[ $1 =~ ^(dd)?[0-9a-f]{32}$ ]]; }
@@ -140,7 +138,7 @@ profile_secret_prompt() {
   local format choice first second
   echo "Формат секрета: [1] обычный (32 hex) [2] с префиксом dd"
   read -r -p "Выбор [1-2]: " format
-  case "$format" in 1) format=plain ;; 2) format=dd ;; *) echo "Недопустимый выбор."; return 1 ;; esac
+  case "$format" in 1) format='plain' ;; 2) format='dd' ;; *) echo "Недопустимый выбор."; return 1 ;; esac
   read -r -p "Сгенерировать секрет автоматически? [Y/n]: " choice
   if [[ ! "$choice" =~ ^[Nn]$ ]]; then
     PROFILE_SECRET="$(openssl rand -hex 16)"
@@ -211,7 +209,7 @@ profile_menu() {
         [[ "$PROFILE_NAME" != default ]] || { echo "Профиль default защищён."; read -r -p "Enter..." _; continue; }
         read -r -p "Удалить профиль $PROFILE_NAME? [y/N]: " selected
         [[ "$selected" =~ ^[YyДд]$ ]] || continue
-        rm -rf -- "$PROFILE_DIR/$PROFILE_NAME"
+        rm -rf -- "${PROFILE_DIR:?}/${PROFILE_NAME:?}"
         profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
         systemctl restart mtproxy tproxy-server
         echo "Профиль $PROFILE_NAME удалён."; read -r -p "Enter..." _ ;;
