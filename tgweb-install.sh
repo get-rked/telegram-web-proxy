@@ -2644,7 +2644,39 @@ restore_command() {
   confirm "Восстановить конфигурации из $archive?" || die "восстановление отменено"
   tar -C / -xzpf "$archive" || die "Ошибка распаковки резервной копии"
   systemctl daemon-reload
-  ok "Файлы восстановлены. Проверь конфигурацию веб-сервера и состояние служб."
+
+  # Перезапускаем восстановленные компоненты, чтобы процессы перечитали файлы.
+  local service web_server
+  local -a restored_services=(
+    mtproxy.service
+    tproxy-server.service
+    tproxy-firewall.service
+    refresh-mtproxy-config.timer
+  )
+  web_server="$(cat "$CONFIG_DIR/web-server" 2>/dev/null || true)"
+  case "$web_server" in
+    caddy) restored_services+=(caddy.service) ;;
+    nginx) restored_services+=(nginx.service) ;;
+    *)
+      if systemctl cat caddy.service >/dev/null 2>&1; then
+        restored_services+=(caddy.service)
+      elif systemctl cat nginx.service >/dev/null 2>&1; then
+        restored_services+=(nginx.service)
+      fi
+      ;;
+  esac
+
+  for service in "${restored_services[@]}"; do
+    if systemctl cat "$service" >/dev/null 2>&1; then
+      info "Перезапускаю $service..."
+      systemctl restart "$service" || die "Не удалось перезапустить $service после восстановления. Проверь: journalctl -u $service -n 50"
+      ok "$service перезапущена"
+    else
+      info "$service не установлена — пропускаю"
+    fi
+  done
+
+  ok "Конфигурации восстановлены, доступные службы перезапущены."
   info "Для проверки выполни: diagnostics"
 }
 
