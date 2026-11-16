@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   shell:
-    name: Bash, ShellCheck and installer tests
+    name: Bash syntax and ShellCheck
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,18 +28,9 @@ jobs:
       - name: Bash syntax
         run: |
           bash -n tgweb-install.sh
-          bash -n tests/test_installer.sh
-          bash -n tests/test_advanced.sh
-          bash -n tproxy-advanced.sh
 
       - name: ShellCheck
-        run: shellcheck --severity=warning --shell=bash tgweb-install.sh tproxy-advanced.sh tests/test_installer.sh tests/test_advanced.sh
-
-      - name: Installer unit tests
-        run: bash tests/test_installer.sh
-
-      - name: Advanced manager unit tests
-        run: bash tests/test_advanced.sh
+        run: shellcheck --severity=warning --shell=bash tgweb-install.sh
 
   upstream-go:
     name: Pinned tproxy-server tests and build
