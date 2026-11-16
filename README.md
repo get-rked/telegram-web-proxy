@@ -290,19 +290,14 @@ sudo ./tgweb-install.sh install \
 
 ## Проверка качества кода
 
-В репозитории настроен GitHub Actions workflow `Shell checks`. Локально можно выполнить тот же набор базовых проверок:
+В репозитории настроен GitHub Actions workflow `Shell checks`. Он проверяет синтаксис установщика и запускает ShellCheck:
 
 ```bash
 bash -n tgweb-install.sh
-bash -n tproxy-advanced.sh
-bash -n tests/test_installer.sh
-bash -n tests/test_advanced.sh
-shellcheck --severity=warning --shell=bash tgweb-install.sh tproxy-advanced.sh tests/test_installer.sh tests/test_advanced.sh
-bash tests/test_installer.sh
-bash tests/test_advanced.sh
+shellcheck --severity=warning --shell=bash tgweb-install.sh
 ```
 
-Обновление запускает upstream `go test ./...` перед сборкой, если не указан `--skip-tests`.
+Обновление запускает upstream `go test ./...` перед сборкой, если не указан `--skip-tests`. CI также выполняет upstream Go tests и сборку закреплённой версии `tproxy-server`.
 
 ## Ссылка подключения и QR-код
 
