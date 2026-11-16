@@ -333,7 +333,9 @@ PNG сохраняется в:
 | Путь / имя | Назначение |
 |---|---|
 | `/opt/telegram-web-proxy/config/proxy/config.json` | Настройки tproxy-server, домен, адреса и каталог сайта |
-| `/opt/telegram-web-proxy/config/proxy/profiles/` | Отдельный каталог настроек каждого профиля |\n| `/opt/telegram-web-proxy/config/proxy/profiles/<имя>/profile.json` | Имя, секрет, backend и Carrier mode выбранного профиля |\n| `/opt/telegram-web-proxy/config/proxy/profiles.json` | Сводный файл всех профилей для tproxy-server |
+| `/opt/telegram-web-proxy/config/proxy/profiles/` | Отдельный каталог настроек каждого профиля |
+| `/opt/telegram-web-proxy/config/proxy/profiles/<имя>/profile.json` | Имя, секрет, backend и Carrier mode выбранного профиля |
+| `/opt/telegram-web-proxy/config/proxy/profiles.json` | Сводный файл всех профилей для tproxy-server |
 | `/opt/telegram-web-proxy/config/proxy/acme-email` | Email Let's Encrypt |
 | `/opt/telegram-web-proxy/config/proxy/web-server` | Выбранный веб-сервер |
 | `/opt/telegram-web-proxy/config/mtproxy/mtproxy.env` | Параметры MTProxy |
