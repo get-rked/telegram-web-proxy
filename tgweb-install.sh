@@ -40,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.0.1"
+readonly SCRIPT_VERSION="1.0.2"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -1096,6 +1096,7 @@ install_nginx_config() {
 server {
  listen 80;
  server_name $HOSTNAME_ARG;
+ access_log off;
  location ^~ /.well-known/acme-challenge/ { root $ACME_WEBROOT; }
  location / { return 301 https://\$host\$request_uri; }
 }
@@ -1127,6 +1128,7 @@ server {
 server {
  listen 443 ssl;
  server_name $HOSTNAME_ARG;
+ access_log off;
  ssl_certificate $cert;
  ssl_certificate_key $key;
  ssl_protocols TLSv1.2 TLSv1.3;
@@ -2078,6 +2080,7 @@ begin_update_transaction() {
     etc/systemd/system/tproxy-firewall.service \
     etc/systemd/system/refresh-mtproxy-config.service \
     etc/systemd/system/refresh-mtproxy-config.timer \
+    etc/systemd/system/caddy.service \
     etc/systemd/system/caddy.service.d/tproxy.conf \
     etc/caddy/Caddyfile \
     etc/nginx/sites-available/tproxy-server \
@@ -2106,6 +2109,7 @@ rollback_update_transaction() {
     /etc/systemd/system/tproxy-firewall.service \
     /etc/systemd/system/refresh-mtproxy-config.service \
     /etc/systemd/system/refresh-mtproxy-config.timer \
+    /etc/systemd/system/caddy.service \
     /etc/systemd/system/caddy.service.d/tproxy.conf \
     /etc/caddy/Caddyfile \
     /etc/nginx/sites-available/tproxy-server \
@@ -2650,7 +2654,7 @@ show_menu() {
   read -r -p "Выбор [1-6]: " choice
   case "$choice" in
     1) MODE=install ;;
-    2) MODE=update; SKIP_TESTS=1 ;;
+    2) MODE=update ;;
     3) MODE=delete ;;
     4) MODE=config ;;
     5) MODE=tools ;;
@@ -2703,7 +2707,7 @@ main() {
   MODE="$1"; shift
   case "$MODE" in
     install)   parse_install_args "$@"; run_install ;;
-    update)    SKIP_TESTS=1; parse_install_args "$@"; run_install ;;
+    update)    parse_install_args "$@"; run_install ;;
     uninstall) parse_uninstall_args "$@"; run_uninstall ;;
     purge)     parse_uninstall_args "$@"; run_purge ;;
     config)    require_root; run_config "$@" ;;
