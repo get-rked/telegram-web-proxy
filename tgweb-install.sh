@@ -807,7 +807,25 @@ preflight_system() {
     fi
   done
   if (( web_port_busy )); then
-    inspect_existing_site
+    local managed_tproxy=0
+    if [[ -s "$PROXY_CONFIG_DIR/config.json" ]] && command -v jq >/dev/null 2>&1 &&
+       jq -e --arg host "$HOSTNAME_ARG" --arg site "$SITE_DIR" '.public_hostname == $host and .public_dir == $site' "$PROXY_CONFIG_DIR/config.json" >/dev/null 2>&1; then
+      if [[ "$WEB_SERVER" == "nginx" ]] &&
+         [[ -L "$NGINX_ENABLED" ]] &&
+         grep -Fq "server_name $HOSTNAME_ARG;" "$NGINX_SITE" &&
+         grep -Fq 'proxy_pass http://127.0.0.1:' "$NGINX_SITE"; then
+        managed_tproxy=1
+      elif [[ "$WEB_SERVER" == "caddy" ]] &&
+           grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile &&
+           grep -Fq 'reverse_proxy 127.0.0.1:' /etc/caddy/Caddyfile; then
+        managed_tproxy=1
+      fi
+    fi
+    if (( managed_tproxy )); then
+      info "Обнаружена действующая конфигурация tproxy-server; сохраняю public_dir из config.json: $SITE_DIR"
+    else
+      inspect_existing_site
+    fi
   fi
   echo
   if (("${#missing_packages[@]}")); then info "Потребуется установить только: ${missing_packages[*]}"
