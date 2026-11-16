@@ -40,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.2.3"
+readonly SCRIPT_VERSION="1.2.4"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -2298,7 +2298,7 @@ diagnostics_command() {
       if dns_public_ip="$(get_public_ipv4)"; then
         for dns_ip in "${dns_ips[@]}"; do [[ "$dns_ip" == "$dns_public_ip" ]] && dns_matched=1; done
         if (( dns_matched )); then
-          printf '  %s DNS A: %s (совпадает с публичным IP сервера %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
+          printf '  %s DNS A: %s (совпадает с IPv4-адресом сервера %s)\n' "$(status_mark ok)" "${dns_ips[*]}" "$dns_public_ip"
         else
           printf '  %s DNS A: %s (публичный IP сервера: %s)\n' "$(status_mark warn)" "${dns_ips[*]}" "$dns_public_ip"
           if is_cloudflare_proxied_domain "$host"; then
