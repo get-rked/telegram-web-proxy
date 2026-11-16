@@ -28,7 +28,11 @@ valid_name() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; }
 valid_mode() { [[ $1 == https || $1 == https-lanes || $1 == websocket || $1 == websocket-lanes ]]; }
 
 write_mtproxy_secrets() {
-  local secrets args tmp seen="" canonical
+  local secrets args tmp seen="" canonical secret count backend
+  count="$(jq '.profiles | length' "$PROFILES_FILE")"
+  (( count >= 1 && count <= 32 )) || die 'Количество профилей должно быть от 1 до 32.'
+  backend="$(jq -r '.profiles[0].backend' "$PROFILES_FILE")"
+  jq -e --arg b "$backend" 'all(.profiles[]; .backend == $b)' "$PROFILES_FILE" >/dev/null || die 'Все профили должны использовать один backend в этой версии.'
   secrets="$(jq -r '.profiles[].secret' "$PROFILES_FILE")"
   [[ -n $secrets ]] || die 'Список профилей пуст.'
   args=
@@ -93,7 +97,7 @@ dashboard() {
 }
 
 profile_menu() {
-  local choice name secret mode existing backend count index
+  local choice name secret mode backend count
   while :; do
     clear
     echo 'Профили и carrier mode'
@@ -106,6 +110,8 @@ profile_menu() {
     read -r -p 'Выбор: ' choice
     case "$choice" in
       1)
+        count="$(jq '.profiles | length' "$PROFILES_FILE")"
+        (( count < 32 )) || { echo 'Достигнут лимит 32 профиля.'; read -r -p 'Enter...' _; continue; }
         read -r -p 'Имя профиля: ' name
         valid_name "$name" || { echo 'Недопустимое имя'; read -r -p 'Enter...' _; continue; }
         if jq -e --arg n "$name" '.profiles[] | select(.name == $n)' "$PROFILES_FILE" >/dev/null; then echo 'Такое имя уже существует'; read -r -p 'Enter...' _; continue; fi
