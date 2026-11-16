@@ -214,4 +214,6 @@ main() {
     *) die 'Использование: tproxy-advanced.sh [dashboard|profiles|upstream|menu]' ;;
   esac
 }
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
