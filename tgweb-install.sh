@@ -1491,6 +1491,8 @@ prepare_layout() {
   require_root
   remove_legacy_compat_links
   install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$CONFIG_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
+  # The legacy standalone manager is no longer used; all its functions live here.
+  rm -f "$BIN_DIR/tproxy-advanced"
 }
 
 profile_manifest_valid() {
@@ -2910,27 +2912,6 @@ valid_secret() { [[ $1 =~ ^(dd)?[0-9a-f]{32}$ ]]; }
 valid_name() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; }
 valid_mode() { [[ $1 == https || $1 == https-lanes || $1 == websocket || $1 == websocket-lanes ]]; }
 
-ui_header() {
-  local title="$1"
-  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
-    printf '  \033[1;34m◆\033[0m %s\n' "$title"
-    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
-  else
-    printf '%s\n' '============================================================'
-    printf '  %s\n' "$title"
-    printf '%s\n' '============================================================'
-  fi
-}
-ui_option() {
-  local number="$1" icon="$2" label="$3"
-  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '  \033[1;34m%s)\033[0m %s %s\n' "$number" "$icon" "$label"
-  else
-    printf '  %s) %s %s\n' "$number" "$icon" "$label"
-  fi
-}
-
 write_mtproxy_secrets() {
   local secrets args tmp seen="" canonical secret count backend
   count="$(jq '.profiles | length' "$PROFILES_FILE")"
@@ -3013,30 +2994,13 @@ profile_manifest_sync() {
   mv -f "$tmp" "$PROFILES_FILE"
 }
 
-profile_menu_manifest_valid() {
-  [[ -s "$PROFILES_FILE" ]] &&
-    jq -e '
-      type == "object" and
-      (.profiles | type == "array" and length >= 1 and length <= 32) and
-      all(.profiles[];
-        type == "object" and
-        (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and
-        (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and
-        (.backend | type == "string" and test("^[^[:space:]]+:[0-9]+$")) and
-        (.carrier_mode | (type == "string" and
-          (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes")))
-      ) and
-      ([.profiles[].name] | length == (unique | length))
-    ' "$PROFILES_FILE" >/dev/null 2>&1
-}
-
 profile_storage_init() {
   install -d -o root -g tproxy -m 0750 "$PROFILE_DIR"
   local count name file
   count="$(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)"
 
   if (( count == 0 )); then
-    if profile_menu_manifest_valid; then
+    if profile_manifest_valid; then
       # One-time migration from the legacy aggregate into per-profile files.
       while IFS= read -r name; do
         [[ -n "$name" ]] || continue
