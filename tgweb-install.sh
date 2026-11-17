@@ -2066,9 +2066,14 @@ run_config() {
     link="https://t.me/webproxy?server=$server&secret=$proxy_secret"
     generate_proxy_qr "$link" >/dev/null
   fi
-  local report
+  local report config_separator
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    config_separator="$(printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m')"
+  else
+    config_separator='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  fi
   report="$(printf '%s\n' \
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' \
+    "$config_separator" \
     "  Профиль                  : $profile_name" \
     "  Carrier mode             : $carrier_label" \
     "  Домен                    : $host" \
@@ -2091,7 +2096,7 @@ run_config() {
     "$(proxy_ports_table "$relay" "$admin" "$backend")" \
     '' 'Ссылка подключения:' "$link" \
     "QR-код (PNG): $QR_DIR/proxy-qr.png" \
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')"
+    "$config_separator")"
   if [[ -n "$output" ]]; then
     install -m 0600 /dev/null "$output"
     printf '%s\n' "$report" | sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' > "$output"
