@@ -2068,7 +2068,7 @@ run_config() {
   fi
   local report
   report="$(printf '%s\n' \
-    '==================== ТЕКУЩАЯ КОНФИГУРАЦИЯ ====================' \
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' \
     "  Профиль                  : $profile_name" \
     "  Carrier mode             : $carrier_label" \
     "  Домен                    : $host" \
@@ -2091,7 +2091,7 @@ run_config() {
     "$(proxy_ports_table "$relay" "$admin" "$backend")" \
     '' 'Ссылка подключения:' "$link" \
     "QR-код (PNG): $QR_DIR/proxy-qr.png" \
-    '==============================================================')"
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')"
   if [[ -n "$output" ]]; then
     install -m 0600 /dev/null "$output"
     printf '%s\n' "$report" | sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' > "$output"
@@ -2846,7 +2846,7 @@ ui_separator() {
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
     printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
   else
-    printf '%s\n' '============================================================'
+    printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   fi
 }
 ui_header() {
@@ -2890,6 +2890,7 @@ show_deletion_menu() {
 # Carrier mode, profile and public_upstream management.
 # These operations are embedded in the main installer to keep deployment single-file.
 CONFIG_FILE="$PROXY_CONFIG_DIR/config.json"
+PROFILES_FILE="$PROXY_CONFIG_DIR/profiles.json"
 MT_ENV="$MTPROXY_CONFIG_DIR/mtproxy.env"
 UNIT_FILE="$SYSTEMD_DIR/mtproxy.service"
 HOSTNAME_VALUE=""
