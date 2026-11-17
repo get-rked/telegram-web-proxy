@@ -327,12 +327,9 @@ interactive_fill() {
     return 0
   fi
 
-  echo
-  echo "────────────────────────────────────────────────────────────"
-  echo "  Установка tproxy-server"
-  echo "  Обязательные параметры нужно заполнить; Enter у остальных"
-  echo "  оставляет значение по умолчанию."
-  echo "────────────────────────────────────────────────────────────"
+  ui_header "Установка tproxy-server"
+  echo "Обязательные параметры нужно заполнить; Enter у остальных"
+  echo "оставляет значение по умолчанию."
 
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then
     echo "Веб-сервер: [1] Caddy (по умолчанию)  [2] Nginx"
@@ -398,7 +395,7 @@ interactive_fill() {
   echo "  Workers                  : $WORKERS_ARG"
   echo "  Max connections          : $MAXCONN_ARG"
   echo "  Каталог сайта            : $SITE_DIR"
-  echo "────────────────────────────────────────────────────────────"
+  ui_separator
   confirm "Начать установку?" || die "установка отменена"
 }
 # ----------------------------- парсер флагов --------------------------------
@@ -533,7 +530,7 @@ proxy_ports_table() {
     (( seen )) || ports+=("$p")
   done
   printf '  %-8s %-25s %-8s %s\n' "Порт" "Назначение" "Протокол" "Процесс / состояние"
-  printf '  %-8s %-25s %-8s %s\n' "--------" "-------------------------" "--------" "-------------------------"
+  printf '\033[1;34m  %-8s %-25s %-8s %s\033[0m\n' "━━━━━━━━" "━━━━━━━━━━━━━━━━━━━━━━━━━" "━━━━━━━━" "━━━━━━━━━━━━━━━━━━━━━━━━━"
   for p in "${ports[@]}"; do
     case "$p" in
       80) label="HTTP / ACME" ;; 443) label="HTTPS / Web Proxy" ;;
@@ -562,7 +559,7 @@ preflight_basics() {
   echo "Проверка основных компонентов до ввода параметров установки."
   echo
   printf '  %-30s %s\n' "Базовые пакеты" "Состояние"
-  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  printf '\033[1;34m  %-30s %s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   for pkg in "${required_packages[@]}"; do
     if package_installed "$pkg"; then
       printf '  %-30s %s\n' "$pkg" "$(status_mark ok) установлен"
@@ -572,7 +569,7 @@ preflight_basics() {
   done
   echo
   printf '  %-30s %s\n' "Основной компонент" "Состояние"
-  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  printf '\033[1;34m  %-30s %s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   if [[ -x "$BIN_DIR/tproxy-server" || -x $BIN_DIR/tproxy-server ]]; then
     printf '  %-30s %s\n' "tproxy-server" "$(status_mark ok) бинарный файл найден"
   else
@@ -600,7 +597,7 @@ preflight_basics() {
   fi
   echo
   printf '  %-30s %s\n' "Служба" "Состояние"
-  printf '  %-30s %s\n' "------------------------------" "------------------------------"
+  printf '\033[1;34m  %-30s %s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   for svc in "${services[@]}"; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
       state="активна"
@@ -2216,12 +2213,9 @@ interactive_update_fill() {
     [[ "$RELAY_PORT" != "$ADMIN_PORT" ]] || die "relay- и admin-порты должны различаться"
     return 0
   fi
-  echo
-  echo "────────────────────────────────────────────────────────────"
-  echo "  Обновление tproxy-server"
-  echo "  Текущие значения указаны в [квадратных скобках]."
-  echo "  Enter — оставить без изменений."
-  echo "────────────────────────────────────────────────────────────"
+  ui_header "Обновление tproxy-server"
+  echo "Текущие значения указаны в [квадратных скобках]."
+  echo "Enter — оставить без изменений."
   prompt_update_value HOSTNAME_ARG "Домен" "$HOSTNAME_ARG" validate_hostname
   # Email is retained from the existing ACME configuration; --email can override it.
   prompt_update_value BASE_PATH_ARG "Base path (none — корень)" "$BASE_PATH_ARG" validate_base_path
@@ -2267,10 +2261,8 @@ interactive_update_fill() {
 
 
 show_operation_overview() {
-  echo
-  echo "--------------------------------------------------------------------"
   if [[ "$MODE" == "update" ]]; then
-    echo "  ПЕРЕД ОБНОВЛЕНИЕМ"
+    ui_header "Перед обновлением"
     cat <<'EOF'
   Будут обновлены исходники и компоненты, пересобран tproxy-server,
   обновлены конфигурации и перезапущены службы.
@@ -2279,7 +2271,7 @@ show_operation_overview() {
   При неудачном health-check предыдущие файлы будут восстановлены автоматически.
 EOF
   else
-    echo "  ПЕРЕД УСТАНОВКОЙ"
+    ui_header "Перед установкой"
     cat <<'EOF'
   Сначала будет проверено, какие зависимости и компоненты уже установлены.
   Будут добавлены только отсутствующие пакеты; существующие Go, Caddy,
@@ -2302,7 +2294,7 @@ EOF
   В firewall VPS разреши входящие TCP 80 и 443. UDP не требуется.
   Нужен root-доступ; службы могут быть перезапущены.
 EOF
-  echo "--------------------------------------------------------------------"
+  ui_separator
   echo
 }
 
@@ -2467,9 +2459,7 @@ run_uninstall() {
       installed_web_server="nginx"
     fi
   fi
-  echo "------------------------------------------------------------"
-  echo "  Удаление tproxy-server"
-  echo "------------------------------------------------------------"
+  ui_header "Удаление tproxy-server"
   echo "Будет удалено:"
   echo "  - сервисы: tproxy-server, mtproxy, tproxy-firewall, refresh-mtproxy-config"
   echo "  - каталоги: $REPO_DIR, $PROXY_CONFIG_DIR, $MTPROXY_CONFIG_DIR, $MTPROXY_DIR; сайт $SITE_DIR сохраняется"
@@ -2570,10 +2560,7 @@ diagnostics_command() {
   backend="$(jq -r '.profiles[0].backend // empty' "$PROXY_CONFIG_DIR/profiles.json" 2>/dev/null || true)"
   backend_port="${backend##*:}"
 
-  echo
-  echo "------------------------------------------------------------"
-  echo "  ДИАГНОСТИКА И ПОИСК НЕИСПРАВНОСТЕЙ"
-  echo "------------------------------------------------------------"
+  ui_header "Диагностика и поиск неисправностей"
 
   echo
   echo "1. Состояние служб"
@@ -2751,8 +2738,7 @@ diagnostics_command() {
     printf '  %s Ошибок уровня error в доступном журнале не найдено\n' "$(status_mark ok)"
   fi
 
-  echo
-  echo "------------------------------------------------------------"
+  ui_separator
   if (( failed )); then
     warn "Диагностика завершена: обнаружены ошибки."
     return 1
@@ -2848,30 +2834,40 @@ restore_command() {
 
   for service in "${restored_services[@]}"; do
     if systemctl cat "$service" >/dev/null 2>&1; then
+      printf '\t'
       info "Перезапускаю $service..."
       systemctl restart "$service" || die "Не удалось перезапустить $service после восстановления. Проверь: journalctl -u $service -n 50"
+      printf '\t'
       ok "$service перезапущена"
     else
+      printf '\t'
       info "$service не установлена — пропускаю"
     fi
   done
 
+  printf '\t'
   ok "Конфигурации восстановлены, доступные службы перезапущены."
+  printf '\t'
   info "Для проверки выполни: diagnostics"
 }
 
-ui_header() {
-  local title="$1"
-  echo
+ui_separator() {
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-    printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
-    printf '  \033[1;34m◆\033[0m %s\n' "$title"
     printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
   else
     printf '%s\n' '============================================================'
-    printf '  %s\n' "$title"
-    printf '%s\n' '============================================================'
   fi
+}
+ui_header() {
+  local title="$1"
+  echo
+  ui_separator
+  if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    printf '  \033[1;34m◆\033[0m %s\n' "$title"
+  else
+    printf '  %s\n' "$title"
+  fi
+  ui_separator
 }
 ui_option() {
   local number="$1" icon="$2" label="$3"
