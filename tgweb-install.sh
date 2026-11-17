@@ -1260,195 +1260,123 @@ install_stub_site() {
   if [[ "$INSTALL_SITE" -ne 1 ]]; then info "Сайт пропущен (--no-site)"; return 0; fi
   if [[ -f "$SITE_DIR/index.html" ]]; then
     info "Сайт уже есть в $SITE_DIR — не трогаю"
-    : # Существующий сайт и его права не изменяем
-    : # Не меняем права пользовательского содержимого
-
     ok "Существующий сайт сохранён без изменений"
     return 0
   fi
-  info "Ставлю сайт-заглушку в $SITE_DIR…"
+  info "Устанавливаю демонстрационный магазин De Kleine Markt в $SITE_DIR…"
   mkdir -p "$SITE_DIR/assets"
 
   cat > "$SITE_DIR/index.html" <<'HTML'
 <!doctype html>
-<html lang="ru">
+<html lang="nl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Vibe Studio — код в потоке</title>
-<meta name="description" content="Инструменты для тех, кто пишет код в потоке: быстрый фидбек, живые прототипы, ноль трения.">
+<meta name="theme-color" content="#f5f1e8">
+<title>De Kleine Markt — lekker lokaal, elke dag</title>
+<meta name="description" content="Een gezellige buurtwinkel met koffie, lekkers, delicatessen en fijne spullen voor thuis.">
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 </head>
 <body>
-<div class="bg-orb orb-a"></div>
-<div class="bg-orb orb-b"></div>
-
-<header class="nav">
-  <a class="brand" href="/"><span class="brand-mark">◆</span> Vibe<span class="brand-dim">Studio</span></a>
-  <nav><a href="/about.html">Манифест</a><a href="/privacy.html">Приватность</a></nav>
+<div class="announcement">Welkom bij De Kleine Markt · klein assortiment, groot plezier</div>
+<header class="site-header">
+  <a class="brand" href="/" aria-label="De Kleine Markt — home"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a>
+  <nav aria-label="Hoofdnavigatie"><a href="#assortiment">Assortiment</a><a href="/about.html">Ons verhaal</a><a href="/contact.html">Contact</a></nav>
+  <a class="header-cta" href="#assortiment">Ontdek de winkel <span>↗</span></a>
 </header>
-
-<main class="hero">
-  <p class="kicker">v0.1 · private beta</p>
-  <h1>Код в&nbsp;потоке.<br><span class="grad">Без трения.</span></h1>
-  <p class="lead">Мы делаем инструменты для вайбкодинга: пишешь мысль —&nbsp;получаешь работающий прототип. Никаких душных настроек, только ритм и&nbsp;фидбек.</p>
-
-  <div class="cta-row">
-    <a class="btn btn-primary" href="/about.html">Читать манифест →</a>
-    <a class="btn btn-ghost" href="#features">Что внутри</a>
-  </div>
-
-  <section id="features" class="cards">
-    <article class="card"><div class="card-icon">⚡</div><h3>Мгновенный фидбек</h3><p>Изменения видны сразу, без пересборки вселенной. Пиши —&nbsp;и смотри, как оживает.</p></article>
-    <article class="card"><div class="card-icon">🧠</div><h3>Память контекста</h3><p>Студия помнит, что ты делал пять минут назад. Никаких «напомни, о чём мы».</p></article>
-    <article class="card"><div class="card-icon">🎛️</div><h3>Один пульт</h3><p>Модели, промпты, диффы — в одном месте. Переключайся, не теряя нить.</p></article>
-    <article class="card"><div class="card-icon">🌊</div><h3>Поток важнее</h3><p>Меньше кликов, больше мысли. Интерфейс уходит с дороги, когда ты в ритме.</p></article>
+<main>
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">GOED GEVONDEN, GOED GEKOZEN</p>
+      <h1>Een beetje<br><em>bijzonder</em><br>voor elke dag.</h1>
+      <p class="intro">Van versgemalen koffie tot iets lekkers voor bij de thee. Bij De Kleine Markt vind je fijne favorieten, mooie ingrediënten en kleine cadeautjes.</p>
+      <a class="button" href="#assortiment">Bekijk ons assortiment <span>→</span></a>
+      <p class="micro-note">Met aandacht uitgezocht · Voor thuis en onderweg</p>
+    </div>
+    <div class="hero-art" role="img" aria-label="Stilleven met brood, bloemen, koffie en fruit">
+      <div class="art-sun"></div><div class="art-label">DAGELIJKS<br>LEKKERS</div>
+      <div class="art-bowl"><span>✿</span></div><div class="art-leaf leaf-one"></div><div class="art-leaf leaf-two"></div>
+      <div class="art-fruit fruit-one"></div><div class="art-fruit fruit-two"></div>
+      <div class="art-caption">kleine vondsten,<br>grote glimlach</div>
+    </div>
   </section>
 
-  <section class="quote">
-    <blockquote>«Вайбкодинг — это когда код пишется сам, а&nbsp;ты только задаёшь настроение.»</blockquote>
-    <cite>— из внутреннего манифеста</cite>
+  <section class="intro-strip"><span>✳ Met zorg gekozen</span><span>✳ Fijn voor jezelf</span><span>✳ Leuk om cadeau te doen</span></section>
+
+  <section class="products section" id="assortiment">
+    <div class="section-heading"><div><p class="eyebrow">UIT DE WINKEL</p><h2>Onze favorieten</h2></div><p>Een kleine greep uit de collectie. Er is altijd iets nieuws te ontdekken.</p></div>
+    <div class="product-grid">
+      <article class="product"><div class="product-art coffee"><span>☕</span><small>01 / KOFFIE & THEE</small></div><div class="product-info"><h3>Koffie & thee</h3><p>Bonen, losse thee en lekkere melanges.</p><span class="tag">Elke dag een goed moment</span></div></article>
+      <article class="product"><div class="product-art pantry"><span>✿</span><small>02 / DELICATESSEN</small></div><div class="product-info"><h3>Delicatessen</h3><p>Olijfolie, jam, honing en smaakmakers.</p><span class="tag">Met aandacht geselecteerd</span></div></article>
+      <article class="product"><div class="product-art bakery"><span>🥐</span><small>03 / BAKKERIJ</small></div><div class="product-info"><h3>Iets lekkers</h3><p>Koekjes, chocolade en knapperige crackers.</p><span class="tag">Voor bij de koffie</span></div></article>
+      <article class="product"><div class="product-art home"><span> vase </span><small>04 / VOOR THUIS</small></div><div class="product-info"><h3>Mooi voor thuis</h3><p>Keramiek, servetten en kleine wooncadeaus.</p><span class="tag">Klein geluk</span></div></article>
+      <article class="product"><div class="product-art cheese"><span>🧀</span><small>05 / HOLLANDS GOED</small></div><div class="product-info"><h3>Kaas & borrel</h3><p>Hollandse kazen, noten en borrelhapjes.</p><span class="tag">Samen smaakt beter</span></div></article>
+      <article class="product"><div class="product-art gifts"><span>🎁</span><small>06 / CADEAUTJES</small></div><div class="product-info"><h3>Kleine cadeaus</h3><p>Attenties, kaarten en leuke pakketjes.</p><span class="tag">Zomaar of speciaal</span></div></article>
+    </div>
   </section>
 
-  <section class="status">
-    <h2>Статус студии</h2>
-    <ul>
-      <li><span class="dot ok"></span> Шлюз студии — в норме</li>
-      <li><span class="dot ok"></span> Синхронизация контекста — активна</li>
-      <li><span class="dot warn"></span> Публичный бета-доступ — по инвайтам</li>
-    </ul>
-  </section>
+  <section class="quote-band"><p class="eyebrow">ONS IDEE</p><blockquote>“Het zijn vaak de kleine dingen die een gewone dag bijzonder maken.”</blockquote><a href="/about.html">Meer over onze winkel →</a></section>
+  <section class="visit section"><div><p class="eyebrow">LOOP GERUST EVEN BINNEN</p><h2>Tot snel<br>in de winkel!</h2><p>Een plek voor dagelijkse favorieten, iets nieuws om te proeven en een praatje aan de toonbank.</p><a class="button button-dark" href="/contact.html">Praktische informatie <span>→</span></a></div><div class="visit-card"><div class="visit-flower">✳</div><p>DE KLEINE MARKT</p><strong>Goed gekozen.<br>Met plezier gegeven.</strong><small>Een fictief winkelconcept</small></div></section>
 </main>
-
-<footer><p>© <span id="y"></span> Vibe Studio. Сделано в потоке.</p></footer>
-<script>document.getElementById('y').textContent=new Date().getFullYear();</script>
+<footer><a class="brand footer-brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><div class="footer-links"><a href="/about.html">Ons verhaal</a><a href="/contact.html">Contact</a><a href="/privacy.html">Privacy</a></div><p>© <span id="year"></span> De Kleine Markt · Conceptwebsite</p></footer>
+<script>document.getElementById('year').textContent=new Date().getFullYear();</script>
 </body>
 </html>
 HTML
 
   cat > "$SITE_DIR/about.html" <<'HTML'
 <!doctype html>
-<html lang="ru">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Манифест — Vibe Studio</title>
-<link rel="stylesheet" href="/assets/styles.css">
-<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"></head>
-<body>
-<div class="bg-orb orb-a"></div><div class="bg-orb orb-b"></div>
-<header class="nav"><a class="brand" href="/"><span class="brand-mark">◆</span> Vibe<span class="brand-dim">Studio</span></a>
-<nav><a href="/">Главная</a><a href="/privacy.html">Приватность</a></nav></header>
-<main class="page">
-  <p class="kicker">manifesto</p>
-  <h1>Мы верим в&nbsp;код, который пишется в&nbsp;потоке</h1>
-  <p>Инструменты не должны требовать, чтобы ты сначала выучил их философию. Они должны подхватывать твою мысль и&nbsp;превращать её в&nbsp;работающий прототип.</p>
-  <h2>Три принципа</h2>
-  <ol class="principles">
-    <li><strong>Меньше церемоний.</strong> Ноль конфигов перед первой строкой.</li>
-    <li><strong>Фидбек быстрее мысли.</strong> Между «придумал» и&nbsp;«увидел» — секунды.</li>
-    <li><strong>Состояние потока — приоритет.</strong> Всё, что мешает, уходит с&nbsp;дороги.</li>
-  </ol>
-  <p class="muted">Мы в&nbsp;закрытой бете. Если хочешь попробовать —&nbsp;следи за&nbsp;анонсами.</p>
-</main>
-<footer><p>© <span id="y"></span> Vibe Studio</p></footer>
-<script>document.getElementById('y').textContent=new Date().getFullYear();</script>
-</body></html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ons verhaal — De Kleine Markt</title><link rel="stylesheet" href="/assets/styles.css"><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"></head>
+<body><div class="announcement">Een fictief winkelconcept · De Kleine Markt</div><header class="site-header"><a class="brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><nav><a href="/">Home</a><a href="/contact.html">Contact</a></nav><a class="header-cta" href="/#assortiment">Assortiment ↗</a></header>
+<main class="text-page"><p class="eyebrow">ONS VERHAAL</p><h1>Goed gekozen.<br><em>Met aandacht.</em></h1><p class="large-copy">De Kleine Markt is bedacht als de buurtwinkel waar je graag even binnenloopt. Voor goede koffie, iets lekkers, een mooi ingrediënt of een klein cadeau.</p><h2>Klein, fijn en met aandacht</h2><p>We geloven dat een winkel niet groot hoeft te zijn om veel te bieden. Liever een overzichtelijke collectie met producten waar je blij van wordt. Van iets voor de voorraadkast tot een kleinigheid voor op tafel.</p><h2>Een plek voor alledaags geluk</h2><p>Een goed gesprek, een nieuwe smaak of een mooi ingepakt cadeautje: juist die kleine momenten maken de dag. Dat is het idee achter De Kleine Markt.</p><a class="button" href="/#assortiment">Ontdek de favorieten →</a><p class="notice">De Kleine Markt is een fictief concept voor demonstratiedoeleinden en vertegenwoordigt geen bestaande onderneming.</p></main>
+<footer><a class="brand footer-brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><div class="footer-links"><a href="/">Home</a><a href="/contact.html">Contact</a><a href="/privacy.html">Privacy</a></div><p>© <span id="year"></span> De Kleine Markt · Conceptwebsite</p></footer><script>document.getElementById('year').textContent=new Date().getFullYear();</script></body></html>
+HTML
+
+  cat > "$SITE_DIR/contact.html" <<'HTML'
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Contact & informatie — De Kleine Markt</title><link rel="stylesheet" href="/assets/styles.css"><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"></head>
+<body><div class="announcement">Een fictief winkelconcept · De Kleine Markt</div><header class="site-header"><a class="brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><nav><a href="/">Home</a><a href="/about.html">Ons verhaal</a></nav><a class="header-cta" href="/#assortiment">Assortiment ↗</a></header>
+<main class="text-page"><p class="eyebrow">PRAKTISCHE INFORMATIE</p><h1>Kom je<br><em>even kijken?</em></h1><p class="large-copy">Hier vind je straks alle informatie over de winkel. Omdat dit een fictief winkelconcept is, zijn onderstaande gegevens demonstratiegegevens.</p><div class="contact-grid"><section><h2>Adres</h2><p>Geen bezoekadres — conceptwebsite</p></section><section><h2>E-mail</h2><p><a href="mailto:info@dekleinemarkt.example.invalid">info@dekleinemarkt.example.invalid</a></p></section><section><h2>Telefoon</h2><p>Niet beschikbaar — demonstratie</p></section><section><h2>Openingstijden</h2><p>Niet van toepassing — fictieve winkel</p></section></div><p class="notice">Dit is geen bestaande winkel. Het adres, telefoonnummer en contactgegevens van een bestaande onderneming worden bewust niet gebruikt.</p><a class="button" href="/">Terug naar de winkel →</a></main>
+<footer><a class="brand footer-brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><div class="footer-links"><a href="/about.html">Ons verhaal</a><a href="/contact.html">Contact</a><a href="/privacy.html">Privacy</a></div><p>© <span id="year"></span> De Kleine Markt · Conceptwebsite</p></footer><script>document.getElementById('year').textContent=new Date().getFullYear();</script></body></html>
 HTML
 
   cat > "$SITE_DIR/privacy.html" <<'HTML'
 <!doctype html>
-<html lang="ru">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Приватность — Vibe Studio</title>
-<link rel="stylesheet" href="/assets/styles.css">
-<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"></head>
-<body>
-<div class="bg-orb orb-a"></div><div class="bg-orb orb-b"></div>
-<header class="nav"><a class="brand" href="/"><span class="brand-mark">◆</span> Vibe<span class="brand-dim">Studio</span></a>
-<nav><a href="/">Главная</a><a href="/about.html">Манифест</a></nav></header>
-<main class="page">
-  <p class="kicker">privacy</p>
-  <h1>Приватность</h1>
-  <p>Мы не собираем персональные данные посетителей сайта. Серверные журналы содержат только агрегированные метрики без URL и&nbsp;заголовков.</p>
-  <p>Если у&nbsp;тебя есть вопросы —&nbsp;пиши: <a href="mailto:hello@example.com">hello@example.com</a>.</p>
-  <p class="muted">Обновлено: ноябрь 2026.</p>
-</main>
-<footer><p>© <span id="y"></span> Vibe Studio</p></footer>
-<script>document.getElementById('y').textContent=new Date().getFullYear();</script>
-</body></html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy — De Kleine Markt</title><link rel="stylesheet" href="/assets/styles.css"><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"></head>
+<body><div class="announcement">Een fictief winkelconcept · De Kleine Markt</div><header class="site-header"><a class="brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><nav><a href="/">Home</a><a href="/contact.html">Contact</a></nav><a class="header-cta" href="/#assortiment">Assortiment ↗</a></header>
+<main class="text-page"><p class="eyebrow">PRIVACY</p><h1>Jouw privacy<br><em>is belangrijk.</em></h1><p class="large-copy">Deze demonstratiewebsite bevat geen winkelwagen, account of contactformulier en vraagt niet om persoonsgegevens.</p><h2>Technische gegevens</h2><p>De webserver kan technische verbindingsgegevens verwerken die nodig zijn om de website te leveren en te beveiligen. De concrete verwerking hangt af van de serverconfiguratie van de beheerder.</p><h2>Cookies</h2><p>Deze voorbeeldwebsite plaatst zelf geen tracking- of marketingcookies.</p><p class="notice">De Kleine Markt is een fictief winkelconcept. Deze voorbeeldtekst is geen juridisch privacyadvies.</p><a class="button" href="/">Terug naar de winkel →</a></main>
+<footer><a class="brand footer-brand" href="/"><span class="brand-icon">✳</span><span>de kleine <b>markt</b></span></a><div class="footer-links"><a href="/">Home</a><a href="/about.html">Ons verhaal</a><a href="/contact.html">Contact</a></div><p>© <span id="year"></span> De Kleine Markt · Conceptwebsite</p></footer><script>document.getElementById('year').textContent=new Date().getFullYear();</script></body></html>
 HTML
 
   cat > "$SITE_DIR/assets/styles.css" <<'CSS'
-:root{--bg:#07080f;--bg2:#0e1122;--panel:#121730;--fg:#eef1fb;--muted:#8f9ac4;--acc:#7cf0c0;--acc2:#7aa8ff;--acc3:#c78cff;--border:#1e2547;--radius:18px;--max:1040px}
-*{box-sizing:border-box}
-html,body{margin:0;height:100%}
-body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;display:flex;flex-direction:column;min-height:100vh;position:relative;overflow-x:hidden}
-a{color:var(--acc2);text-decoration:none}
-a:hover{text-decoration:underline}
-.bg-orb{position:fixed;border-radius:50%;filter:blur(90px);opacity:.45;z-index:0;pointer-events:none}
-.orb-a{width:520px;height:520px;background:radial-gradient(circle,var(--acc2),transparent 70%);top:-200px;right:-120px}
-.orb-b{width:480px;height:480px;background:radial-gradient(circle,var(--acc3),transparent 70%);bottom:-220px;left:-160px}
-.nav{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;max-width:var(--max);margin:0 auto;padding:22px 20px;width:100%}
-.brand{font-weight:800;letter-spacing:.2px;color:var(--fg);font-size:1.15rem}
-.brand-mark{color:var(--acc);margin-right:4px}
-.brand-dim{color:var(--muted);font-weight:600}
-.nav nav a{color:var(--muted);margin-left:20px;font-size:.95rem}
-.nav nav a:hover{color:var(--fg)}
-.hero{position:relative;z-index:1;max-width:var(--max);margin:32px auto 80px;padding:0 20px;flex:1;text-align:center}
-.kicker{display:inline-block;font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;color:var(--acc);border:1px solid var(--border);border-radius:999px;padding:6px 14px;margin:0 0 22px;background:rgba(124,240,192,.06)}
-.hero h1{font-size:clamp(2.2rem,6vw,4rem);line-height:1.05;margin:0 0 22px;font-weight:800;letter-spacing:-.02em}
-.grad{background:linear-gradient(90deg,var(--acc),var(--acc2) 45%,var(--acc3));-webkit-background-clip:text;background-clip:text;color:transparent}
-.lead{color:var(--muted);font-size:1.12rem;max-width:620px;margin:0 auto 34px}
-.cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:56px}
-.btn{display:inline-block;padding:12px 22px;border-radius:12px;font-weight:600;font-size:.98rem;transition:transform .15s ease,box-shadow .15s ease,background .15s ease;border:1px solid transparent}
-.btn-primary{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04121a;box-shadow:0 10px 24px rgba(122,168,255,.28)}
-.btn-primary:hover{transform:translateY(-2px);box-shadow:0 14px 30px rgba(122,168,255,.38);text-decoration:none}
-.btn-ghost{color:var(--fg);border-color:var(--border);background:rgba(255,255,255,.02)}
-.btn-ghost:hover{background:rgba(255,255,255,.06);text-decoration:none}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;text-align:left;margin:0 0 64px}
-.card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);border-radius:var(--radius);padding:22px;transition:transform .18s ease,border-color .18s ease}
-.card:hover{transform:translateY(-4px);border-color:var(--acc2)}
-.card-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(122,168,255,.12);border:1px solid var(--border);margin-bottom:14px;font-size:1.1rem}
-.card h3{margin:0 0 8px;font-size:1.05rem;letter-spacing:-.01em}
-.card p{margin:0;color:var(--muted);font-size:.95rem}
-.quote{border:1px solid var(--border);border-radius:var(--radius);background:linear-gradient(180deg,rgba(122,168,255,.06),transparent);padding:28px 24px;margin:0 0 64px}
-.quote blockquote{margin:0 0 10px;font-size:1.25rem;line-height:1.4;font-weight:600;background:linear-gradient(90deg,var(--acc),var(--acc3));-webkit-background-clip:text;background-clip:text;color:transparent}
-.quote cite{color:var(--muted);font-style:normal;font-size:.9rem}
-.status{text-align:left;max-width:520px;margin:0 auto}
-.status h2{font-size:1.05rem;margin:0 0 12px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
-.status ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.status li{display:flex;align-items:center;color:var(--fg);font-size:.98rem}
-.dot{width:9px;height:9px;border-radius:50%;margin-right:10px;flex:0 0 auto}
-.dot.ok{background:var(--acc);box-shadow:0 0 10px var(--acc)}
-.dot.warn{background:#ffcf6e;box-shadow:0 0 10px #ffcf6e}
-.page{position:relative;z-index:1;max-width:760px;margin:32px auto 80px;padding:0 20px;flex:1;width:100%}
-.page h1{font-size:clamp(1.8rem,4vw,2.6rem);line-height:1.15;margin:0 0 18px;letter-spacing:-.02em}
-.page h2{font-size:1.2rem;margin:28px 0 12px}
-.page p{color:var(--muted)}
-.page .muted{color:var(--muted);font-size:.92rem}
-.principles{margin:0 0 20px;padding-left:1.2em;color:var(--muted)}
-.principles li{margin-bottom:10px}
-.principles strong{color:var(--fg)}
-footer{position:relative;z-index:1;border-top:1px solid var(--border);padding:24px;text-align:center;color:var(--muted);font-size:.9rem;margin-top:auto}
+:root{--paper:#f5f1e8;--ink:#24372d;--green:#315c45;--sage:#dce4d5;--orange:#d98250;--muted:#72776d;--line:#ded9cc;--serif:Georgia,"Times New Roman",serif;--sans:Arial,Helvetica,sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.6}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}.announcement{background:var(--green);color:#fff;text-align:center;padding:8px 14px;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase}.site-header{max-width:1180px;margin:auto;padding:22px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:9px;font-family:var(--serif);font-size:1.35rem;letter-spacing:-.04em;white-space:nowrap}.brand b{font-weight:700;color:var(--green)}.brand-icon{font-family:var(--sans);font-size:1.7rem;color:var(--orange)}nav{display:flex;gap:30px;font-size:.83rem;color:#586258}.header-cta{font-size:.78rem;font-weight:bold;border-bottom:1px solid var(--green);padding:8px 0;white-space:nowrap}.header-cta span{color:var(--orange)}
+.hero{max-width:1180px;margin:auto;padding:76px 28px 82px;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:64px;min-height:570px}.eyebrow{font-size:.69rem;letter-spacing:.19em;font-weight:bold;color:var(--orange);margin:0 0 20px}.hero h1,.text-page h1{font-family:var(--serif);font-size:clamp(3.5rem,7vw,6.3rem);line-height:.96;letter-spacing:-.055em;font-weight:400;margin:0 0 25px}.hero h1 em,.text-page h1 em{color:var(--green);font-weight:400}.intro{max-width:450px;color:#646b60;font-size:1rem;line-height:1.85;margin:0 0 28px}.button{display:inline-flex;align-items:center;gap:26px;background:var(--green);color:white;padding:14px 20px;font-size:.8rem;font-weight:bold;letter-spacing:.02em}.button:hover{background:#244634;text-decoration:none}.button span{font-size:1.15rem}.micro-note{font-size:.7rem;color:#85877d;margin-top:18px;letter-spacing:.04em}
+.hero-art{height:440px;position:relative;overflow:hidden;background:#d8dfce;border-radius:48% 48% 8px 8px;isolation:isolate}.hero-art:before{content:"";position:absolute;inset:18px;border:1px solid rgba(49,92,69,.24);border-radius:48% 48% 5px 5px}.art-sun{position:absolute;width:210px;height:210px;border-radius:50%;background:#e8a875;top:44px;right:60px}.art-label{position:absolute;top:42px;left:40px;font-size:.63rem;letter-spacing:.2em;line-height:1.7;color:var(--green);z-index:2}.art-bowl{position:absolute;width:230px;height:155px;left:50%;top:180px;transform:translateX(-50%);border-radius:20px 20px 110px 110px;background:#f1e6ce;box-shadow:inset 0 -14px 0 #c4b69b,0 24px 35px #6b775033;display:grid;place-items:center;font-size:4rem;color:#b66b45}.art-leaf{position:absolute;width:100px;height:180px;border-radius:100% 0 100% 0;background:#6e8c68;transform:rotate(-28deg);z-index:-1}.leaf-one{bottom:18px;left:12%}.leaf-two{bottom:35px;right:12%;transform:rotate(38deg);background:#8fa17b}.art-fruit{position:absolute;width:65px;height:65px;border-radius:50%;background:#d98250;bottom:70px;left:23%;box-shadow:inset -10px -8px 0 #b96c42}.fruit-two{width:47px;height:47px;left:auto;right:22%;bottom:95px;background:#e7bd63}.art-caption{position:absolute;right:30px;bottom:25px;font-family:var(--serif);font-style:italic;color:var(--green);font-size:1.2rem;line-height:1.1;text-align:right}
+.intro-strip{background:#e8e4d8;display:flex;justify-content:center;gap:clamp(25px,8vw,110px);padding:22px 20px;color:var(--green);font-size:.75rem;letter-spacing:.04em}.section{max-width:1180px;margin:auto;padding:92px 28px}.section-heading{display:flex;justify-content:space-between;align-items:end;margin-bottom:34px;gap:30px}.section-heading h2,.visit h2{font:400 clamp(2.6rem,5vw,4rem)/1 var(--serif);letter-spacing:-.04em;margin:0}.section-heading>p{max-width:320px;color:var(--muted);font-size:.85rem;margin:0 0 5px}.product-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:30px 22px}.product{background:#fbf9f3}.product-art{height:220px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;font-size:4.2rem}.product-art small{position:absolute;bottom:14px;left:17px;font-size:.58rem;letter-spacing:.15em;font-weight:bold;color:#536251}.coffee{background:#d9cbb8}.pantry{background:#dce3d1;color:#6d8666}.bakery{background:#eddbbf}.home{background:#d6dedb}.home span{font:italic 1.2rem var(--serif);border:3px solid #7b9a91;border-radius:40% 40% 12% 12%;padding:32px 18px;color:#52756b}.cheese{background:#e9d9a9}.gifts{background:#e8d2c6}.product-info{padding:17px 18px 20px}.product-info h3{font:400 1.45rem var(--serif);margin:0 0 4px}.product-info p{font-size:.78rem;color:var(--muted);margin:0 0 12px}.tag{font-size:.62rem;color:var(--green);border-bottom:1px solid #c6d0c1;padding-bottom:3px}
+.quote-band{background:var(--green);color:#fff;text-align:center;padding:75px 24px}.quote-band .eyebrow{color:#e7b18a}.quote-band blockquote{font:400 clamp(1.8rem,4vw,3.3rem)/1.2 var(--serif);max-width:780px;margin:0 auto 22px;letter-spacing:-.025em}.quote-band>a{font-size:.78rem;border-bottom:1px solid #b5c7b8;padding-bottom:5px}.visit{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:70px}.visit h2{margin-bottom:20px}.visit>div>p:not(.eyebrow){color:var(--muted);max-width:390px;font-size:.9rem;margin-bottom:25px}.button-dark{background:#293c31}.visit-card{background:#e4d7c4;min-height:300px;padding:40px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;outline:1px solid #c7bba8;outline-offset:-12px}.visit-flower{font-size:2.5rem;color:var(--orange)}.visit-card p{font-size:.65rem;letter-spacing:.2em;color:var(--green)}.visit-card strong{font:400 2rem/1.15 var(--serif)}.visit-card small{margin-top:22px;color:#77776c;font-size:.65rem}
+footer{border-top:1px solid var(--line);padding:28px max(28px,calc((100% - 1124px)/2));display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}.footer-brand{font-size:1.1rem}.footer-links{display:flex;gap:22px;font-size:.75rem;color:var(--muted)}footer>p{grid-column:1/-1;margin:0;color:#929186;font-size:.65rem}
+.text-page{max-width:760px;margin:85px auto 110px;padding:0 28px;min-height:50vh}.text-page h1{font-size:clamp(3.2rem,7vw,5.5rem)}.text-page h2{font:400 1.8rem var(--serif);margin:40px 0 10px}.text-page>p:not(.eyebrow){color:#666d62;line-height:1.9}.text-page .large-copy{font:400 1.45rem/1.55 var(--serif);color:var(--green);margin:30px 0 45px}.notice{margin:45px 0 28px;padding:16px 18px;background:#e9e5da;border-left:3px solid var(--orange);font-size:.78rem}.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:35px 0}.contact-grid section{padding:20px;background:#ebe7dc}.contact-grid h2{font-size:1.25rem;margin:0 0 8px}.contact-grid p{font-size:.82rem;margin:0;overflow-wrap:anywhere}
+@media(max-width:760px){.site-header{padding:17px 18px;flex-wrap:wrap}.site-header nav{order:3;width:100%;justify-content:space-between;gap:12px}.header-cta{font-size:.7rem}.hero{grid-template-columns:1fr;padding:55px 22px;gap:38px}.hero h1{font-size:4.2rem}.hero-art{height:350px;max-width:520px;width:100%;margin:auto}.intro-strip{flex-wrap:wrap;gap:12px 25px;font-size:.68rem}.section{padding:65px 20px}.section-heading{display:block}.section-heading>p{margin-top:15px}.product-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.product-art{height:155px;font-size:3rem}.product-info{padding:13px}.product-info h3{font-size:1.2rem}.product-info p{font-size:.72rem}.visit{grid-template-columns:1fr;gap:35px}.visit-card{min-height:250px}.quote-band{padding:60px 22px}footer{padding:25px 20px;grid-template-columns:1fr}.footer-links{flex-wrap:wrap}footer>p{grid-column:auto}.text-page{margin:55px auto 75px;padding:0 22px}.contact-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:420px){.brand{font-size:1.15rem}.hero h1{font-size:3.6rem}.product-grid{grid-template-columns:1fr}.product-art{height:190px}.contact-grid{grid-template-columns:1fr}.header-cta{display:none}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 CSS
 
   cat > "$SITE_DIR/assets/favicon.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-<stop offset="0" stop-color="#7cf0c0"/><stop offset=".5" stop-color="#7aa8ff"/><stop offset="1" stop-color="#c78cff"/>
-</linearGradient></defs>
-<rect width="64" height="64" rx="16" fill="#07080f"/>
-<path d="M32 12 L52 32 L32 52 L12 32 Z" fill="none" stroke="url(#g)" stroke-width="4" stroke-linejoin="round"/>
-<circle cx="32" cy="32" r="5" fill="url(#g)"/>
+<rect width="64" height="64" rx="18" fill="#315c45"/>
+<path d="M32 9l5.2 16.8L54 20l-10.5 14L58 45l-18-1.5L32 61l-8-17.5L6 47l12-13L7 20l17 6z" fill="#f5f1e8"/>
+<circle cx="32" cy="33" r="5" fill="#d98250"/>
 </svg>
 SVG
 
-  chown root:root "$SITE_DIR" "$SITE_DIR/index.html" "$SITE_DIR/about.html" "$SITE_DIR/privacy.html" \
+  chown root:root "$SITE_DIR" "$SITE_DIR/index.html" "$SITE_DIR/about.html" "$SITE_DIR/contact.html" "$SITE_DIR/privacy.html" \
     "$SITE_DIR/assets" "$SITE_DIR/assets/styles.css" "$SITE_DIR/assets/favicon.svg"
   chmod 0755 "$SITE_DIR" "$SITE_DIR/assets"
-  chmod 0644 "$SITE_DIR/index.html" "$SITE_DIR/about.html" "$SITE_DIR/privacy.html" \
+  chmod 0644 "$SITE_DIR/index.html" "$SITE_DIR/about.html" "$SITE_DIR/contact.html" "$SITE_DIR/privacy.html" \
     "$SITE_DIR/assets/styles.css" "$SITE_DIR/assets/favicon.svg"
-  ok "Права файлов сайта-заглушки настроены (каталоги 0755, файлы 0644)"
+  ok "Файлы De Kleine Markt установлены (каталоги 0755, файлы 0644)"
 }
 
 ensure_tproxy_user() {
@@ -2501,8 +2429,8 @@ remove_decoy_site() {
 
   ui_header "Удаление decoy-сайта"
   if [[ ! -d "$SITE_DIR" ]]; then info "Каталог сайта не найден: $SITE_DIR"; return 0; fi
-  if [[ ! -f "$SITE_DIR/index.html" ]] || ! grep -qF '<title>Vibe Studio — код в потоке</title>' "$SITE_DIR/index.html"; then
-    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт Vibe Studio. Ничего не удалено."
+  if [[ ! -f "$SITE_DIR/index.html" ]] || ! grep -qF '<title>De Kleine Markt — lekker lokaal, elke dag</title>' "$SITE_DIR/index.html"; then
+    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт De Kleine Markt. Ничего не удалено."
     return 1
   fi
   info "Будет удалён только штатный decoy-сайт: $SITE_DIR"
