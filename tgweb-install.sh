@@ -3073,7 +3073,7 @@ profile_menu() {
       printf '  ◆ %-20s | %-28s | backend %s\n' "$name" "$mode_label" "$backend"
     done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
     echo
-    ui_option 1 "＋" "Добавить профиль"
+    ui_option 1 "+" "Добавить профиль"
     ui_option 2 "↻" "Изменить Carrier mode"
     ui_option 3 "✖" "Удалить дополнительный профиль"
     ui_option 4 "←" "Назад"
