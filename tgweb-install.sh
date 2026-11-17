@@ -41,8 +41,6 @@ readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.0.2"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_DIR
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
