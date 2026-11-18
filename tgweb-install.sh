@@ -486,7 +486,8 @@ caddy_config_compatible() {
   [[ -s /etc/caddy/Caddyfile && -x /usr/local/bin/caddy ]] || return 1
   grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
   grep -Fq "127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile || return 1
-  grep -Fq 'TPROXY_SITE_ROOT' /etc/caddy/Caddyfile || return 1
+  # Site root is consumed by tproxy-server via config.json and the systemd drop-in,
+  # not by Caddyfile: Caddy proxies the complete domain to the relay backend.
   grep -Fq 'TPROXY_HOSTNAME' /etc/caddy/Caddyfile || return 1
   grep -Fq 'ACME_EMAIL' /etc/caddy/Caddyfile || return 1
   [[ -s /etc/systemd/system/caddy.service ]] || return 1
