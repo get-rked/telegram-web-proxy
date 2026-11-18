@@ -2787,7 +2787,7 @@ restore_command() {
     done
     echo
     read -r -p "Выбери номер архива (0 — отмена): " selection || die "Ввод прерван."
-    [[ "$selection" != "0" ]] || { info "Восстановление отменено."; return 0; }
+    [[ "$selection" != "0" ]] || { info "Восстановление отменено."; RESTORE_CANCELLED=1; return 0; }
     [[ "$selection" =~ ^[0-9]+$ ]] || die "Неверный номер архива."
     selection=$((10#$selection))
     (( selection >= 1 && selection <= ${#archives[@]} )) || die "Неверный номер архива."
@@ -3431,7 +3431,7 @@ show_tools_menu() {
     case "$choice" in
       1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
       2) require_root; backup_command; read -r -p "Enter — назад..." _ ;;
-      3) require_root; restore_command; read -r -p "Enter — назад..." _ ;;
+      3) require_root; RESTORE_CANCELLED=0; restore_command; (( RESTORE_CANCELLED == 1 )) || read -r -p "Enter — назад..." _ ;;
       4) carrier_tools_menu ;;
       5) restart_proxy_services || true; read -r -p "Enter — назад..." _ ;;
       6) return 0 ;;
