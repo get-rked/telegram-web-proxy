@@ -481,7 +481,15 @@ package_installed() {
   dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
 }
 
-# Проверка совместимости существующей конфигурации веб-сервера с текущими параметрами.
+# Проверяет только маршрутизацию домена в Caddyfile. Не зависит от systemd
+# unit/drop-in и состояния каталога сайта: decoy-сайт обслуживает tproxy-server.
+caddyfile_routes_to_tproxy() {
+  [[ -s /etc/caddy/Caddyfile ]] || return 1
+  grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
+  grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile
+}
+
+# Проверка полной совместимости Caddy с текущими параметрами.
 caddy_config_compatible() {
   [[ -s /etc/caddy/Caddyfile && -x /usr/local/bin/caddy ]] || return 1
   grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
@@ -831,10 +839,10 @@ preflight_system() {
          grep -Fq 'proxy_pass http://127.0.0.1:' "$NGINX_SITE"; then
         nginx_config_compatible || die "Текущая конфигурация Nginx для этого домена изменилась. Не перезаписываю занятый сайт автоматически; сначала проверь vhost вручную."
         managed_tproxy=1
-      elif [[ "$WEB_SERVER" == "caddy" ]] &&
-           grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile &&
-           grep -Fq 'reverse_proxy 127.0.0.1:' /etc/caddy/Caddyfile; then
-        caddy_config_compatible || die "Текущая конфигурация Caddy для этого домена изменилась. Не перезаписываю занятый сайт автоматически; сначала проверь Caddyfile вручную."
+      elif [[ "$WEB_SERVER" == "caddy" ]] && caddyfile_routes_to_tproxy; then
+        # A matching Caddy virtual host is sufficient to identify our occupied
+        # domain. Unit/drop-in drift must not block restoring backend-served
+        # site files or cause an otherwise working Caddy instance to be replaced.
         managed_tproxy=1
       fi
     fi
@@ -2349,8 +2357,13 @@ run_install() {
   write_mtproxy_env
   install_units
   if [[ "$WEB_SERVER" == "caddy" ]]; then
-    if caddy_config_compatible; then ok "Совместимая конфигурация Caddy уже существует — запись пропущена."
-    else install_caddyfile; fi
+    if caddyfile_routes_to_tproxy; then
+      ok "Существующий Caddyfile уже проксирует этот домен на relay — Caddyfile и systemd unit не изменяю."
+    elif caddy_config_compatible; then
+      ok "Совместимая конфигурация Caddy уже существует — запись пропущена."
+    else
+      install_caddyfile
+    fi
   else
     if nginx_config_compatible; then ok "Совместимая конфигурация Nginx уже существует — запись и reload пропущены."
     else install_nginx_config; fi
