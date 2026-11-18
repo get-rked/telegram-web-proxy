@@ -4304,7 +4304,8 @@ profile_cli() {
       if [[ "$target" == default ]]; then
         [[ -f "$file" ]] || { rm -rf "$rollback" "$tmp"; die "Профиль default не найден."; }
         install -d -o root -g root -m 0700 "$BACKUP_DIR/profile-backups"
-        local pre="$BACKUP_DIR/profile-backups/trpoxy-profile-backup-default-before-import-$(date +%Y%m%d-%H%M%S).tar.gz"
+        local pre
+        pre="$BACKUP_DIR/profile-backups/trpoxy-profile-backup-default-before-import-$(date +%Y%m%d-%H%M%S).tar.gz"
         tar -C "$PROXY_CONFIG_DIR" -czpf "$pre" profiles/default/profile.json || { rm -rf "$rollback" "$tmp"; die "Не удалось сохранить default."; }; chmod 0600 "$pre"
       fi
       [[ ! -f "$file" ]] || cp -a "$file" "$rollback/profile.json"
@@ -4312,7 +4313,7 @@ profile_cli() {
       chown root:tproxy "$tmp.new"; chmod 0640 "$tmp.new"; install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$target"; mv -f "$tmp.new" "$file"
       if ! profile_manifest_sync || ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || ! write_mtproxy_secrets || ! patch_mtproxy_unit || ! systemctl restart mtproxy tproxy-server; then
         [[ ! -f "$rollback/profile.json" ]] || cp -a "$rollback/profile.json" "$file"
-        [[ -f "$rollback/profile.json" ]] || rm -rf -- "$PROFILE_DIR/$target"
+        [[ -f "$rollback/profile.json" ]] || rm -rf -- "${PROFILE_DIR:?}/${target:?}"
         cp -a "$rollback/profiles.json" "$PROFILES_FILE"
         cp -a "$rollback/mtproxy.env" "$MT_ENV"
         cp -a "$rollback/mtproxy.service" "$UNIT_FILE"
