@@ -1568,9 +1568,9 @@ EOF
   [[ "$profile_name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || die "Недопустимое имя профиля: $profile_name"
   install -d -o root -g tproxy -m 0750 "$profile_dir/$profile_name"
   profile_tmp="$(mktemp "$profile_dir/$profile_name/profile.json.XXXXXX")"
-  if ! jq --arg n "$profile_name" --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" --argjson update "$([[ "$MODE" == "update" ]] && echo true || echo false)" '
+  if ! jq --arg n "$profile_name" --arg secret "$SECRET_ARG" --arg mode "$CARRIER_MODE_ARG" --argjson update "$([[ "$MODE" == "update" ]] && echo true || echo false)" --argjson mode_set "$CARRIER_MODE_SET" '
       .profiles[] | select(.name == $n) |
-      .secret = $secret | if $update then . else .carrier_mode = $mode end
+      .secret = $secret | if ($update and ($mode_set == 0)) then . else .carrier_mode = $mode end
     ' "$PROXY_CONFIG_DIR/profiles.json" > "$profile_tmp" ||
      ! jq -e --arg n "$profile_name" '
       type == "object" and .name == $n and
@@ -3067,74 +3067,178 @@ profile_secret_prompt() {
   done
 }
 
+profile_backup_menu() {
+  local file dest stamp
+  profile_choose || return 0
+  file="$PROFILE_DIR/$PROFILE_NAME/profile.json"
+  [[ -s "$file" ]] || die "Файл профиля не найден."
+  install -d -o root -g root -m 0700 "$BACKUP_DIR/profile-backups"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dest="$BACKUP_DIR/profile-backups/profile-${PROFILE_NAME}-${stamp}.tar.gz"
+  [[ ! -e "$dest" ]] || die "Архив уже существует: $dest"
+  tar -C "$PROXY_CONFIG_DIR" -czpf "$dest" "profiles/$PROFILE_NAME/profile.json"
+  tar -tzf "$dest" | grep -Fxq "profiles/$PROFILE_NAME/profile.json" || die "Проверка архива профиля не пройдена."
+  chmod 0600 "$dest"
+  ok "Профиль $PROFILE_NAME сохранён: $dest"
+}
+
+profile_archive_list() {
+  local archive
+  for archive in "$BACKUP_DIR"/profile-backups/profile-*.tar.gz "$BACKUP_DIR"/tproxy-backup-*.tar.gz; do
+    [[ -f "$archive" ]] && printf "%s\n" "$archive"
+  done | sort -r
+}
+
+profile_import_menu() {
+  local selection archive entry profile_path extracted name secret backend mode target active_backend relay_port
+  local count choice canonical existing_secret destination tmp rollback_dir backend_port
+  local -a archives=()
+  mapfile -t archives < <(profile_archive_list)
+  ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
+  ui_header "Импорт профиля из резервной копии"
+  for i in "${!archives[@]}"; do printf "  %2d) %s\n" "$((i+1))" "${archives[$i]##*/}"; done
+  read -r -p "Выбери архив (0 — отмена): " selection || return 0
+  [[ "$selection" =~ ^[0-9]+$ ]] || { warn "Неверный номер."; return 0; }
+  (( selection > 0 && selection <= ${#archives[@]} )) || return 0
+  archive="${archives[selection-1]}"
+  tar -tzf "$archive" >/dev/null 2>&1 || { warn "Архив повреждён."; return 0; }
+  profile_path=""
+  while IFS= read -r entry; do
+    entry="${entry#./}"
+    case "$entry" in
+      profiles/*/profile.json|opt/telegram-web-proxy/config/proxy/profiles/*/profile.json)
+        [[ -z "$profile_path" ]] || { warn "В архиве несколько профилей; выбери архив одного профиля."; return 0; }
+        profile_path="$entry" ;;
+    esac
+  done < <(tar -tzf "$archive")
+  [[ -n "$profile_path" ]] || { warn "В архиве не найден файл профиля."; return 0; }
+  extracted="$(mktemp)"
+  if ! tar -xOzf "$archive" "$profile_path" > "$extracted" 2>/dev/null; then rm -f "$extracted"; warn "Не удалось прочитать профиль."; return 0; fi
+  if ! jq -e 'type == "object" and (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and (.backend | type == "string" and test("^127\\.0\\.0\\.1:[0-9]{1,5}$")) and (.carrier_mode | type == "string" and (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))' "$extracted" >/dev/null; then
+    rm -f "$extracted"; warn "Профиль не прошёл проверку или содержит неподдерживаемый backend."; return 0
+  fi
+  name="$(jq -r ".name" "$extracted")"
+  secret="$(jq -r ".secret" "$extracted")"
+  backend="$(jq -r ".backend" "$extracted")"
+  mode="$(jq -r ".carrier_mode" "$extracted")"
+  active_backend="$(jq -r ".profiles[0].backend" "$PROFILES_FILE")"
+  relay_port="$(jq -r ".listen | split(\":\")[-1]" "$CONFIG_FILE")"
+  printf "\nПараметры профиля:\n  Имя: %s\n  Backend: %s\n  Carrier mode: %s\n  Секрет: скрыт\n" "$name" "$backend" "$mode"
+  if [[ "$backend" != "$active_backend" ]]; then
+    echo "В текущей версии все профили используют один общий backend: $active_backend"
+    read -r -p "Переназначить импортируемый профиль на активный backend? [y/N]: " choice
+    if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+    backend="$active_backend"
+  fi
+  backend_port="${backend##*:}"
+  if ! validate_port "$backend_port" >/dev/null 2>&1 || [[ "$backend_port" == "$relay_port" || "$backend_port" == "$ADMIN_PORT" ]]; then
+    rm -f "$extracted"; warn "Backend порт конфликтует с relay/admin портом или недопустим."; return 0
+  fi
+  read -r -p "Имя целевого профиля [$name]: " target || { rm -f "$extracted"; return 0; }
+  target="${target:-$name}"
+  if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
+  count="$(jq ".profiles | length" "$PROFILES_FILE")"
+  destination="$PROFILE_DIR/$target/profile.json"
+  if [[ -e "$PROFILE_DIR/$target" ]]; then
+    read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
+    if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+  elif (( count >= 32 )); then rm -f "$extracted"; warn "Достигнут лимит 32 профиля."; return 0; fi
+  canonical="${secret#dd}"
+  while IFS= read -r existing_secret; do
+    [[ -n "$existing_secret" ]] || continue
+    if [[ "${existing_secret#dd}" == "$canonical" ]]; then
+      if [[ -f "$destination" && "$existing_secret" == "$(jq -r ".secret" "$destination")" ]]; then continue; fi
+      rm -f "$extracted"; warn "Этот секрет уже используется другим профилем."; return 0
+    fi
+  done < <(jq -r ".profiles[].secret" "$PROFILES_FILE")
+  tmp="$(mktemp)"
+  jq --arg n "$target" --arg b "$backend" '.name=$n | .backend=$b' "$extracted" > "$tmp"
+  rm -f "$extracted"
+  chown root:tproxy "$tmp"; chmod 0640 "$tmp"
+  rollback_dir="$(mktemp -d)"
+  cp -a "$PROFILES_FILE" "$rollback_dir/profiles.json"
+  if [[ -f "$destination" ]]; then cp -a "$destination" "$rollback_dir/profile.json"; fi
+  install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$target"
+  mv -f "$tmp" "$destination"
+  chown root:tproxy "$destination"; chmod 0640 "$destination"
+  if ! profile_manifest_sync || ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then
+    if [[ -f "$rollback_dir/profile.json" ]]; then cp -a "$rollback_dir/profile.json" "$destination"; else rm -rf -- "$PROFILE_DIR/$target"; fi
+    cp -a "$rollback_dir/profiles.json" "$PROFILES_FILE"; rm -rf "$rollback_dir"
+    die "Импорт не прошёл проверку; исходная конфигурация восстановлена."
+  fi
+  if ! write_mtproxy_secrets || ! patch_mtproxy_unit || ! systemctl restart mtproxy tproxy-server; then
+    if [[ -f "$rollback_dir/profile.json" ]]; then cp -a "$rollback_dir/profile.json" "$destination"; else rm -rf -- "$PROFILE_DIR/$target"; fi
+    cp -a "$rollback_dir/profiles.json" "$PROFILES_FILE"; rm -rf "$rollback_dir"
+    die "Не удалось применить профиль; исходная конфигурация восстановлена."
+  fi
+  rm -rf "$rollback_dir"
+  ok "Профиль $target импортирован и проверен."
+}
+
 profile_menu() {
   local choice name mode mode_label backend count file tmp selected profile_row
   while :; do
-    ui_header "Профили подключений"
-    printf '  Общий домен: %s\n' "$HOSTNAME_VALUE"
+    ui_header "Carrier mode и профили"
+    printf "  Общий домен: %s\n" "$HOSTNAME_VALUE"
     while IFS= read -r profile_row; do
-      name="$(cut -f1 <<< "$profile_row")"
-      mode="$(cut -f2 <<< "$profile_row")"
-      backend="$(cut -f3 <<< "$profile_row")"
-      case "$mode" in
-        https) mode_label="HTTPS" ;;
-        https-lanes) mode_label="HTTPS · несколько каналов" ;;
-        websocket) mode_label="WebSocket" ;;
-        websocket-lanes) mode_label="WebSocket · несколько каналов" ;;
-        *) mode_label="$mode" ;;
-      esac
-      printf '  ◆ %-20s | %-28s | backend %s\n' "$name" "$mode_label" "$backend"
+      name="$(cut -f1 <<< "$profile_row")"; mode="$(cut -f2 <<< "$profile_row")"; backend="$(cut -f3 <<< "$profile_row")"
+      case "$mode" in https) mode_label="HTTPS" ;; https-lanes) mode_label="HTTPS · несколько каналов" ;; websocket) mode_label="WebSocket" ;; websocket-lanes) mode_label="WebSocket · несколько каналов" ;; *) mode_label="$mode" ;; esac
+      printf "  ◆ %-20s | %-28s | backend %s\n" "$name" "$mode_label" "$backend"
     done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
     echo
     ui_option 1 "+" "Добавить профиль"
-    ui_option 2 "↻" "Изменить Carrier mode"
+    ui_option 2 "↻" "Изменить Carrier mode выбранного профиля"
     ui_option 3 "✖" "Удалить дополнительный профиль"
-    ui_option 4 "←" "Назад"
+    ui_option 4 "▤" "Создать резервную копию профиля"
+    ui_option 5 "⇧" "Импортировать профиль из резервной копии"
+    ui_option 6 "←" "Назад"
     echo
-    read -r -p "Выбор [1-4]: " choice
+    read -r -p "Выбор [1-6]: " choice
     case "$choice" in
       1)
-        count="$(jq '.profiles | length' "$PROFILES_FILE")"
-        (( count < 32 )) || { echo "Достигнут лимит 32 профиля."; read -r -p "Enter..." _; continue; }
-        read -r -p "Имя профиля (латиница, цифры, _ и -): " name
-        valid_name "$name" && [[ ! -e "$PROFILE_DIR/$name" ]] || { echo "Имя недопустимо или уже занято."; read -r -p "Enter..." _; continue; }
-        profile_secret_prompt || { read -r -p "Enter..." _; continue; }
-        if jq -e --arg s "$PROFILE_SECRET" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then
-          echo "Секрет уже используется."; read -r -p "Enter..." _; continue
-        fi
+        count="$(jq ".profiles | length" "$PROFILES_FILE")"; (( count < 32 )) || { warn "Достигнут лимит 32 профиля."; continue; }
+        read -r -p "Имя профиля: " name
+        valid_name "$name" && [[ ! -e "$PROFILE_DIR/$name" ]] || { warn "Имя недопустимо или уже занято."; continue; }
+        profile_secret_prompt || continue
+        if jq -e --arg s "$PROFILE_SECRET" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then warn "Секрет уже используется."; continue; fi
         echo "Carrier mode: [1] HTTPS [2] HTTPS с каналами [3] WebSocket [4] WebSocket с каналами"
         read -r -p "Выбор [1-4]: " choice
-        case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo "Недопустимый режим."; continue ;; esac
-        backend="$(jq -r '.profiles[0].backend' "$PROFILES_FILE")"
+        case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) warn "Недопустимый режим."; continue ;; esac
+        backend="$(jq -r ".profiles[0].backend" "$PROFILES_FILE")"
         install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$name"
         jq -n --arg n "$name" --arg s "$PROFILE_SECRET" --arg b "$backend" --arg m "$mode" '{name:$n,secret:$s,backend:$b,carrier_mode:$m}' > "$PROFILE_DIR/$name/profile.json"
         chown root:tproxy "$PROFILE_DIR/$name/profile.json"; chmod 0640 "$PROFILE_DIR/$name/profile.json"
         profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
-        systemctl restart mtproxy tproxy-server
-        echo "Профиль $name добавлен."; read -r -p "Enter..." _ ;;
+        systemctl restart mtproxy tproxy-server || die "Не удалось перезапустить службы после добавления профиля."
+        ok "Профиль $name добавлен." ;;
       2)
         profile_choose || continue
         echo "Carrier mode: [1] HTTPS [2] HTTPS с каналами [3] WebSocket [4] WebSocket с каналами"
         read -r -p "Выбор [1-4]: " choice
-        case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) echo "Недопустимый режим."; continue ;; esac
+        case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) warn "Недопустимый режим."; continue ;; esac
         file="$PROFILE_DIR/$PROFILE_NAME/profile.json"; tmp="$(mktemp "$file.XXXXXX")"
         jq --arg m "$mode" '.carrier_mode = $m' "$file" > "$tmp"
         chown root:tproxy "$tmp"; chmod 0640 "$tmp"; mv -f "$tmp" "$file"
-        profile_manifest_sync; systemctl restart tproxy-server
-        echo "Carrier mode профиля $PROFILE_NAME изменён."; read -r -p "Enter..." _ ;;
+        profile_manifest_sync
+        "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Carrier mode не прошёл проверку конфигурации."
+        systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
+        ok "Carrier mode профиля $PROFILE_NAME изменён." ;;
       3)
-        count="$(jq '.profiles | length' "$PROFILES_FILE")"; (( count > 1 )) || { echo "Нельзя удалить последний профиль."; read -r -p "Enter..." _; continue; }
+        count="$(jq ".profiles | length" "$PROFILES_FILE")"; (( count > 1 )) || { warn "Нельзя удалить последний профиль."; continue; }
         profile_choose || continue
-        [[ "$PROFILE_NAME" != default ]] || { echo "Профиль default защищён."; read -r -p "Enter..." _; continue; }
+        [[ "$PROFILE_NAME" != default ]] || { warn "Профиль default защищён."; continue; }
         read -r -p "Удалить профиль $PROFILE_NAME? [y/N]: " selected
         [[ "$selected" =~ ^[YyДд]$ ]] || continue
         rm -rf -- "${PROFILE_DIR:?}/${PROFILE_NAME:?}"
         profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
-        systemctl restart mtproxy tproxy-server
-        echo "Профиль $PROFILE_NAME удалён."; read -r -p "Enter..." _ ;;
-      4) return 0 ;;
-      *) echo "Неверный выбор."; sleep 1 ;;
+        systemctl restart mtproxy tproxy-server || die "Не удалось перезапустить службы после удаления профиля."
+        ok "Профиль $PROFILE_NAME удалён." ;;
+      4) profile_backup_menu ;;
+      5) profile_import_menu ;;
+      6) return 0 ;;
+      *) warn "Неверный выбор." ;;
     esac
+    read -r -p "Enter — продолжить..." _
   done
 }
 upstream_menu() {
