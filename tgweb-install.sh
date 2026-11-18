@@ -2420,9 +2420,10 @@ run_uninstall() {
 }
 
 remove_decoy_site() {
+  require_root
   local configured_site=""
-  if [[ -f "$CONFIG_FILE" ]]; then
-    configured_site="$(jq -r '.site_dir // empty' "$CONFIG_FILE" 2>/dev/null || true)"
+  if command -v jq >/dev/null 2>&1 && [[ -r $PROXY_CONFIG_DIR/config.json ]]; then
+    configured_site="$(jq -r '.public_dir // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null || true)"
   fi
   if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
 
