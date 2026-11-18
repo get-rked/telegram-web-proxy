@@ -3091,8 +3091,8 @@ profile_archive_list() {
 
 profile_import_menu() {
   local selection archive entry profile_path extracted name secret backend mode target active_backend relay_port
-  local count choice canonical existing_secret destination tmp rollback_dir backend_port
-  local -a archives=()
+  local count choice canonical existing_secret destination tmp rollback_dir backend_port profile_choice
+  local -a archives=() profile_paths=()
   mapfile -t archives < <(profile_archive_list)
   ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
   ui_header "Импорт профиля из резервной копии"
@@ -3102,16 +3102,22 @@ profile_import_menu() {
   (( selection > 0 && selection <= ${#archives[@]} )) || return 0
   archive="${archives[selection-1]}"
   tar -tzf "$archive" >/dev/null 2>&1 || { warn "Архив повреждён."; return 0; }
-  profile_path=""
   while IFS= read -r entry; do
     entry="${entry#./}"
     case "$entry" in
-      profiles/*/profile.json|opt/telegram-web-proxy/config/proxy/profiles/*/profile.json)
-        [[ -z "$profile_path" ]] || { warn "В архиве несколько профилей; выбери архив одного профиля."; return 0; }
-        profile_path="$entry" ;;
+      profiles/*/profile.json|opt/telegram-web-proxy/config/proxy/profiles/*/profile.json) profile_paths+=("$entry") ;;
     esac
   done < <(tar -tzf "$archive")
-  [[ -n "$profile_path" ]] || { warn "В архиве не найден файл профиля."; return 0; }
+  ((${#profile_paths[@]})) || { warn "В архиве не найден файл профиля."; return 0; }
+  if ((${#profile_paths[@]} > 1)); then
+    echo "В архиве найдены профили:"
+    for i in "${!profile_paths[@]}"; do printf "  %2d) %s\\n" "$((i+1))" "${profile_paths[$i]}"; done
+    read -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
+    [[ "$profile_choice" =~ ^[0-9]+$ ]] && ((profile_choice > 0 && profile_choice <= ${#profile_paths[@]})) || return 0
+    profile_path="${profile_paths[profile_choice-1]}"
+  else
+    profile_path="${profile_paths[0]}"
+  fi
   extracted="$(mktemp)"
   if ! tar -xOzf "$archive" "$profile_path" > "$extracted" 2>/dev/null; then rm -f "$extracted"; warn "Не удалось прочитать профиль."; return 0; fi
   if ! jq -e 'type == "object" and (.name | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and (.secret | type == "string" and test("^(dd)?[0-9a-f]{32}$")) and (.backend | type == "string" and test("^127\\.0\\.0\\.1:[0-9]{1,5}$")) and (.carrier_mode | type == "string" and (. == "https" or . == "https-lanes" or . == "websocket" or . == "websocket-lanes"))' "$extracted" >/dev/null; then
