@@ -2765,7 +2765,7 @@ list_backup_archives() {
   local -n result_ref=$1
   result_ref=()
   [[ -d "$BACKUP_DIR" ]] || return 0
-  mapfile -t result_ref < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\\n' | sort -r)
+  mapfile -t result_ref < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\n' | sort -r)
 }
 
 restore_command() {
@@ -2775,6 +2775,7 @@ restore_command() {
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
 
   if [[ -n "$selection" && "$selection" =~ ^[0-9]+$ ]]; then
+    selection=$((10#$selection))
     (( selection >= 1 && selection <= ${#archives[@]} )) || die "Номер архива вне списка."
     archive="$BACKUP_DIR/${archives[selection-1]}"
   elif [[ -z "$selection" ]]; then
@@ -2787,7 +2788,9 @@ restore_command() {
     echo
     read -r -p "Выбери номер архива (0 — отмена): " selection || die "Ввод прерван."
     [[ "$selection" != "0" ]] || { info "Восстановление отменено."; return 0; }
-    [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#archives[@]} )) || die "Неверный номер архива."
+    [[ "$selection" =~ ^[0-9]+$ ]] || die "Неверный номер архива."
+    selection=$((10#$selection))
+    (( selection >= 1 && selection <= ${#archives[@]} )) || die "Неверный номер архива."
     archive="$BACKUP_DIR/${archives[selection-1]}"
   else
     die "Укажи номер архива из списка, а не путь к файлу."
@@ -3289,7 +3292,7 @@ restart_proxy_services() {
 }
 
 show_tools_menu() {
-  local choice archive
+  local choice
   while true; do
     ui_header "Инструменты"
     ui_option 1 "⌕" "Диагностика и поиск неисправностей"
