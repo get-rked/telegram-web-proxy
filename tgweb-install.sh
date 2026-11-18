@@ -4120,7 +4120,7 @@ show_tools_menu() {
 }
 show_menu() {
   local choice
-  ui_header "tproxy-manager v${SCRIPT_VERSION}"
+  ui_header "Telegram WEB-Proxy Manager v${SCRIPT_VERSION}"
   ui_option 1 "⇧" "Установить tproxy-server"
   ui_option 2 "↻" "Обновить существующую установку"
   ui_option 3 "⌫" "Удаление"
