@@ -2764,7 +2764,7 @@ backup_command() {
 
 list_backup_archives() {
   [[ -d "$BACKUP_DIR" ]] || return 0
-  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\\n' | sort -r
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\n' | sort -r
 }
 
 restore_command() {
@@ -3082,10 +3082,13 @@ profile_backup_menu() {
   ok "Профиль $PROFILE_NAME сохранён: $dest"
 }
 
-profile_archive_list() {
+pprofile_archive_list() {
   local archive
   for archive in "$BACKUP_DIR"/profile-backups/trpoxy-profile-backup-*.tar.gz "$BACKUP_DIR"/profile-backups/profile-*.tar.gz; do
-    [[ -f "$archive" ]] && printf "%s\n" "$archive"
+    [[ -f "$archive" ]] || continue
+    # Full-system backups are never valid profile-import sources.
+    tar -tzf "$archive" 2>/dev/null | grep -Eq '^profiles/[^/]+/profile\.json$' || continue
+    printf '%s\n' "$archive"
   done | sort -r
 }
 
