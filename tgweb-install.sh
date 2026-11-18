@@ -2783,7 +2783,7 @@ restore_command() {
     for i in "${!archives[@]}"; do
       printf '  %2d) %-42s  ' "$((i+1))" "${archives[i]}"
       size="$(du -h -- "$BACKUP_DIR/${archives[i]}")" || die "Не удалось определить размер архива: ${archives[i]}"
-      printf '%s\n' "${size%%
+      printf '%s\n' "${size%%[[:space:]]*}"
     done
     echo
     read -r -p "Выбери номер архива (0 — отмена): " selection || die "Ввод прерван."
