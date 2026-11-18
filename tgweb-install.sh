@@ -4,9 +4,9 @@
 #
 #  Usage:
 #    sudo ./tproxy-manager.sh                  # интерактивное меню
-#    sudo ./tproxy-manager.sh install [опции]  # установка
-#    sudo ./tproxy-manager.sh update  [опции]  # обновление (skip-tests, не трогает сайт)
-#    sudo ./tproxy-manager.sh uninstall [--keep-web-server] [--yes]
+#    sudo ./tgweb-install.sh install [опции]  # установка
+#    sudo ./tgweb-install.sh update  [опции]  # обновление (skip-tests, не трогает сайт)
+#    sudo ./tgweb-install.sh uninstall [--keep-web-server] [--yes]
 #    sudo ./tproxy-manager.sh purge     [--yes]
 # ============================================================================
 set -Eeuo pipefail
@@ -148,7 +148,7 @@ redact_sensitive_log() {
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./tproxy-manager.sh                          # интерактивное меню
+  sudo ./tgweb-install.sh                          # интерактивное меню
   sudo ./tproxy-manager.sh install   [опции установки]
   sudo ./tproxy-manager.sh update    [опции установки]
   sudo ./tproxy-manager.sh uninstall [--keep-caddy] [--yes]
@@ -4417,8 +4417,8 @@ profile_cli() {
       tar -tzf "$archive" >/dev/null 2>&1 || die "Архив повреждён."
       local -a entries=()
       while IFS= read -r file; do file="${file#./}"; case "$file" in profiles/*/profile.json|opt/telegram-web-proxy/config/proxy/profiles/*/profile.json) entries+=("$file") ;; esac; done < <(tar -tzf "$archive")
-      (("${#entries[@]}" > 0)) || die "В архиве нет профилей."
-      if [[ -z "$entry" ]]; then (("${#entries[@]}" == 1)) || die "В архиве несколько профилей; укажи --entry."; entry="${entries[0]}"; fi
+      ((${#entries[@]} > 0)) || die "В архиве нет профилей."
+      if [[ -z "$entry" ]]; then ((${#entries[@]} == 1)) || die "В архиве несколько профилей; укажи --entry."; entry="${entries[0]}"; fi
       local found=0 candidate; for candidate in "${entries[@]}"; do [[ "$candidate" == "$entry" ]] && found=1; done
       (( found )) || die "Путь --entry не найден."
       tmp="$(mktemp)"; tar -xOzf "$archive" "$entry" > "$tmp" || { rm -f "$tmp"; die "Не удалось извлечь профиль."; }
