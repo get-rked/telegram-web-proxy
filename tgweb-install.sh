@@ -1665,7 +1665,13 @@ install_units() {
       -e "s#/usr/local/sbin/refresh-mtproxy-config#$BIN_DIR/refresh-mtproxy-config#g" \
       -e "s#/srv/tproxy-site#$SITE_DIR#g" "$src" > "$dst"
     if [[ "$name" == "mtproxy.service" ]]; then
-      sed -i 's/-S ${MTPROXY_SECRET}/-S $MTPROXY_SECRETS/' "$dst"
+      # All MTProxy runtime settings come from mtproxy.env. Keeping duplicate
+      # Environment= entries here would override EnvironmentFile values.
+      sed -i \
+        -e '/^[[:space:]]*Environment=MTPROXY_WORKERS=/d' \
+        -e '/^[[:space:]]*Environment=MTPROXY_MAX_CONNECTIONS=/d' \
+        -e '/^[[:space:]]*Environment=MTPROXY_NAT_ARGS=/d' \
+        -e 's/-S ${MTPROXY_SECRET}/-S $MTPROXY_SECRETS/' "$dst"
     elif [[ "$name" == "tproxy-server.service" ]]; then
       # Validate the exact systemd credential at service start. This catches
       # credential-path/schema mismatches that a temporary-file check cannot.
