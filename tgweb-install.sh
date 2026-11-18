@@ -4384,7 +4384,7 @@ profile_cli() {
       systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
       ok "Carrier mode профиля $name изменён." ;;
     delete)
-      (($# == 2 && "$2" == --yes)) || die "profile delete ИМЯ --yes"
+      [[ $# -eq 2 && "$2" == --yes ]] || die "profile delete ИМЯ --yes"
       name="$1"; valid_name "$name" || die "Недопустимое имя."
       [[ "$name" != default ]] || die "Профиль default защищён."
       [[ -d "$PROFILE_DIR/$name" ]] || die "Профиль не найден."
