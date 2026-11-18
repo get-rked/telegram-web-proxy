@@ -3094,8 +3094,8 @@ profile_archive_list() {
 }
 
 profile_import_menu() {
-  local selection archive entry profile_path extracted name secret backend mode target active_backend relay_port
-  local count choice canonical existing_secret destination tmp rollback_dir backend_port profile_choice
+  local selection archive entry profile_path extracted name secret backend mode target target_mode active_backend relay_port
+  local count choice canonical existing_secret destination tmp rollback_dir backend_port profile_choice backup_dir backup_file
   local -a archives=() profile_paths=()
   mapfile -t archives < <(profile_archive_list)
   ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
@@ -3156,20 +3156,40 @@ profile_import_menu() {
   if ! validate_port "$backend_port" >/dev/null 2>&1 || [[ "$backend_port" == "$relay_port" || "$backend_port" == "$ADMIN_PORT" ]]; then
     rm -f "$extracted"; warn "Backend порт конфликтует с relay/admin портом или недопустим."; return 0
   fi
-  read -r -p "Имя целевого профиля [$name]: " target || { rm -f "$extracted"; return 0; }
-  target="${target:-$name}"
-  if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
+  echo
+  echo "Действие с импортируемым профилем:"
+  echo "  1) Создать новый профиль (или заменить профиль с таким же именем)"
+  echo "  2) Заменить системный профиль default"
+  read -r -p "Выбор [1-2] (0 — отмена): " target_mode || { rm -f "$extracted"; return 0; }
+  case "$target_mode" in
+    1)
+      read -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
+      target="${target:-$name}"
+      if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
+      ;;
+    2)
+      target="default"
+      [[ -s "$PROFILE_DIR/default/profile.json" ]] || { rm -f "$extracted"; warn "Профиль default не найден; заменить его невозможно."; return 0; }
+      read -r -p "Заменить текущий профиль default импортируемым профилем? [y/N]: " choice
+      if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+      ;;
+    0|"") rm -f "$extracted"; info "Импорт отменён."; return 0 ;;
+    *) rm -f "$extracted"; warn "Неверный выбор."; return 0 ;;
+  esac
   count="$(jq ".profiles | length" "$PROFILES_FILE")"
   destination="$PROFILE_DIR/$target/profile.json"
   if [[ -e "$PROFILE_DIR/$target" ]]; then
-    read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
-    if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+    if [[ "$target" != "default" || "$target_mode" != "2" ]]; then
+      read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
+      if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+    fi
   elif (( count >= 32 )); then rm -f "$extracted"; warn "Достигнут лимит 32 профиля."; return 0; fi
   canonical="${secret#dd}"
   while IFS= read -r existing_secret; do
     [[ -n "$existing_secret" ]] || continue
     if [[ "${existing_secret#dd}" == "$canonical" ]]; then
-      if [[ -f "$destination" && "$existing_secret" == "$(jq -r ".secret" "$destination")" ]]; then continue; fi
+      destination_secret="$(jq -r '.secret' "$destination" 2>/dev/null || true)"
+      if [[ -f "$destination" && "${destination_secret#dd}" == "$canonical" ]]; then continue; fi
       rm -f "$extracted"; warn "Этот секрет уже используется другим профилем."; return 0
     fi
   done < <(jq -r ".profiles[].secret" "$PROFILES_FILE")
@@ -3179,6 +3199,16 @@ profile_import_menu() {
   chown root:tproxy "$tmp"; chmod 0640 "$tmp"
   rollback_dir="$(mktemp -d)"
   cp -a "$PROFILES_FILE" "$rollback_dir/profiles.json"
+  if [[ "$target" == "default" ]]; then
+    backup_dir="$BACKUP_DIR/profile-backups"
+    install -d -o root -g root -m 0700 "$backup_dir"
+    backup_file="$backup_dir/trpoxy-profile-backup-default-before-import-$(date +%Y%m%d-%H%M%S).tar.gz"
+    tar -C "$PROXY_CONFIG_DIR" -czpf "$backup_file" "profiles/default/profile.json" || {
+      rm -rf "$rollback_dir" "$tmp"; warn "Не удалось сохранить текущий default; импорт отменён."; return 0;
+    }
+    chmod 0600 "$backup_file"
+    info "Текущий default сохранён: $backup_file"
+  fi
   if [[ -f "$destination" ]]; then cp -a "$destination" "$rollback_dir/profile.json"; fi
   install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$target"
   mv -f "$tmp" "$destination"
@@ -3833,8 +3863,8 @@ profile_archive_list() {
 }
 
 profile_import_menu() {
-  local selection archive entry profile_path extracted name secret backend mode target active_backend relay_port
-  local count choice canonical existing_secret destination tmp rollback_dir backend_port profile_choice
+  local selection archive entry profile_path extracted name secret backend mode target target_mode active_backend relay_port
+  local count choice canonical existing_secret destination tmp rollback_dir backend_port profile_choice backup_dir backup_file
   local -a archives=() profile_paths=()
   mapfile -t archives < <(profile_archive_list)
   ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
@@ -3895,20 +3925,40 @@ profile_import_menu() {
   if ! validate_port "$backend_port" >/dev/null 2>&1 || [[ "$backend_port" == "$relay_port" || "$backend_port" == "$ADMIN_PORT" ]]; then
     rm -f "$extracted"; warn "Backend порт конфликтует с relay/admin портом или недопустим."; return 0
   fi
-  read -r -p "Имя целевого профиля [$name]: " target || { rm -f "$extracted"; return 0; }
-  target="${target:-$name}"
-  if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
+  echo
+  echo "Действие с импортируемым профилем:"
+  echo "  1) Создать новый профиль (или заменить профиль с таким же именем)"
+  echo "  2) Заменить системный профиль default"
+  read -r -p "Выбор [1-2] (0 — отмена): " target_mode || { rm -f "$extracted"; return 0; }
+  case "$target_mode" in
+    1)
+      read -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
+      target="${target:-$name}"
+      if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
+      ;;
+    2)
+      target="default"
+      [[ -s "$PROFILE_DIR/default/profile.json" ]] || { rm -f "$extracted"; warn "Профиль default не найден; заменить его невозможно."; return 0; }
+      read -r -p "Заменить текущий профиль default импортируемым профилем? [y/N]: " choice
+      if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+      ;;
+    0|"") rm -f "$extracted"; info "Импорт отменён."; return 0 ;;
+    *) rm -f "$extracted"; warn "Неверный выбор."; return 0 ;;
+  esac
   count="$(jq ".profiles | length" "$PROFILES_FILE")"
   destination="$PROFILE_DIR/$target/profile.json"
   if [[ -e "$PROFILE_DIR/$target" ]]; then
-    read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
-    if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+    if [[ "$target" != "default" || "$target_mode" != "2" ]]; then
+      read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
+      if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
+    fi
   elif (( count >= 32 )); then rm -f "$extracted"; warn "Достигнут лимит 32 профиля."; return 0; fi
   canonical="${secret#dd}"
   while IFS= read -r existing_secret; do
     [[ -n "$existing_secret" ]] || continue
     if [[ "${existing_secret#dd}" == "$canonical" ]]; then
-      if [[ -f "$destination" && "$existing_secret" == "$(jq -r ".secret" "$destination")" ]]; then continue; fi
+      destination_secret="$(jq -r '.secret' "$destination" 2>/dev/null || true)"
+      if [[ -f "$destination" && "${destination_secret#dd}" == "$canonical" ]]; then continue; fi
       rm -f "$extracted"; warn "Этот секрет уже используется другим профилем."; return 0
     fi
   done < <(jq -r ".profiles[].secret" "$PROFILES_FILE")
@@ -3918,6 +3968,16 @@ profile_import_menu() {
   chown root:tproxy "$tmp"; chmod 0640 "$tmp"
   rollback_dir="$(mktemp -d)"
   cp -a "$PROFILES_FILE" "$rollback_dir/profiles.json"
+  if [[ "$target" == "default" ]]; then
+    backup_dir="$BACKUP_DIR/profile-backups"
+    install -d -o root -g root -m 0700 "$backup_dir"
+    backup_file="$backup_dir/trpoxy-profile-backup-default-before-import-$(date +%Y%m%d-%H%M%S).tar.gz"
+    tar -C "$PROXY_CONFIG_DIR" -czpf "$backup_file" "profiles/default/profile.json" || {
+      rm -rf "$rollback_dir" "$tmp"; warn "Не удалось сохранить текущий default; импорт отменён."; return 0;
+    }
+    chmod 0600 "$backup_file"
+    info "Текущий default сохранён: $backup_file"
+  fi
   if [[ -f "$destination" ]]; then cp -a "$destination" "$rollback_dir/profile.json"; fi
   install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$target"
   mv -f "$tmp" "$destination"
