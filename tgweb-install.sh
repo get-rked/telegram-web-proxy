@@ -4339,7 +4339,7 @@ main() {
 # CLI-интерфейс операций, ранее доступных только из меню.
 profile_cli() {
   need_root; need_files
-  local action="\${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0
+  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0
   shift || true
   case "$action" in
     list)
@@ -4363,7 +4363,7 @@ profile_cli() {
       else valid_secret "$secret" || die "Укажи --secret или --generate с корректным секретом."
         [[ "$prefix" != dd || "$secret" == dd* ]] || die "Секрет должен иметь префикс dd."
         [[ "$prefix" != plain || "$secret" != dd* ]] || die "Для plain секрет не должен иметь префикс dd."; fi
-      canonical="\${secret#dd}"
+      canonical="${secret#dd}"
       jq -e --arg s "$canonical" '.profiles[] | select((.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null && die "Секрет уже используется."
       count="$(jq '.profiles | length' "$PROFILES_FILE")"; (( count < 32 )) || die "Достигнут лимит 32 профиля."
       backend="$(jq -r '.profiles[0].backend' "$PROFILES_FILE")"
@@ -4389,7 +4389,7 @@ profile_cli() {
       [[ "$name" != default ]] || die "Профиль default защищён."
       [[ -d "$PROFILE_DIR/$name" ]] || die "Профиль не найден."
       count="$(jq '.profiles | length' "$PROFILES_FILE")"; (( count > 1 )) || die "Нельзя удалить последний профиль."
-      rm -rf -- "\${PROFILE_DIR:?}/\${name:?}"
+      rm -rf -- "${PROFILE_DIR:?}/${name:?}"
       profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
       systemctl restart mtproxy tproxy-server || die "Не удалось перезапустить службы."
       ok "Профиль $name удалён." ;;
@@ -4398,7 +4398,7 @@ profile_cli() {
       name="$1"; valid_name "$name" || die "Недопустимое имя."
       [[ -s "$PROFILE_DIR/$name/profile.json" ]] || die "Профиль не найден."
       install -d -o root -g root -m 0700 "$BACKUP_DIR/profile-backups"
-      archive="$BACKUP_DIR/profile-backups/trpoxy-profile-backup-\${name}-$(date +%Y%m%d-%H%M%S).tar.gz"
+      archive="$BACKUP_DIR/profile-backups/trpoxy-profile-backup-${name}-$(date +%Y%m%d-%H%M%S).tar.gz"
       [[ ! -e "$archive" ]] || die "Архив уже существует."
       tar -C "$PROXY_CONFIG_DIR" -czpf "$archive" "profiles/$name/profile.json"
       tar -tzf "$archive" | grep -Fxq "profiles/$name/profile.json" || die "Проверка архива не пройдена."
@@ -4416,20 +4416,20 @@ profile_cli() {
       valid_name "$target" || die "Укажи --name или --replace-default."
       tar -tzf "$archive" >/dev/null 2>&1 || die "Архив повреждён."
       local -a entries=()
-      while IFS= read -r file; do file="\${file#./}"; case "$file" in profiles/*/profile.json|opt/telegram-web-proxy/config/proxy/profiles/*/profile.json) entries+=("$file") ;; esac; done < <(tar -tzf "$archive")
-      (("\${#entries[@]}" > 0)) || die "В архиве нет профилей."
-      if [[ -z "$entry" ]]; then (("\${#entries[@]}" == 1)) || die "В архиве несколько профилей; укажи --entry."; entry="\${entries[0]}"; fi
-      local found=0 candidate; for candidate in "\${entries[@]}"; do [[ "$candidate" == "$entry" ]] && found=1; done
+      while IFS= read -r file; do file="${file#./}"; case "$file" in profiles/*/profile.json|opt/telegram-web-proxy/config/proxy/profiles/*/profile.json) entries+=("$file") ;; esac; done < <(tar -tzf "$archive")
+      (("${#entries[@]}" > 0)) || die "В архиве нет профилей."
+      if [[ -z "$entry" ]]; then (("${#entries[@]}" == 1)) || die "В архиве несколько профилей; укажи --entry."; entry="${entries[0]}"; fi
+      local found=0 candidate; for candidate in "${entries[@]}"; do [[ "$candidate" == "$entry" ]] && found=1; done
       (( found )) || die "Путь --entry не найден."
       tmp="$(mktemp)"; tar -xOzf "$archive" "$entry" > "$tmp" || { rm -f "$tmp"; die "Не удалось извлечь профиль."; }
       jq -e 'type=="object" and (.name|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")) and (.secret|type=="string" and test("^(dd)?[0-9a-f]{32}$")) and (.backend|type=="string" and test("^127\\.0\\.0\\.1:[0-9]{1,5}$")) and (.carrier_mode|type=="string" and (.=="https" or .=="https-lanes" or .=="websocket" or .=="websocket-lanes"))' "$tmp" >/dev/null || { rm -f "$tmp"; die "Профиль не прошёл проверку."; }
-      secret="$(jq -r '.secret' "$tmp")"; canonical="\${secret#dd}"; backend="$(jq -r '.profiles[0].backend' "$PROFILES_FILE")"
+      secret="$(jq -r '.secret' "$tmp")"; canonical="${secret#dd}"; backend="$(jq -r '.profiles[0].backend' "$PROFILES_FILE")"
       count="$(jq '.profiles | length' "$PROFILES_FILE")"; file="$PROFILE_DIR/$target/profile.json"
       if [[ -e "$PROFILE_DIR/$target" ]]; then [[ "$target" == default ]] || info "Существующий профиль будет заменён."
       else (( count < 32 )) || { rm -f "$tmp"; die "Достигнут лимит 32 профиля."; }; fi
       local existing oldsecret
       while IFS= read -r existing; do [[ -n "$existing" ]] || continue
-        if [[ "\${existing#dd}" == "$canonical" ]]; then oldsecret="$(jq -r '.secret' "$file" 2>/dev/null || true)"; [[ -f "$file" && "\${oldsecret#dd}" == "$canonical" ]] || { rm -f "$tmp"; die "Секрет уже используется."; }; fi
+        if [[ "${existing#dd}" == "$canonical" ]]; then oldsecret="$(jq -r '.secret' "$file" 2>/dev/null || true)"; [[ -f "$file" && "${oldsecret#dd}" == "$canonical" ]] || { rm -f "$tmp"; die "Секрет уже используется."; }; fi
       done < <(jq -r '.profiles[].secret' "$PROFILES_FILE")
       local rollback; rollback="$(mktemp -d)"; cp -a "$PROFILES_FILE" "$rollback/profiles.json"
       if [[ "$target" == default ]]; then
@@ -4453,18 +4453,18 @@ profile_cli() {
 
 upstream_cli() {
   need_root; need_files
-  local action="\${1:-}" value="\${2:-}" tmp backup
+  local action="${1:-}" value="${2:-}" tmp backup
   [[ -n "$action" && -n "$value" ]] || die "upstream set-url URL | set-dir PATH"
   shift 2 || true; (($# == 0)) || die "Лишние аргументы."
   tmp="$(mktemp "$CONFIG_FILE.XXXXXX")"
   case "$action" in
-    set-url) [[ "$value" =~ ^http://127\\.0\\.0\\.1:[0-9]{1,5}$ ]] || { rm -f "$tmp"; die "URL должен иметь вид http://127.0.0.1:PORT."; }
-      validate_port "\${value##*:}" >/dev/null || { rm -f "$tmp"; die "Недопустимый порт."; }
+    set-url) [[ "$value" =~ ^http://127\.0\.0\.1:[0-9]{1,5}$ ]] || { rm -f "$tmp"; die "URL должен иметь вид http://127.0.0.1:PORT."; }
+      validate_port "${value##*:}" >/dev/null || { rm -f "$tmp"; die "Недопустимый порт."; }
       jq --arg u "$value" 'del(.public_dir) | .public_upstream=$u' "$CONFIG_FILE" > "$tmp" ;;
     set-dir) [[ "$value" == /* && -d "$value" ]] || { rm -f "$tmp"; die "Нужен существующий абсолютный каталог."; }
       jq --arg d "$value" 'del(.public_upstream) | .public_dir=$d' "$CONFIG_FILE" > "$tmp" ;;
     *) rm -f "$tmp"; die "Допустимы set-url и set-dir." ;; esac
-  chown root:tproxy "$tmp"; chmod 0640 "$tmp"; backup="\${CONFIG_FILE}.before-upstream.$(date +%Y%m%d-%H%M%S)"
+  chown root:tproxy "$tmp"; chmod 0640 "$tmp"; backup="${CONFIG_FILE}.before-upstream.$(date +%Y%m%d-%H%M%S)"
   cp -a "$CONFIG_FILE" "$backup"; mv -f "$tmp" "$CONFIG_FILE"
   if ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then cp -a "$backup" "$CONFIG_FILE"; die "Проверка не пройдена; конфигурация восстановлена."; fi
   systemctl restart tproxy-server || { cp -a "$backup" "$CONFIG_FILE"; systemctl restart tproxy-server || true; die "Перезапуск не удался; конфигурация восстановлена."; }
