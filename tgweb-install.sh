@@ -3168,12 +3168,12 @@ profile_import_menu() {
   mv -f "$tmp" "$destination"
   chown root:tproxy "$destination"; chmod 0640 "$destination"
   if ! profile_manifest_sync || ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then
-    if [[ -f "$rollback_dir/profile.json" ]]; then cp -a "$rollback_dir/profile.json" "$destination"; else rm -rf -- "$PROFILE_DIR/$target"; fi
+    if [[ -f "$rollback_dir/profile.json" ]]; then cp -a "$rollback_dir/profile.json" "$destination"; else rm -rf -- "${PROFILE_DIR:?}/${target:?}"; fi
     cp -a "$rollback_dir/profiles.json" "$PROFILES_FILE"; rm -rf "$rollback_dir"
     die "Импорт не прошёл проверку; исходная конфигурация восстановлена."
   fi
   if ! write_mtproxy_secrets || ! patch_mtproxy_unit || ! systemctl restart mtproxy tproxy-server; then
-    if [[ -f "$rollback_dir/profile.json" ]]; then cp -a "$rollback_dir/profile.json" "$destination"; else rm -rf -- "$PROFILE_DIR/$target"; fi
+    if [[ -f "$rollback_dir/profile.json" ]]; then cp -a "$rollback_dir/profile.json" "$destination"; else rm -rf -- "${PROFILE_DIR:?}/${target:?}"; fi
     cp -a "$rollback_dir/profiles.json" "$PROFILES_FILE"; rm -rf "$rollback_dir"
     die "Не удалось применить профиль; исходная конфигурация восстановлена."
   fi
