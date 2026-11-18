@@ -3255,7 +3255,7 @@ profile_menu() {
         systemctl restart mtproxy tproxy-server || die "Не удалось перезапустить службы после удаления профиля."
         ok "Профиль $PROFILE_NAME удалён." ;;
       4) profile_backup_menu ;;
-      5) profile_import_menu ;;
+      5) profile_import_menu; continue ;;
       6) return 0 ;;
       *) warn "Неверный выбор." ;;
     esac
