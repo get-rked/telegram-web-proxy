@@ -3098,9 +3098,9 @@ profile_import_menu() {
   ui_header "Импорт профиля из резервной копии"
   for i in "${!archives[@]}"; do
     if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-      printf '  \033[1;34m%2d)\033[0m %s\\n' "$((i+1))" "${archives[$i]##*/}"
+      printf '  \033[1;34m%2d)\033[0m %s\n' "$((i+1))" "${archives[$i]##*/}"
     else
-      printf '  %2d) %s\\n' "$((i+1))" "${archives[$i]##*/}"
+      printf '  %2d) %s\n' "$((i+1))" "${archives[$i]##*/}"
     fi
   done
   read -r -p "Выбери архив (0 — отмена): " selection || return 0
@@ -3119,9 +3119,9 @@ profile_import_menu() {
     echo "В архиве найдены профили:"
     for i in "${!profile_paths[@]}"; do
       if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-        printf '  \033[1;34m%2d)\033[0m %s\\n' "$((i+1))" "${profile_paths[$i]}"
+        printf '  \033[1;34m%2d)\033[0m %s\n' "$((i+1))" "${profile_paths[$i]}"
       else
-        printf '  %2d) %s\\n' "$((i+1))" "${profile_paths[$i]}"
+        printf '  %2d) %s\n' "$((i+1))" "${profile_paths[$i]}"
       fi
     done
     read -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
