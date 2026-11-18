@@ -1267,12 +1267,20 @@ build_tproxy() {
 
 install_stub_site() {
   if [[ "$INSTALL_SITE" -ne 1 ]]; then info "Сайт пропущен (--no-site)"; return 0; fi
-  if [[ -f "$SITE_DIR/index.html" ]]; then
-    info "Сайт уже есть в $SITE_DIR — не трогаю"
+  if [[ -f "$SITE_DIR/index.html" && -s "$SITE_DIR/assets/styles.css" && -s "$SITE_DIR/assets/favicon.svg" ]]; then
+    info "Сайт и его статические ресурсы уже есть в $SITE_DIR — не трогаю"
     ok "Существующий сайт сохранён без изменений"
     return 0
   fi
-  info "Устанавливаю демонстрационный магазин De Kleine Markt в $SITE_DIR…"
+  if [[ -f "$SITE_DIR/index.html" ]] && ! grep -Fq 'De Kleine Markt' "$SITE_DIR/index.html"; then
+    warn "Найден пользовательский сайт без полного набора ресурсов; содержимое не перезаписываю."
+    return 0
+  fi
+  if [[ -f "$SITE_DIR/index.html" ]]; then
+    warn "Обнаружен неполный встроенный сайт (нет CSS или favicon); восстанавливаю комплект файлов."
+  else
+    info "Устанавливаю демонстрационный магазин De Kleine Markt в $SITE_DIR…"
+  fi
   mkdir -p "$SITE_DIR/assets"
 
   cat > "$SITE_DIR/index.html" <<'HTML'
@@ -1829,6 +1837,25 @@ start_services() {
   ok "Сервисы проверены/запущены"
 }
 
+# Полный перезапуск служб после успешного применения обновлённых файлов.
+# Порядок важен: firewall и backend запускаются до внешнего веб-сервера.
+restart_proxy_services() {
+  local -a services=(
+    tproxy-firewall.service
+    mtproxy.service
+    tproxy-server.service
+  )
+  if [[ "$WEB_SERVER" == "caddy" ]]; then
+    services+=(caddy.service)
+  else
+    services+=(nginx.service)
+  fi
+  info "Перезапускаю все службы прокси после обновления…"
+  systemctl restart "${services[@]}" || die "Не удалось перезапустить одну или несколько служб: ${services[*]}"
+  systemctl restart refresh-mtproxy-config.timer 2>/dev/null || true
+  ok "Службы перезапущены: ${services[*]}"
+}
+
 wait_ready() {
   local attempt health_ok ready_ok
   info "Ждём healthz и readyz на 127.0.0.1:$ADMIN_PORT (до 30с)…"
@@ -2370,6 +2397,9 @@ run_install() {
   fi
   validate_configs
   start_services
+  if [[ "$MODE" == "update" ]]; then
+    restart_proxy_services
+  fi
   wait_ready || die "relay не прошёл health-check"
   UPDATE_TRANSACTION_ACTIVE=0
   if [[ "$MODE" == "update" ]]; then
