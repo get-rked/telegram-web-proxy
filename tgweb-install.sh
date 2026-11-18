@@ -3074,7 +3074,7 @@ profile_backup_menu() {
   [[ -s "$file" ]] || die "Файл профиля не найден."
   install -d -o root -g root -m 0700 "$BACKUP_DIR/profile-backups"
   stamp="$(date +%Y%m%d-%H%M%S)"
-  dest="$BACKUP_DIR/profile-backups/profile-${PROFILE_NAME}-${stamp}.tar.gz"
+  dest="$BACKUP_DIR/profile-backups/trpoxy-profile-backup-${PROFILE_NAME}-${stamp}.tar.gz"
   [[ ! -e "$dest" ]] || die "Архив уже существует: $dest"
   tar -C "$PROXY_CONFIG_DIR" -czpf "$dest" "profiles/$PROFILE_NAME/profile.json"
   tar -tzf "$dest" | grep -Fxq "profiles/$PROFILE_NAME/profile.json" || die "Проверка архива профиля не пройдена."
@@ -3084,7 +3084,7 @@ profile_backup_menu() {
 
 profile_archive_list() {
   local archive
-  for archive in "$BACKUP_DIR"/profile-backups/profile-*.tar.gz "$BACKUP_DIR"/tproxy-backup-*.tar.gz; do
+  for archive in "$BACKUP_DIR"/profile-backups/trpoxy-profile-backup-*.tar.gz "$BACKUP_DIR"/profile-backups/profile-*.tar.gz "$BACKUP_DIR"/tproxy-backup-*.tar.gz; do
     [[ -f "$archive" ]] && printf "%s\n" "$archive"
   done | sort -r
 }
@@ -3096,7 +3096,13 @@ profile_import_menu() {
   mapfile -t archives < <(profile_archive_list)
   ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
   ui_header "Импорт профиля из резервной копии"
-  for i in "${!archives[@]}"; do printf "  %2d) %s\n" "$((i+1))" "${archives[$i]##*/}"; done
+  for i in "${!archives[@]}"; do
+    if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+      printf '  \\033[1;34m%2d)\\033[0m %s\\n' "$((i+1))" "${archives[$i]##*/}"
+    else
+      printf '  %2d) %s\\n' "$((i+1))" "${archives[$i]##*/}"
+    fi
+  done
   read -r -p "Выбери архив (0 — отмена): " selection || return 0
   [[ "$selection" =~ ^[0-9]+$ ]] || { warn "Неверный номер."; return 0; }
   (( selection > 0 && selection <= ${#archives[@]} )) || return 0
@@ -3111,7 +3117,13 @@ profile_import_menu() {
   ((${#profile_paths[@]})) || { warn "В архиве не найден файл профиля."; return 0; }
   if ((${#profile_paths[@]} > 1)); then
     echo "В архиве найдены профили:"
-    for i in "${!profile_paths[@]}"; do printf "  %2d) %s\\n" "$((i+1))" "${profile_paths[$i]}"; done
+    for i in "${!profile_paths[@]}"; do
+      if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+        printf '  \\033[1;34m%2d)\\033[0m %s\\n' "$((i+1))" "${profile_paths[$i]}"
+      else
+        printf '  %2d) %s\\n' "$((i+1))" "${profile_paths[$i]}"
+      fi
+    done
     read -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
     [[ "$profile_choice" =~ ^[0-9]+$ ]] && ((profile_choice > 0 && profile_choice <= ${#profile_paths[@]})) || return 0
     profile_path="${profile_paths[profile_choice-1]}"
