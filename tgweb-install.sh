@@ -2429,8 +2429,11 @@ remove_decoy_site() {
 
   ui_header "Удаление decoy-сайта"
   if [[ ! -d "$SITE_DIR" ]]; then info "Каталог сайта не найден: $SITE_DIR"; return 0; fi
-  if [[ ! -f "$SITE_DIR/index.html" ]] || ! grep -qF '<title>De Kleine Markt — lekker lokaal, elke dag</title>' "$SITE_DIR/index.html"; then
-    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт De Kleine Markt. Ничего не удалено."
+  if [[ ! -f "$SITE_DIR/index.html" ]] || {
+    ! grep -qF '<title>De Kleine Markt — lekker lokaal, elke dag</title>' "$SITE_DIR/index.html" &&
+    ! grep -qF '<title>Vibe Studio — код в потоке</title>' "$SITE_DIR/index.html"
+  }; then
+    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт (De Kleine Markt или предыдущая версия Vibe Studio). Ничего не удалено."
     return 1
   fi
   info "Будет удалён только штатный decoy-сайт: $SITE_DIR"
