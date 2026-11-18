@@ -3084,7 +3084,7 @@ profile_backup_menu() {
 
 profile_archive_list() {
   local archive
-  for archive in "$BACKUP_DIR"/profile-backups/trpoxy-profile-backup-*.tar.gz "$BACKUP_DIR"/profile-backups/profile-*.tar.gz "$BACKUP_DIR"/tproxy-backup-*.tar.gz; do
+  for archive in "$BACKUP_DIR"/profile-backups/trpoxy-profile-backup-*.tar.gz "$BACKUP_DIR"/profile-backups/profile-*.tar.gz; do
     [[ -f "$archive" ]] && printf "%s\n" "$archive"
   done | sort -r
 }
