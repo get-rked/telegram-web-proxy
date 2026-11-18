@@ -3082,7 +3082,7 @@ profile_backup_menu() {
   ok "Профиль $PROFILE_NAME сохранён: $dest"
 }
 
-pprofile_archive_list() {
+profile_archive_list() {
   local archive
   for archive in "$BACKUP_DIR"/profile-backups/trpoxy-profile-backup-*.tar.gz "$BACKUP_DIR"/profile-backups/profile-*.tar.gz; do
     [[ -f "$archive" ]] || continue
