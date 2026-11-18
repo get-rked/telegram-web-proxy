@@ -188,17 +188,21 @@ sudo ./tgweb-install.sh diagnostics
 sudo ./tgweb-install.sh backup
 ```
 
-Указать собственный абсолютный путь:
+Архив создаётся автоматически в стандартном каталоге. Передать произвольный путь или имя файла через аргументы команды нельзя.
+
+Восстановить архив можно по его номеру в списке:
 
 ```bash
-sudo ./tgweb-install.sh backup /root/tproxy-backup.tar.gz
+sudo ./tgweb-install.sh restore
 ```
 
-Восстановить:
+Либо указать номер архива:
 
 ```bash
-sudo ./tgweb-install.sh restore /root/tproxy-backup.tar.gz
+sudo ./tgweb-install.sh restore 1
 ```
+
+Команда принимает номер из списка архивов в `/opt/telegram-web-proxy/backups/`, а не путь к файлу.
 
 Резервная копия включает доступные конфигурации приложения и MTProxy, файлы веб-сервера, TLS-сертификаты Let's Encrypt, связанные systemd units, каталог сайта, QR и служебные файлы. Архив создаётся с правами `0600`; существующий файл не перезаписывается.
 
@@ -286,6 +290,108 @@ sudo ./tgweb-install.sh install \
 Профильные настройки хранятся раздельно: /opt/telegram-web-proxy/config/proxy/profiles/<имя>/profile.json. Общие настройки сервера остаются в config.json, а установщик собирает из профильных файлов агрегированный profiles.json для совместимости с tproxy-server. При первом открытии менеджера существующий profiles.json автоматически раскладывается по каталогам профилей. MTProxy использует общий mtproxy.env, содержащий набор секретов всех профилей.
 
 Обновление сохраняет дополнительные профили и применяет параметры установки/обновления к основному профилю `default`. Изменение Carrier mode в менеджере затрагивает только выбранный профиль. При добавлении/удалении профиля набор секретов MTProxy синхронизируется, затем перезапускаются `mtproxy` и `tproxy-server`. При изменении Carrier mode перезапускается `tproxy-server`.
+
+### Управление профилями из командной строки
+
+Операции с профилями доступны без запуска интерактивного меню. Все команды выполняются от root или через `sudo`.
+
+Список профилей:
+
+```bash
+sudo ./tgweb-install.sh profile list
+```
+
+Создание профиля с автоматически сгенерированным секретом:
+
+```bash
+sudo ./tgweb-install.sh profile add mobile --generate --carrier-mode https
+```
+
+Создание профиля с заданным секретом:
+
+```bash
+sudo ./tgweb-install.sh profile add mobile \
+  --secret 0123456789abcdef0123456789abcdef \
+  --carrier-mode websocket
+```
+
+Для генерации секрета с префиксом `dd` используется `--secret-prefix dd`.
+
+Изменение Carrier mode:
+
+```bash
+sudo ./tgweb-install.sh profile set-carrier mobile websocket-lanes
+```
+
+Удаление дополнительного профиля. Операция требует явного подтверждения:
+
+```bash
+sudo ./tgweb-install.sh profile delete mobile --yes
+```
+
+Создание резервной копии профиля:
+
+```bash
+sudo ./tgweb-install.sh profile backup mobile
+```
+
+Импорт профиля из архива с созданием нового профиля или заменой существующего:
+
+```bash
+sudo ./tgweb-install.sh profile import /path/to/profile-backup.tar.gz --name mobile --yes
+```
+
+Замена системного профиля `default`:
+
+```bash
+sudo ./tgweb-install.sh profile import /path/to/profile-backup.tar.gz --replace-default --yes
+```
+
+Если архив содержит несколько профилей, необходимо указать `--entry` с точным путём к нужному файлу внутри архива. Список файлов можно получить командой:
+
+```bash
+tar -tzf /path/to/profile-backup.tar.gz
+```
+
+При импорте проверяются структура профиля, формат секрета и совместимость backend. Перед заменой `default` создаётся отдельная резервная копия текущего профиля. Параметр `--yes` обязателен, поскольку импорт изменяет рабочую конфигурацию.
+
+### Управление публичным сайтом из командной строки
+
+Назначить локальное HTTP-приложение в качестве `public_upstream`:
+
+```bash
+sudo ./tgweb-install.sh upstream set-url http://127.0.0.1:3000
+```
+
+Вернуться к обслуживанию сайта из локального каталога:
+
+```bash
+sudo ./tgweb-install.sh upstream set-dir /opt/telegram-web-proxy/data/website
+```
+
+Для `set-url` поддерживается локальный адрес вида `http://127.0.0.1:PORT`. После изменения конфигурации выполняется проверка `tproxy-server -check` и перезапуск службы. При неудачной проверке исходный `config.json` восстанавливается.
+
+### Обслуживание и удаление компонентов из командной строки
+
+Перезапуск установленных служб прокси:
+
+```bash
+sudo ./tgweb-install.sh services restart
+```
+
+Удаление decoy-сайта:
+
+```bash
+sudo ./tgweb-install.sh site remove --yes
+```
+
+Удаление выбранного веб-сервера:
+
+```bash
+sudo ./tgweb-install.sh web-server remove --yes
+```
+
+Команды удаления без `--yes` запрашивают подтверждение интерактивно. Удаление сайта затрагивает весь настроенный каталог сайта и его содержимое. Удаление веб-сервера может привести к прекращению внешнего доступа к Web Proxy.
 
 ## Ссылка подключения и QR-код
 
