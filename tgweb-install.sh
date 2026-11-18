@@ -2420,28 +2420,27 @@ run_uninstall() {
 }
 
 remove_decoy_site() {
-  require_root
   local configured_site=""
-  if command -v jq >/dev/null 2>&1 && [[ -r $PROXY_CONFIG_DIR/config.json ]]; then
-    configured_site="$(jq -r '.public_dir // empty' $PROXY_CONFIG_DIR/config.json 2>/dev/null || true)"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    configured_site="$(jq -r '.site_dir // empty' "$CONFIG_FILE" 2>/dev/null || true)"
   fi
   if [[ -n "$configured_site" && "$configured_site" == /* ]]; then SITE_DIR="$configured_site"; fi
 
   ui_header "Удаление decoy-сайта"
-  if [[ ! -d "$SITE_DIR" ]]; then info "Каталог сайта не найден: $SITE_DIR"; return 0; fi
-  if [[ ! -f "$SITE_DIR/index.html" ]] || {
-    ! grep -qF '<title>De Kleine Markt — lekker lokaal, elke dag</title>' "$SITE_DIR/index.html" &&
-    ! grep -qF '<title>Vibe Studio — код в потоке</title>' "$SITE_DIR/index.html"
-  }; then
-    warn "Каталог $SITE_DIR не распознан как штатный decoy-сайт (De Kleine Markt или предыдущая версия Vibe Studio). Ничего не удалено."
-    return 1
+  if [[ ! -d "$SITE_DIR" ]]; then
+    info "Каталог сайта не найден: $SITE_DIR"
+    return 0
   fi
-  info "Будет удалён только штатный decoy-сайт: $SITE_DIR"
-  confirm "Удалить decoy-сайт?" || { info "Удаление отменено."; return 0; }
-  rm -rf -- "$SITE_DIR"
-  ok "Decoy-сайт удалён: $SITE_DIR"
-}
 
+  warn "Будет полностью удалён каталог сайта и всё его содержимое: $SITE_DIR"
+  confirm "Удалить сайт из $SITE_DIR без проверки его содержимого?" || {
+    info "Удаление отменено."
+    return 0
+  }
+
+  rm -rf -- "$SITE_DIR"
+  ok "Каталог сайта удалён: $SITE_DIR"
+}
 remove_web_server_interactive() {
   require_root
   local installed_web_server
