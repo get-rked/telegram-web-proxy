@@ -10,7 +10,7 @@
 #    sudo ./tproxy-manager.sh purge     [--yes]
 # ============================================================================
 set -Eeuo pipefail
-trap 'if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then printf "\\033[1;31m❌ ERROR\\033[0m at line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2; else printf "❌ ERROR at line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2; fi' ERR
+trap 'if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then printf "\\033[1;31m❌ ERROR\033[0m at line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2; else printf "❌ ERROR at line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2; fi' ERR
 umask 077
 
 # ----------------------------- константы ------------------------------------
@@ -3098,7 +3098,7 @@ profile_import_menu() {
   ui_header "Импорт профиля из резервной копии"
   for i in "${!archives[@]}"; do
     if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-      printf '  \\033[1;34m%2d)\\033[0m %s\\n' "$((i+1))" "${archives[$i]##*/}"
+      printf '  \033[1;34m%2d)\033[0m %s\\n' "$((i+1))" "${archives[$i]##*/}"
     else
       printf '  %2d) %s\\n' "$((i+1))" "${archives[$i]##*/}"
     fi
@@ -3119,7 +3119,7 @@ profile_import_menu() {
     echo "В архиве найдены профили:"
     for i in "${!profile_paths[@]}"; do
       if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
-        printf '  \\033[1;34m%2d)\\033[0m %s\\n' "$((i+1))" "${profile_paths[$i]}"
+        printf '  \033[1;34m%2d)\033[0m %s\\n' "$((i+1))" "${profile_paths[$i]}"
       else
         printf '  %2d) %s\\n' "$((i+1))" "${profile_paths[$i]}"
       fi
