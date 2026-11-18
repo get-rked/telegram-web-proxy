@@ -3926,11 +3926,12 @@ profile_import_menu() {
   if ! validate_port "$backend_port" >/dev/null 2>&1 || [[ "$backend_port" == "$relay_port" || "$backend_port" == "$ADMIN_PORT" ]]; then
     rm -f "$extracted"; warn "Backend порт конфликтует с relay/admin портом или недопустим."; return 0
   fi
+  ui_header "Действие с импортируемым профилем"
+  ui_option 1 "＋" "Создать новый профиль или заменить существующий"
+  ui_option 2 "↻" "Заменить системный профиль default"
+  ui_option 0 "←" "Отмена"
   echo
-  echo "Действие с импортируемым профилем:"
-  echo "  1) Создать новый профиль (или заменить профиль с таким же именем)"
-  echo "  2) Заменить системный профиль default"
-  read -r -p "Выбор [1-2] (0 — отмена): " target_mode || { rm -f "$extracted"; return 0; }
+  read -r -p "Выбор [0-2]: " target_mode || { rm -f "$extracted"; return 0; }
   case "$target_mode" in
     1)
       read -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
