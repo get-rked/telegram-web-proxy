@@ -2764,13 +2764,13 @@ backup_command() {
 
 list_backup_archives() {
   [[ -d "$BACKUP_DIR" ]] || return 0
-  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\n' | sort -r
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\0' | sort -zr
 }
 
 restore_command() {
-  local selection="${1:-}" archive="" i
+  local selection="${1:-}" archive="" i size
   local -a archives=()
-  mapfile -t archives < <(list_backup_archives)
+  mapfile -d '' -t archives < <(list_backup_archives)
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
 
   if [[ -n "$selection" && "$selection" =~ ^[0-9]+$ ]]; then
