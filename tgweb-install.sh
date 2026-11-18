@@ -163,8 +163,8 @@ Usage:
   --carrier-mode MODE        https|https-lanes|websocket|websocket-lanes
   config [--output PATH]     Показать текущие настройки (секреты скрыты)
   diagnostics                Диагностика: службы, порты, конфигурации и ошибки
-  backup [ABSOLUTE_PATH]     Резервная копия конфигураций
-  restore ABSOLUTE_PATH      Восстановить конфигурации из архива
+  backup                     Создать резервную копию в стандартном каталоге
+  restore [NUMBER]           Выбрать архив из списка и восстановить
   --base-path SLUG|none     Базовый путь (default: генерируется)
   --site-dir PATH           Каталог сайта (default: /opt/telegram-web-proxy/data/website)
   --no-site                 Не устанавливать сайт
@@ -2723,9 +2723,9 @@ diagnostics_command() {
 }
 
 backup_command() {
-  local dest="${1:-$BACKUP_DIR/tproxy-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
-  [[ "$dest" = /* ]] || die "Путь backup должен быть абсолютным"
-  install -d -m 0700 "$(dirname "$dest")"
+  (($# == 0)) || die "Путь сохранения резервной копии задавать нельзя. Архивы сохраняются в $BACKUP_DIR"
+  install -d -m 0700 "$BACKUP_DIR"
+  local dest="$BACKUP_DIR/tproxy-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   [[ ! -e "$dest" ]] || die "Файл уже существует: $dest (не перезаписываю резервную копию)"
 
   local -a items=()
@@ -2749,7 +2749,7 @@ backup_command() {
   done
   (("${#items[@]}")) || die "Нет файлов конфигурации для резервирования"
 
-  local tmp="${dest}.tmp.$$"
+  local tmp="${dest}.tmp.$"
   trap 'rm -f "$tmp"' RETURN
   tar -C / -czpf "$tmp" "${items[@]}"
   tar -tzf "$tmp" >/dev/null || die "Проверка созданного архива не пройдена"
@@ -2757,13 +2757,43 @@ backup_command() {
   mv -- "$tmp" "$dest"
   trap - RETURN
   ok "Резервная копия создана: $dest (0600)"
+  info "Все резервные копии хранятся в одном каталоге: $BACKUP_DIR"
   info "В архив включено объектов: ${#items[@]}; включая конфигурацию выбранного веб-сервера и TLS."
 }
 
+list_backup_archives() {
+  local -n result_ref=$1
+  result_ref=()
+  [[ -d "$BACKUP_DIR" ]] || return 0
+  mapfile -t result_ref < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\\n' | sort -r)
+}
+
 restore_command() {
-  local archive="${1:-}"
-  [[ -n "$archive" && -f "$archive" ]] || die "Укажи существующий архив: restore /absolute/path/backup.tar.gz"
-  [[ "$archive" = /* ]] || die "Путь к архиву должен быть абсолютным"
+  local selection="${1:-}" archive="" i
+  local -a archives=()
+  list_backup_archives archives
+  (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
+
+  if [[ -n "$selection" && "$selection" =~ ^[0-9]+$ ]]; then
+    (( selection >= 1 && selection <= ${#archives[@]} )) || die "Номер архива вне списка."
+    archive="$BACKUP_DIR/${archives[selection-1]}"
+  elif [[ -z "$selection" ]]; then
+    echo
+    ui_header "Доступные резервные копии"
+    for i in "${!archives[@]}"; do
+      printf '  %2d) %-42s  ' "$((i+1))" "${archives[i]}"
+      du -h "$BACKUP_DIR/${archives[i]}" | awk '{print $1}'
+    done
+    echo
+    read -r -p "Выбери номер архива (0 — отмена): " selection || die "Ввод прерван."
+    [[ "$selection" != "0" ]] || { info "Восстановление отменено."; return 0; }
+    [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#archives[@]} )) || die "Неверный номер архива."
+    archive="$BACKUP_DIR/${archives[selection-1]}"
+  else
+    die "Укажи номер архива из списка, а не путь к файлу."
+  fi
+
+  [[ -f "$archive" ]] || die "Выбранный архив не найден: $archive"
   tar -tzf "$archive" >/dev/null 2>&1 || die "Архив повреждён или имеет неподдерживаемый формат"
 
   local entry normalized
@@ -3272,8 +3302,8 @@ show_tools_menu() {
     read -r -p "Выбор [1-6]: " choice
     case "$choice" in
       1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
-      2) read -r -p "Путь к архиву (Enter — по умолчанию): " archive; require_root; if [[ -n "$archive" ]]; then backup_command "$archive"; else backup_command; fi; read -r -p "Enter — назад..." _ ;;
-      3) read -e -r -p "Абсолютный путь к архиву: " archive; [[ -n "$archive" ]] || { warn "Путь не указан"; continue; }; require_root; restore_command "$archive"; read -r -p "Enter — назад..." _ ;;
+      2) require_root; backup_command; read -r -p "Enter — назад..." _ ;;
+      3) require_root; restore_command; read -r -p "Enter — назад..." _ ;;
       4) carrier_tools_menu ;;
       5) restart_proxy_services || true; read -r -p "Enter — назад..." _ ;;
       6) return 0 ;;
