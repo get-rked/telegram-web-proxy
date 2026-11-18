@@ -4432,6 +4432,8 @@ profile_cli() {
         if [[ "${existing#dd}" == "$canonical" ]]; then oldsecret="$(jq -r '.secret' "$file" 2>/dev/null || true)"; [[ -f "$file" && "${oldsecret#dd}" == "$canonical" ]] || { rm -f "$tmp"; die "Секрет уже используется."; }; fi
       done < <(jq -r '.profiles[].secret' "$PROFILES_FILE")
       local rollback; rollback="$(mktemp -d)"; cp -a "$PROFILES_FILE" "$rollback/profiles.json"
+      cp -a "$MT_ENV" "$rollback/mtproxy.env"
+      cp -a "$UNIT_FILE" "$rollback/mtproxy.service"
       if [[ "$target" == default ]]; then
         [[ -f "$file" ]] || { rm -rf "$rollback" "$tmp"; die "Профиль default не найден."; }
         install -d -o root -g root -m 0700 "$BACKUP_DIR/profile-backups"
@@ -4444,7 +4446,12 @@ profile_cli() {
       if ! profile_manifest_sync || ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || ! write_mtproxy_secrets || ! patch_mtproxy_unit || ! systemctl restart mtproxy tproxy-server; then
         [[ ! -f "$rollback/profile.json" ]] || cp -a "$rollback/profile.json" "$file"
         [[ -f "$rollback/profile.json" ]] || rm -rf -- "$PROFILE_DIR/$target"
-        cp -a "$rollback/profiles.json" "$PROFILES_FILE"; rm -rf "$rollback"; die "Импорт не прошёл проверку; исходная конфигурация восстановлена."
+        cp -a "$rollback/profiles.json" "$PROFILES_FILE"
+        cp -a "$rollback/mtproxy.env" "$MT_ENV"
+        cp -a "$rollback/mtproxy.service" "$UNIT_FILE"
+        systemctl daemon-reload
+        systemctl restart mtproxy tproxy-server 2>/dev/null || true
+        rm -rf "$rollback"; die "Импорт не прошёл проверку; исходная конфигурация восстановлена."
       fi
       rm -rf "$rollback"; ok "Профиль импортирован: $target" ;;
     *) die "profile {list|add|set-carrier|delete|backup|import} ..." ;;
@@ -4459,7 +4466,11 @@ upstream_cli() {
   tmp="$(mktemp "$CONFIG_FILE.XXXXXX")"
   case "$action" in
     set-url) [[ "$value" =~ ^http://127\.0\.0\.1:[0-9]{1,5}$ ]] || { rm -f "$tmp"; die "URL должен иметь вид http://127.0.0.1:PORT."; }
-      validate_port "${value##*:}" >/dev/null || { rm -f "$tmp"; die "Недопустимый порт."; }
+      local upstream_port="${value##*:}" relay_port admin_port
+      (( upstream_port >= 1 && upstream_port <= 65535 )) || { rm -f "$tmp"; die "Порт upstream должен находиться в диапазоне 1–65535."; }
+      relay_port="$(jq -r '.listen | split(":")[-1]' "$CONFIG_FILE")"
+      admin_port="$(jq -r '.admin_listen | split(":")[-1]' "$CONFIG_FILE")"
+      [[ "$upstream_port" != "$relay_port" && "$upstream_port" != "$admin_port" ]] || { rm -f "$tmp"; die "Upstream не может использовать relay/admin порт."; }
       jq --arg u "$value" 'del(.public_dir) | .public_upstream=$u' "$CONFIG_FILE" > "$tmp" ;;
     set-dir) [[ "$value" == /* && -d "$value" ]] || { rm -f "$tmp"; die "Нужен существующий абсолютный каталог."; }
       jq --arg d "$value" 'del(.public_upstream) | .public_dir=$d' "$CONFIG_FILE" > "$tmp" ;;
