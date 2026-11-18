@@ -2731,7 +2731,8 @@ diagnostics_command() {
 backup_command() {
   (($# == 0)) || die "Путь сохранения резервной копии задавать нельзя. Архивы сохраняются в $BACKUP_DIR"
   install -d -m 0700 "$BACKUP_DIR"
-  local dest="$BACKUP_DIR/tproxy-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  local dest
+  dest="$BACKUP_DIR/tproxy-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   [[ ! -e "$dest" ]] || die "Файл уже существует: $dest (не перезаписываю резервную копию)"
 
   local -a items=()
@@ -2768,16 +2769,14 @@ backup_command() {
 }
 
 list_backup_archives() {
-  local -n result_ref=$1
-  result_ref=()
   [[ -d "$BACKUP_DIR" ]] || return 0
-  mapfile -t result_ref < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\n' | sort -r)
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'tproxy-backup-*.tar.gz' -printf '%f\\n' | sort -r
 }
 
 restore_command() {
   local selection="${1:-}" archive="" i
   local -a archives=()
-  list_backup_archives archives
+  mapfile -t archives < <(list_backup_archives)
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
 
   if [[ -n "$selection" && "$selection" =~ ^[0-9]+$ ]]; then
