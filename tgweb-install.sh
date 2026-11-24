@@ -28,21 +28,7 @@ tproxy_bootstrap_repository() {
   script_path="$(readlink -f -- "$0")"
   if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]] \
     && [[ "$(git -C "$TPROXY_DEPLOY_DIR" remote get-url origin 2>/dev/null || true)" == "$TPROXY_DEPLOY_REPO" ]]; then
-    printf '\n=== Проверка обновлений установщика ===\n'
-    if ! git -C "$TPROXY_DEPLOY_DIR" fetch --quiet --prune origin "$TPROXY_DEPLOY_BRANCH"; then
-      echo "Не удалось получить обновления из $TPROXY_DEPLOY_BRANCH; локальная версия не изменена." >&2
-      exit 1
-    fi
-    # Сбрасываем только отслеживаемые файлы к полученному коммиту.
-    # Это также исправляет случай, когда curl сохранил новый установщик
-    # поверх tracked tgweb-install.sh внутри существующего checkout.
-    if ! git -C "$TPROXY_DEPLOY_DIR" reset --hard FETCH_HEAD; then
-      echo "Не удалось обновить отслеживаемые файлы до $TPROXY_DEPLOY_BRANCH." >&2
-      exit 1
-    fi
-    git -C "$TPROXY_DEPLOY_DIR" update-ref "refs/heads/$TPROXY_DEPLOY_BRANCH" FETCH_HEAD
-    git -C "$TPROXY_DEPLOY_DIR" symbolic-ref HEAD "refs/heads/$TPROXY_DEPLOY_BRANCH"
-    printf 'Актуальная версия ветки %s загружена: %s\n' "$TPROXY_DEPLOY_BRANCH" "$(git -C "$TPROXY_DEPLOY_DIR" rev-parse --short HEAD)"
+    # При обычном запуске используем уже установленную версию без сетевой проверки обновлений.
     exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
   fi
   printf '\n=== Первоначальное развёртывание Telegram Web Proxy (Docker) ===\n'
