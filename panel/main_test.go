@@ -66,8 +66,7 @@ func TestProfilesDoNotExposeSecrets(t *testing.T) {
 
 func TestProfilesRejectNonGetLegacyHandler(t *testing.T) {
 	a := testApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/profiles", nil)
-	request.SetBasicAuth("admin", "a-long-test-password")
+	request := authRequest(http.MethodPut, "/admin/api/profiles", "", true)
 	response := httptest.NewRecorder()
 	a.auth(a.profilesAPI)(response, request)
 	if response.Code != http.StatusMethodNotAllowed { t.Fatalf("status=%d, want 405", response.Code) }
