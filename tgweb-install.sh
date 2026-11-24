@@ -24,8 +24,7 @@ tproxy_bootstrap_repository() {
     printf 'Запусти установщик от root: sudo bash %q\n' "$0" >&2
     exit 1
   }
-  local script_path stamp backup_root archive clone_tmp old_tree
-  script_path="$(readlink -f -- "$0")"
+  local stamp backup_root archive clone_tmp old_tree
   if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]] \
     && [[ "$(git -C "$TPROXY_DEPLOY_DIR" remote get-url origin 2>/dev/null || true)" == "$TPROXY_DEPLOY_REPO" ]]; then
     # При обычном запуске используем уже установленную версию без сетевой проверки обновлений.
