@@ -78,7 +78,10 @@ Reverse proxy пишет access log в тот же каталог. Дополн�
 Fail2ban и встроенный лимит панели. Для Cloudflare proxy в Caddy и Nginx настроены официальные доверенные IPv4/IPv6
 диапазоны Cloudflare и извлечение `CF-Connecting-IP`; заголовок принимается только
 от адресов из этих диапазонов. Диапазоны также добавлены в `ignoreip`, чтобы
-ошибка конфигурации не привела к блокировке edge-узла Cloudflare. Панель получает
+ошибка конфигурации не привела к блокировке edge-узла Cloudflare. Список диапазонов
+сверяется с официальным API `https://api.cloudflare.com/client/v4/ips`; при
+изменениях Cloudflare обновите CIDR в `docker/Caddyfile`, `docker/nginx/default.conf`
+и `docker/security/fail2ban/jail.d/`. Панель получает
 проверенный адрес через `X-Real-IP`: Caddy формирует его из фактического соединения,
 Nginx использует `$remote_addr`. Не публикуйте порт панели напрямую и не
 подключайте к её внутренней сети недоверенные контейнеры.
