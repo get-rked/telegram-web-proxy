@@ -91,3 +91,6 @@ jobs:
           cp .env.example .env
           sed -i 's/replace-with-at-least-16-random-characters/ci-only-not-a-production-password/' .env
           docker compose config --quiet
+          test -s docker/site/index.html
+          python3 -m json.tool docker/config/config.example.json >/dev/null
+          python3 -m json.tool docker/config/profiles.example.json >/dev/null
