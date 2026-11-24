@@ -4311,6 +4311,7 @@ profile_cli() {
         while :; do
           secret="${prefix}$(openssl rand -hex 16)"
           canonical="${secret#dd}"
+          valid_secret "$secret" || continue
           if ! jq -e --arg s "$canonical" '.profiles[] | select((.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null; then break; fi
         done
       fi
