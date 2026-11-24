@@ -2569,8 +2569,46 @@ docker_wait_ready() {
   done
 }
 
+docker_prompt_secret() {
+  local format_choice generate_choice first second
+  if [[ "$NONINTERACTIVE" == "1" ]]; then
+    SECRET_PREFIX_MODE="${SECRET_PREFIX_MODE:-plain}"
+    [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$(openssl rand -hex 16)"
+    [[ "$SECRET_PREFIX_MODE" == "dd" && "$SECRET_ARG" != dd* ]] && SECRET_ARG="dd$SECRET_ARG"
+    [[ "$SECRET_PREFIX_MODE" == "plain" && "$SECRET_ARG" == dd* ]] && die "Секрет с dd-префиксом несовместим с --secret-prefix plain."
+  else
+    echo
+    echo "Формат секрета Web Proxy:"
+    echo "  1) Обычный — 32 hex-символа"
+    echo "  2) С префиксом dd — для обфускации"
+    read -r -p "Выбор [1-2, по умолчанию 1]: " format_choice || die "Ввод прерван."
+    case "${format_choice:-1}" in
+      1) SECRET_PREFIX_MODE=plain ;;
+      2) SECRET_PREFIX_MODE=dd ;;
+      *) die "Выбери 1 или 2." ;;
+    esac
+    read -r -p "Сгенерировать секрет автоматически? [Y/n]: " generate_choice || die "Ввод прерван."
+    if [[ ! "$generate_choice" =~ ^[Nn]$ ]]; then
+      SECRET_ARG="$(openssl rand -hex 16)"
+      [[ "$SECRET_PREFIX_MODE" == "dd" ]] && SECRET_ARG="dd$SECRET_ARG"
+    else
+      while :; do
+        read -r -s -p "Секрет (32 hex): " first || die "Ввод прерван."; echo
+        read -r -s -p "Повторите секрет: " second || die "Ввод прерван."; echo
+        [[ "$first" == "$second" ]] || { echo "Секреты не совпадают."; continue; }
+        validate_secret "$first" >/dev/null || { echo "Неверный формат секрета."; continue; }
+        if [[ "$SECRET_PREFIX_MODE" == "dd" && "$first" != dd* ]]; then echo "Для выбранного формата нужен префикс dd."; continue; fi
+        if [[ "$SECRET_PREFIX_MODE" == "plain" && "$first" == dd* ]]; then echo "Уберите префикс dd."; continue; fi
+        SECRET_ARG="$first"
+        break
+      done
+    fi
+  fi
+  validate_secret "$SECRET_ARG" >/dev/null || die "Неверный секрет Web Proxy."
+}
+
 docker_install_fresh_command() {
-  local proxy="$1" domain="$2" email="$3" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
+  local proxy="$1" domain="$2" email="$3" relay_port="$4" admin_port="$5" secret="$6" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
   if [[ -z "$domain" ]]; then read -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
   domain="${domain,,}"
   validate_hostname "$domain" >/dev/null || die "Некорректное доменное имя: $domain"
@@ -2583,9 +2621,9 @@ docker_install_fresh_command() {
   fi
   command -v ss >/dev/null 2>&1 || die "Не найдена команда ss (пакет iproute2)."
   local port listeners
-  for port in 80 443; do
+  for port in 80 443 "$relay_port" "$admin_port"; do
     listeners="$(ss -H -ltn "sport = :$port" 2>/dev/null || true)"
-    [[ -z "$listeners" ]] || die "TCP-порт $port уже занят. Освободи его или сначала выполни перенос прежней установки."
+    [[ -z "$listeners" ]] || die "TCP-порт $port уже занят. Выбери другой порт или освободи этот порт."
   done
   python3 - "$DOCKER_PROJECT_DIR/.env.example" "$DOCKER_PROJECT_DIR/.env" "$domain" "$email" <<'PY'
 import pathlib
@@ -2594,7 +2632,7 @@ import sys
 source, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 domain, email = sys.argv[3], sys.argv[4]
 text = source.read_text(encoding="utf-8")
-for key, value in {"DOMAIN": domain, "ACME_EMAIL": email}.items():
+for key, value in {"DOMAIN": domain, "ACME_EMAIL": email, "RELAY_PORT": relay_port, "ADMIN_PORT": admin_port}.items():
     text, count = re.subn(rf"(?m)^{key}=.*$", f"{key}={value}", text)
     if not count:
         text += f"\n{key}={value}\n"
@@ -2605,6 +2643,8 @@ PY
     "$DOCKER_PROJECT_DIR/docker/profiles" "$DOCKER_PROJECT_DIR/docker/private" \
     "$DOCKER_PROJECT_DIR/docker/private-credentials" "$DOCKER_PROJECT_DIR/docker/generated" \
     "$DOCKER_PROJECT_DIR/docker/security/logs"
+  printf '%s\n' "$secret" > "$DOCKER_PROJECT_DIR/docker/mtproxy/secret"
+  chmod 0600 "$DOCKER_PROJECT_DIR/docker/mtproxy/secret"
   docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Загружаю внешние образы..."
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы."
@@ -2628,6 +2668,9 @@ PY
   [[ "$http_code" == 200 || "$http_code" == 301 || "$http_code" == 302 ]] ||
     die "HTTPS/Web Proxy не прошёл локальную проверку (HTTP ${http_code:-нет ответа}). Проверь docker logs $proxy и relay."
   ok "HTTPS/Web Proxy отвечает: HTTP $http_code."
+  echo "Relay-порт внутри контейнера: $relay_port"
+  echo "Admin-порт внутри контейнера: $admin_port"
+  echo "Формат секрета: $SECRET_PREFIX_MODE"
   ok "Чистая Docker-установка завершена."
   echo "Конфигурация: $DOCKER_PROJECT_DIR/.env"
   echo "Учётные данные панели: $DOCKER_PROJECT_DIR/docker/private-credentials/panel-credentials.txt"
@@ -2636,32 +2679,27 @@ PY
 
 docker_install_command() {
   require_root
-  local source_dir="$BASE_DIR" proxy="" domain="" email="" choice
-  if [[ -n "${TPROXY_NATIVE_SOURCE_DIR:-}" ]]; then
-    source_dir="$TPROXY_NATIVE_SOURCE_DIR"
-  elif [[ -s /var/lib/telegram-web-proxy/native-source-path ]]; then
-    source_dir="$(cat /var/lib/telegram-web-proxy/native-source-path)"
-  fi
+  local proxy="" domain="" email="" choice relay_port="${RELAY_PORT:-}" admin_port="${ADMIN_PORT:-}"
+  local secret="${SECRET_ARG:-}" prefix="${SECRET_PREFIX_MODE:-plain}"
   while (($#)); do
     case "$1" in
-      --source-dir) (($# >= 2)) || die "--source-dir требует путь"; source_dir="$2"; shift 2 ;;
       --web-server) (($# >= 2)) || die "--web-server требует caddy|nginx"; proxy="$2"; shift 2 ;;
       --hostname) (($# >= 2)) || die "--hostname требует домен"; domain="$2"; shift 2 ;;
       --email) (($# >= 2)) || die "--email требует адрес"; email="$2"; shift 2 ;;
+      --relay-port|--port) (($# >= 2)) || die "$1 требует порт"; relay_port="$2"; shift 2 ;;
+      --admin-port) (($# >= 2)) || die "--admin-port требует порт"; admin_port="$2"; shift 2 ;;
+      --secret-prefix) (($# >= 2)) || die "--secret-prefix требует plain|dd"; prefix="$2"; shift 2 ;;
+      --secret) (($# >= 2)) || die "--secret требует значение"; secret="$2"; shift 2 ;;
       *) die "Неизвестный параметр docker install: $1" ;;
     esac
   done
-  docker_ensure_engine
-  [[ -f "$DOCKER_PROJECT_DIR/docker-compose.yml" && -f "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" ]] || die "Репозиторий не полностью развёрнут в $DOCKER_PROJECT_DIR."
   if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)" ]]; then
-    warn "Docker-проект уже запущен. Повторный перенос не требуется; используй пункт обновления или обслуживания."
+    warn "Docker-проект уже запущен. Повторная установка не требуется; используй обновление или обслуживание."
     docker_status_command
     return 0
   fi
   if [[ -z "$proxy" ]]; then
-    if [[ -s "$source_dir/config/proxy/web-server" ]]; then
-      proxy="$(tr '[:upper:]' '[:lower:]' < "$source_dir/config/proxy/web-server")"
-    elif [[ "$NONINTERACTIVE" == "1" ]]; then
+    if [[ "$NONINTERACTIVE" == "1" ]]; then
       proxy=caddy
     else
       echo "Выбери reverse proxy:"
@@ -2672,16 +2710,42 @@ docker_install_command() {
     fi
   fi
   [[ "$proxy" == caddy || "$proxy" == nginx ]] || die "Допустимы только Caddy или Nginx."
-  if [[ -s "$source_dir/config/proxy/config.json" ]]; then
-    info "Найдена прежняя native-конфигурация. Запускаю безопасный перенос в Docker..."
-    [[ -z "$domain" ]] || die "При переносе домен берётся из сохранённой native-конфигурации; --hostname здесь не применяется."
-    python3 "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" --source-dir "$source_dir" --web-server "$proxy" || return $?
-    docker_write_state "$proxy"
-    ok "Перенос завершён. Нативные файлы и службы сохранены для отката."
+
+  if [[ -z "$domain" ]]; then read -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
+  domain="${domain,,}"
+  validate_hostname "$domain" >/dev/null || die "Некорректное доменное имя: $domain"
+  if [[ -z "$email" ]]; then read -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
+  validate_email "$email" >/dev/null || die "Некорректный email: $email"
+
+  command -v ss >/dev/null 2>&1 || die "Не найдена команда ss (пакет iproute2)."
+  if [[ "$NONINTERACTIVE" == "1" ]]; then
+    relay_port="${relay_port:-8080}"
+    admin_port="${admin_port:-8081}"
+    validate_port "$relay_port" >/dev/null || die "Некорректный relay-порт."
+    validate_port "$admin_port" >/dev/null || die "Некорректный admin-порт."
+    [[ "$relay_port" != "$admin_port" ]] || die "Relay- и admin-порты должны различаться."
+    for choice in "$relay_port" "$admin_port"; do
+      port_in_use "$choice" && die "TCP-порт $choice уже занят. Укажи другой порт через --relay-port/--admin-port."
+    done
+    SECRET_PREFIX_MODE="$prefix"
+    [[ "$SECRET_PREFIX_MODE" == plain || "$SECRET_PREFIX_MODE" == dd ]] || die "--secret-prefix должен быть plain или dd."
+    SECRET_ARG="$secret"
+    docker_prompt_secret
   else
-    info "Старая native-конфигурация не найдена. Выполняю чистую Docker-установку."
-    docker_install_fresh_command "$proxy" "$domain" "$email"
+    echo
+    echo "Внутренний relay-порт приложения (значение по умолчанию 8080)."
+    prompt_port relay_port "Relay-порт" "${relay_port:-8080}"
+    echo
+    echo "Внутренний admin-порт для health check и метрик (по умолчанию 8081)."
+    prompt_port admin_port "Admin-порт" "${admin_port:-8081}"
+    [[ "$relay_port" != "$admin_port" ]] || die "Relay- и admin-порты должны различаться."
+    SECRET_PREFIX_MODE="$prefix"
+    SECRET_ARG="$secret"
+    docker_prompt_secret
   fi
+
+  docker_ensure_engine
+  docker_install_fresh_command "$proxy" "$domain" "$email" "$relay_port" "$admin_port" "$SECRET_ARG"
 }
 docker_update_runtime_command() {
   docker_require_project
