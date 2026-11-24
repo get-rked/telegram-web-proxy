@@ -2686,6 +2686,11 @@ docker_install_command() {
   done
   docker_ensure_engine
   [[ -f "$DOCKER_PROJECT_DIR/docker-compose.yml" && -f "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" ]] || die "Репозиторий не полностью развёрнут в $DOCKER_PROJECT_DIR."
+  if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)" ]]; then
+    warn "Docker-проект уже запущен. Повторный перенос не требуется; используй пункт обновления или обслуживания."
+    docker_status_command
+    return 0
+  fi
   if [[ -z "$proxy" ]]; then
     if [[ -s "$source_dir/config/proxy/web-server" ]]; then
       proxy="$(tr '[:upper:]' '[:lower:]' < "$source_dir/config/proxy/web-server")"
