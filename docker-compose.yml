@@ -153,6 +153,7 @@ services:
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
     depends_on:
       bootstrap: {condition: service_completed_successfully}
+      panel-volume-init: {condition: service_completed_successfully}
     volumes:
       - panel-data:/var/lib/tproxy-panel
       - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
