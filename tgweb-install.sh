@@ -2577,21 +2577,28 @@ docker_prompt_secret() {
     [[ "$SECRET_PREFIX_MODE" == "dd" && "$SECRET_ARG" != dd* ]] && SECRET_ARG="dd$SECRET_ARG"
     [[ "$SECRET_PREFIX_MODE" == "plain" && "$SECRET_ARG" == dd* ]] && die "Секрет с dd-префиксом несовместим с --secret-prefix plain."
   else
-    echo
-    echo "Формат секрета Web Proxy:"
-    echo "  1) Обычный — 32 hex-символа"
-    echo "  2) С префиксом dd — для обфускации"
-    read -r -p "Выбор [1-2, по умолчанию 1]: " format_choice || die "Ввод прерван."
-    case "${format_choice:-1}" in
-      1) SECRET_PREFIX_MODE=plain ;;
-      2) SECRET_PREFIX_MODE=dd ;;
-      *) die "Выбери 1 или 2." ;;
-    esac
-    read -r -p "Сгенерировать секрет автоматически? [Y/n]: " generate_choice || die "Ввод прерван."
-    if [[ ! "$generate_choice" =~ ^[Nn]$ ]]; then
-      SECRET_ARG="$(openssl rand -hex 16)"
-      [[ "$SECRET_PREFIX_MODE" == "dd" ]] && SECRET_ARG="dd$SECRET_ARG"
+    if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
+      echo
+      echo "Формат секрета Web Proxy:"
+      echo "  1) Обычный — 32 hex-символа"
+      echo "  2) С префиксом dd — для обфускации"
+      read -r -p "Выбор [1-2, по умолчанию 1]: " format_choice || die "Ввод прерван."
+      case "${format_choice:-1}" in
+        1) SECRET_PREFIX_MODE=plain ;;
+        2) SECRET_PREFIX_MODE=dd ;;
+        *) die "Выбери 1 или 2." ;;
+      esac
+    fi
+    [[ "$SECRET_PREFIX_MODE" == plain || "$SECRET_PREFIX_MODE" == dd ]] || die "--secret-prefix должен быть plain или dd."
+    if [[ -n "$SECRET_ARG" ]]; then
+      [[ "$SECRET_PREFIX_MODE" == dd && "$SECRET_ARG" != dd* ]] && die "Для выбранного формата секрет должен начинаться с dd."
+      [[ "$SECRET_PREFIX_MODE" == plain && "$SECRET_ARG" == dd* ]] && die "Уберите префикс dd у секрета."
     else
+      read -r -p "Сгенерировать секрет автоматически? [Y/n]: " generate_choice || die "Ввод прерван."
+      if [[ ! "$generate_choice" =~ ^[Nn]$ ]]; then
+        SECRET_ARG="$(openssl rand -hex 16)"
+        [[ "$SECRET_PREFIX_MODE" == "dd" ]] && SECRET_ARG="dd$SECRET_ARG"
+      else
       while :; do
         read -r -s -p "Секрет (32 hex): " first || die "Ввод прерван."; echo
         read -r -s -p "Повторите секрет: " second || die "Ввод прерван."; echo
@@ -2602,6 +2609,7 @@ docker_prompt_secret() {
         SECRET_ARG="$first"
         break
       done
+      fi
     fi
   fi
   validate_secret "$SECRET_ARG" >/dev/null || die "Неверный секрет Web Proxy."
@@ -2688,7 +2696,7 @@ docker_install_command() {
       --email) (($# >= 2)) || die "--email требует адрес"; email="$2"; shift 2 ;;
       --relay-port|--port) (($# >= 2)) || die "$1 требует порт"; relay_port="$2"; shift 2 ;;
       --admin-port) (($# >= 2)) || die "--admin-port требует порт"; admin_port="$2"; shift 2 ;;
-      --secret-prefix) (($# >= 2)) || die "--secret-prefix требует plain|dd"; prefix="$2"; shift 2 ;;
+      --secret-prefix) (($# >= 2)) || die "--secret-prefix требует plain|dd"; prefix="$2"; SECRET_PREFIX_MODE_SET=1; shift 2 ;;
       --secret) (($# >= 2)) || die "--secret требует значение"; secret="$2"; shift 2 ;;
       *) die "Неизвестный параметр docker install: $1" ;;
     esac
