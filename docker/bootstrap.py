@@ -19,8 +19,6 @@ PANEL_ROUTE_DIR = Path(os.environ.get("PANEL_ROUTE_DIR", "/opt/telegram-web-prox
 DOMAIN = os.environ.get("DOMAIN", "").strip().lower()
 RELAY_PORT = int(os.environ.get("RELAY_PORT", "8080"))
 ADMIN_PORT = int(os.environ.get("ADMIN_PORT", "8081"))
-LEGACY_PUBLIC_DIR = Path("/srv/tproxy-site")
-LEGACY_TOKEN_KEY_FILE = Path("/etc/tproxy-server/token.key")
 UID = int(os.environ.get("TPROXY_UID", "10001"))
 GID = int(os.environ.get("TPROXY_GID", "10001"))
 
@@ -180,21 +178,6 @@ def main():
         if not config.get("public_dir") and not config.get("public_upstream"):
             fail("config.json must set public_dir or public_upstream")
         changed = False
-        # Migrate only the exact legacy defaults. Custom paths remain untouched.
-        if config.get("public_dir") == str(LEGACY_PUBLIC_DIR):
-            config["public_dir"] = "/opt/telegram-web-proxy/docker/site"
-            changed = True
-        if config.get("token_key_file") == str(LEGACY_TOKEN_KEY_FILE):
-            if not token_path.exists() and LEGACY_TOKEN_KEY_FILE.exists():
-                try:
-                    legacy_key = LEGACY_TOKEN_KEY_FILE.read_bytes()
-                except OSError as exc:
-                    fail(f"cannot read legacy token key: {exc}")
-                if len(legacy_key) != 32:
-                    fail("legacy token.key must contain exactly 32 random bytes; refusing to replace it")
-                atomic_write(token_path, legacy_key, 0o600)
-            config["token_key_file"] = str(token_path)
-            changed = True
         if config.get("public_hostname") != DOMAIN:
             config["public_hostname"] = DOMAIN
             changed = True
