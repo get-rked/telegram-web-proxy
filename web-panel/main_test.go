@@ -284,7 +284,7 @@ func TestProfileActionUpdateIgnoresRuntimeSettings(t *testing.T) {
 	dir := t.TempDir()
 	capture := filepath.Join(dir, "args.txt")
 	script := filepath.Join(dir, "capture.sh")
-	scriptBody := "#!/bin/sh\\nprintf '%s\\\\n' \"$@\" > \"$CAPTURE_ARGS\"\\n"
+	scriptBody := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"
 	if err := os.WriteFile(script, []byte(scriptBody), 0700); err != nil { t.Fatal(err) }
 	t.Setenv("CAPTURE_ARGS", capture)
 	a := &App{base: "panel", script: script}
@@ -293,8 +293,9 @@ func TestProfileActionUpdateIgnoresRuntimeSettings(t *testing.T) {
 	a.profileAction(response, req)
 	if response.Code != http.StatusOK { t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String()) }
 	raw, err := os.ReadFile(capture); if err != nil { t.Fatal(err) }
-	args := strings.Split(strings.TrimSpace(string(raw)), "\\n")
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	want := []string{"profile", "update", "alpha", "--carrier-mode", "https"}
 	if strings.Join(args, "|") != strings.Join(want, "|") { t.Fatalf("panel unexpectedly passed CLI-only runtime settings: %#v", args) }
+}) }
 }
 
