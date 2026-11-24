@@ -77,12 +77,16 @@ func (a *App) init() error {
 	a.db = db
 	db.SetMaxOpenConns(1)
 
-	schema := "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);" +
-		"CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt BLOB NOT NULL, password_hash BLOB NOT NULL);" +
-		"CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL);" +
-		"CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);"
-	if _, err := db.Exec(schema); err != nil {
-		return err
+	statements := []string{
+		"CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt BLOB NOT NULL, password_hash BLOB NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+		"CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)",
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
 	}
 
 	var users int
