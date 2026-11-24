@@ -40,3 +40,12 @@ docker/mtproxy/__pycache__/
 /docker/nginx/certs/
 /docker/Caddyfile.before-*
 /docker/config/*.before-*
+
+# Legacy native runtime retained for rollback alongside the Docker repository
+/bin/
+/config/
+/data/
+/src/
+/systemd/
+/qr/
+/backups/
