@@ -2453,7 +2453,7 @@ path = pathlib.Path("/etc/caddy/Caddyfile")
 if path.exists():
     text = path.read_text()
     base = re.escape(sys.argv[1])
-    pattern = r"(?ms)^[ \\t]*handle /" + base + r"/\\* \\{\\n[ \\t]*reverse_proxy 127\\.0\\.0\\.1:18765 \\{\\n[ \\t]*header_up X-Real-IP \\{http\\.request\\.remote\\.host\\}\\n[ \\t]*\\}\\n[ \\t]*\\}\\n?"
+    pattern = r"(?ms)^[ \t]*handle /" + base + r"/\* \{\n[ \t]*reverse_proxy 127\.0\.0\.1:18765 \{\n[ \t]*header_up X-Real-IP \{http\.request\.remote\.host\}\n[ \t]*\}\n[ \t]*\}\n?"
     path.write_text(re.sub(pattern, "", text, count=1))
 PYTHON
         systemctl reload caddy.service 2>/dev/null || true ;;
@@ -2464,7 +2464,7 @@ path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
 if path.exists():
     text = path.read_text()
     base = re.escape(sys.argv[1])
-    pattern = r"(?ms)^[ \\t]*location \\^~ /" + base + r"/ \\{\\n.*?^[ \\t]*\\}\\n?"
+    pattern = r"(?ms)^[ \t]*location \^~ /" + base + r"/ \{\n.*?^[ \t]*\}\n?"
     path.write_text(re.sub(pattern, "", text, count=1))
 PYTHON
         nginx -t >/dev/null 2>&1 && systemctl reload nginx.service 2>/dev/null || true ;;
