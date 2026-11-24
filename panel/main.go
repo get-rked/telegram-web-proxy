@@ -468,46 +468,50 @@ func (a *application) readProfiles() (profileDocument, error) {
 }
 
 func (a *application) writeProfiles(doc profileDocument) error {
-	if err := backupFile(a.profiles); err != nil {
-		return err
-	}
-	if err := pruneFileBackups(a.profiles, 20); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	data = append(data, '\n')
-	dir := filepath.Dir(a.profiles)
-	tmp, err := os.CreateTemp(dir, ".profiles-*.tmp")
-	if err != nil {
-		return err
+	if err := backupFile(a.profiles); err != nil { return err }
+	if err := pruneFileBackups(a.profiles, 20); err != nil { return err }
+	original, err := os.ReadFile(a.profiles)
+	if err != nil { return err }
+	if err := writeAtomicFile(a.profiles, data, 0600); err != nil { return err }
+	if err := a.syncMTProxySecrets(doc); err != nil {
+		if rollbackErr := writeAtomicFile(a.profiles, original, 0600); rollbackErr != nil {
+			return fmt.Errorf("MTProxy secret sync failed (%v) and profiles rollback failed (%v)", err, rollbackErr)
+		}
+		return fmt.Errorf("MTProxy secret sync failed; profiles rolled back: %w", err)
 	}
+	return nil
+}
+
+func (a *application) syncMTProxySecrets(doc profileDocument) error {
+	if a.mtproxySecret == "" { return nil }
+	var values []string
+	seen := make(map[string]bool, len(doc.Profiles))
+	for _, item := range doc.Profiles {
+		value := strings.TrimPrefix(strings.ToLower(item.Secret), "dd")
+		decoded, err := hex.DecodeString(value)
+		if err != nil || len(decoded) != 16 { return errors.New("invalid profile secret; refusing MTProxy sync") }
+		if seen[value] { return errors.New("duplicate profile secret; refusing MTProxy sync") }
+		seen[value] = true
+		values = append(values, value)
+	}
+	return writeAtomicFile(a.mtproxySecret, []byte(strings.Join(values, "\n")+"\n"), 0600)
+}
+
+func writeAtomicFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".atomic-*.tmp")
+	if err != nil { return err }
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-	if _, err = tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Chmod(0600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	if err = os.Rename(tmpName, a.profiles); err != nil {
-		return err
-	}
-	if directory, openErr := os.Open(dir); openErr == nil {
-		_ = directory.Sync()
-		_ = directory.Close()
-	}
+	if _, err = tmp.Write(data); err != nil { _ = tmp.Close(); return err }
+	if err = tmp.Sync(); err != nil { _ = tmp.Close(); return err }
+	if err = tmp.Chmod(mode); err != nil { _ = tmp.Close(); return err }
+	if err = tmp.Close(); err != nil { return err }
+	if err = os.Rename(tmpName, path); err != nil { return err }
+	if directory, openErr := os.Open(dir); openErr == nil { _ = directory.Sync(); _ = directory.Close() }
 	return nil
 }
 
