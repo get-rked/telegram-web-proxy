@@ -1579,6 +1579,9 @@ EOF
 EOF
   fi
 
+  # Profile storage is immutable during an update. Only a fresh install
+  # initializes or migrates per-profile files.
+  if [[ "$MODE" != "update" ]]; then
   # Per-profile JSON files are authoritative. Read the selected profile,
   # apply the installer choices, and write back only that profile object.
   profile_storage_rebuild
@@ -1605,13 +1608,18 @@ EOF
   chmod 0640 "$profile_tmp"
   mv -f "$profile_tmp" "$profile_dir/$profile_name/profile.json"
 
-  # Rebuild the aggregate from validated per-profile objects. This prevents
-  # accidentally writing the whole {"profiles":[...]} wrapper into profile.json.
+  # Rebuild the aggregate from validated per-profile objects.
   profile_storage_rebuild
-  chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
+  fi
+  chown root:tproxy $PROXY_CONFIG_DIR/config.json
+  if [[ "$MODE" != "update" ]]; then chown root:tproxy $PROXY_CONFIG_DIR/profiles.json; fi
   chmod 0640 $PROXY_CONFIG_DIR/config.json
-  chmod 0400 $PROXY_CONFIG_DIR/profiles.json
-  ok "config.json и profiles.json записаны (порты $RELAY_PORT / $ADMIN_PORT)"
+  if [[ "$MODE" != "update" ]]; then chmod 0400 $PROXY_CONFIG_DIR/profiles.json; fi
+  if [[ "$MODE" == "update" ]]; then
+    ok "Обновлены только общие параметры config.json; профили не изменялись"
+  else
+    ok "config.json и profiles.json записаны (порты $RELAY_PORT / $ADMIN_PORT)"
+  fi
 }
 
 write_mtproxy_env() {
@@ -1647,15 +1655,21 @@ write_mtproxy_env() {
 
   mkdir -p $MTPROXY_CONFIG_DIR
   local mtproxy_secrets="" profile_secret
-  if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
-    while IFS= read -r profile_secret; do
-      [[ -n "$profile_secret" ]] || continue
-      profile_secret="${profile_secret#dd}"
-      if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
-      mtproxy_secrets+="$profile_secret"
-    done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
+  if [[ "$MODE" == "update" ]]; then
+    # Preserve the active secret list; profile storage is read-only during updates.
+    mtproxy_secrets="$(grep -m1 '^MTPROXY_SECRETS=' "$MTPROXY_CONFIG_DIR/mtproxy.env" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
+    [[ -n "$mtproxy_secrets" ]] || die "В mtproxy.env отсутствует MTPROXY_SECRETS; обновление отменено."
+  else
+    if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
+      while IFS= read -r profile_secret; do
+        [[ -n "$profile_secret" ]] || continue
+        profile_secret="${profile_secret#dd}"
+        if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
+        mtproxy_secrets+="$profile_secret"
+      done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
+    fi
+    [[ -n "$mtproxy_secrets" ]] || mtproxy_secrets="$backend_secret"
   fi
-  [[ -n "$mtproxy_secrets" ]] || mtproxy_secrets="$backend_secret"
   cat > "$MTPROXY_CONFIG_DIR/mtproxy.env" <<EOF
 MTPROXY_SECRETS="$mtproxy_secrets"
 MTPROXY_WORKERS=${WORKERS_ARG:-1}
@@ -2108,7 +2122,6 @@ load_existing_config() {
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
   [[ -r "$cfg" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
   command -v jq >/dev/null 2>&1 || die "Для чтения настроек нужен jq"
-  profile_storage_rebuild
   v="$(jq -er '.public_hostname | select(type == "string" and length > 0)' "$cfg")" || die "Не удалось прочитать hostname"
   [[ -n "$HOSTNAME_ARG" ]] || HOSTNAME_ARG="$v"
   v="$(jq -r '.base_path // "none"' "$cfg")"; [[ -n "$BASE_PATH_ARG" ]] || BASE_PATH_ARG="$v"
@@ -2117,12 +2130,6 @@ load_existing_config() {
   v="$(jq -r '.public_dir // empty' "$cfg")"; [[ -n "$v" ]] && SITE_DIR="$v"
   SITE_UPSTREAM_ARG="$(jq -r '.public_upstream // empty' "$cfg")"
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
-  v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
-  [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
-  if [[ "$CARRIER_MODE_SET" -eq 0 ]]; then CARRIER_MODE_ARG="$(jq -r '.profiles[0].carrier_mode // "https"' "$profiles")"; fi
-  if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
-    if [[ "$SECRET_ARG" == dd* ]]; then SECRET_PREFIX_MODE="dd"; else SECRET_PREFIX_MODE="plain"; fi
-  fi
   v="$(sed -n 's/^MTPROXY_WORKERS=//p' "$envf" | head -n1)"; [[ -n "$WORKERS_ARG" ]] || WORKERS_ARG="${v:-1}"
   v="$(sed -n 's/^MTPROXY_MAX_CONNECTIONS=//p' "$envf" | head -n1)"; [[ -n "$MAXCONN_ARG" ]] || MAXCONN_ARG="${v:-4096}"
   if [[ -r $PROXY_CONFIG_DIR/acme-email ]]; then
@@ -2150,7 +2157,6 @@ load_existing_config() {
   chmod 0600 $PROXY_CONFIG_DIR/acme-email
   validate_port "$RELAY_PORT" >/dev/null || die "Некорректный текущий relay-порт"
   validate_port "$ADMIN_PORT" >/dev/null || die "Некорректный текущий admin-порт"
-  validate_secret "$SECRET_ARG" >/dev/null || die "Некорректный текущий секрет"
   validate_base_path "$BASE_PATH_ARG" >/dev/null || die "Некорректный текущий base_path"
 }
 
@@ -2208,8 +2214,7 @@ interactive_update_fill() {
   prompt_update_port RELAY_PORT "Relay-порт" "$RELAY_PORT"
   prompt_update_port ADMIN_PORT "Admin-порт" "$ADMIN_PORT"
   [[ "$RELAY_PORT" != "$ADMIN_PORT" ]] || die "relay- и admin-порты должны различаться"
-  prompt_update_secret
-  info "Carrier mode при обновлении не меняется. Для изменения выбери профиль в меню «Carrier mode и профили»."
+  info "Профили, секреты и Carrier mode при обновлении не изменяются."
 
   local input
   while :; do
@@ -2232,7 +2237,6 @@ interactive_update_fill() {
   echo "  Base path  : $BASE_PATH_ARG"
   echo "  Relay port : $RELAY_PORT"
   echo "  Admin port : $ADMIN_PORT"
-  echo "  Секрет     : сохранён / изменён (значение скрыто)"
   echo "  Workers    : $WORKERS_ARG"
   echo "  Max conns  : $MAXCONN_ARG"
   echo "  Каталог    : $SITE_DIR"
@@ -2426,7 +2430,17 @@ run_install() {
   if [[ "$MODE" == "update" ]]; then
     ok "Обновление прошло health-check; rollback-копия сохранена: $UPDATE_ROLLBACK_ARCHIVE"
   fi
-  print_summary
+  if [[ "$MODE" == "update" ]]; then
+    echo
+    ok "Обновление завершено. Профили, секреты и Carrier mode сохранены без изменений."
+    echo "  Workers         : $WORKERS_ARG"
+    echo "  Max connections : $MAXCONN_ARG"
+    echo "  Relay port      : $RELAY_PORT"
+    echo "  Admin port      : $ADMIN_PORT"
+    echo "  Rollback        : $UPDATE_ROLLBACK_ARCHIVE"
+  else
+    print_summary
+  fi
 }
 
 # ============================================================================
