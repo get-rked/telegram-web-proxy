@@ -30,6 +30,15 @@ jobs:
       - name: Test
         working-directory: web-panel
         run: go test ./...
+      - name: Validate dashboard JavaScript
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          html = Path("web-panel/templates/dashboard.html").read_text()
+          script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+          Path("/tmp/tproxy-dashboard.js").write_text(script)
+          PY
+          node --check /tmp/tproxy-dashboard.js
       - name: Vet
         working-directory: web-panel
         run: go vet ./...
