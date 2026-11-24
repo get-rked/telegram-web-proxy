@@ -128,16 +128,23 @@ def main():
             fail("config.json must set only one of public_dir or public_upstream")
         if not config.get("public_dir") and not config.get("public_upstream"):
             fail("config.json must set public_dir or public_upstream")
+        changed = False
         if config.get("public_hostname") != DOMAIN:
-            backup(config_path)
             config["public_hostname"] = DOMAIN
+            changed = True
+        if config.get("admin_listen") == "127.0.0.1:8081":
+            # Admin API is reachable only over the private Docker bridge (no published port).
+            config["admin_listen"] = "0.0.0.0:8081"
+            changed = True
+        if changed:
+            backup(config_path)
             atomic_write(config_path, (json.dumps(config, indent=2) + "\n").encode(), 0o640)
     else:
         config = {
             "public_hostname": DOMAIN,
             "base_path": "",
             "listen": "127.0.0.1:8080",
-            "admin_listen": "127.0.0.1:8081",
+            "admin_listen": "0.0.0.0:8081",
             "public_dir": "/srv/tproxy-site",
             "token_key_file": "/etc/tproxy-server/token.key",
             "static_routes": "exact",
