@@ -14,6 +14,7 @@ import (
  "log"
  "net"
  "net/http"
+ "golang.org/x/crypto/argon2"
  "os"
  "os/exec"
  "path/filepath"
@@ -30,7 +31,7 @@ type App struct { db *sql.DB; base,script,backups,qr string; mu sync.Mutex; fail
 var nameRE=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 func env(k,d string)string{if v:=os.Getenv(k);v!=""{return v};return d}
 func random(n int)(string,error){b:=make([]byte,n);if _,e:=rand.Read(b);e!=nil{return "",e};return base64.RawURLEncoding.EncodeToString(b),nil}
-func derive(p string,s []byte)[]byte{u:=make([]byte,32);m:=hmac.New(sha256.New,[]byte(p));m.Write(s);m.Write([]byte{0,0,0,1});u=m.Sum(nil);out:=append([]byte{},u...);for i:=1;i<310000;i++{m=hmac.New(sha256.New,[]byte(p));m.Write(u);u=m.Sum(nil);for j:=range out{out[j]^=u[j]}};return out}
+func derive(p string,s []byte)[]byte{return argon2.IDKey([]byte(p),s,3,64*1024,2,32)}
 func(a *App)init()error{
  if e:=os.MkdirAll(filepath.Dir(env("PANEL_DB","/opt/telegram-web-proxy/data/panel/panel.db")),0700);e!=nil{return e}
  path:=env("PANEL_DB","/opt/telegram-web-proxy/data/panel/panel.db")
