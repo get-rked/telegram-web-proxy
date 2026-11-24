@@ -2885,14 +2885,14 @@ docker_update_runtime_command() {
     case "$choice" in 1) proxy=caddy ;; 2) proxy=nginx ;; *) die "Обновление отменено." ;; esac
     docker_write_state "$proxy"
   fi
-  info "Проверка Compose-конфигурации ($proxy + MTProxy)..."
-  docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Загрузка внешних образов..."
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы."
   info "Сборка обновлённых образов..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
-  info "Исправление прав доступа к конфигурациям Docker..."
+  info "Миграция и проверка конфигураций Docker..."
+  docker_compose run --rm --no-deps bootstrap || die "Не удалось выполнить миграцию конфигураций Docker."
   docker_repair_bind_mount_permissions
+  docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Применение обновления..."
   docker_compose --profile "$proxy" --profile mtproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
   docker_compose ps
