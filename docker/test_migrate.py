@@ -72,19 +72,19 @@ class MigrationTests(unittest.TestCase):
             (source / "config/proxy/acme-email").write_text("admin@example.test")
             (source / "config/proxy/web-server").write_text("caddy")
             (source / "config/mtproxy/mtproxy.env").write_text(
-                'MTPROXY_SECRETS="' + "12" * 16 + " -S " + "34" * 16 + '"\\n'
-                "MTPROXY_WORKERS=2\\nMTPROXY_MAX_CONNECTIONS=30\\n"
-                "MTPROXY_NAT_ARGS=--nat-info 10.0.0.2:203.0.113.4\\n"
+                'MTPROXY_SECRETS="' + "12" * 16 + " -S " + "34" * 16 + '"\n'
+                "MTPROXY_WORKERS=2\nMTPROXY_MAX_CONNECTIONS=30\n"
+                "MTPROXY_NAT_ARGS=--nat-info 10.0.0.2:203.0.113.4\n"
             )
             (source / "data/website/index.html").write_text("native-site")
             original_config = config_path.read_bytes()
             migrator.REPO = repo
-            with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), \\
-                 patch.object(migrator.os, "geteuid", return_value=0), \\
+            with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), \
+                 patch.object(migrator.os, "geteuid", return_value=0), \
                  patch.object(sys, "argv", ["migrate-to-docker.py", "--source-dir", str(source)]):
                 self.assertEqual(migrator.main(), 0)
-            with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), \\
-                 patch.object(migrator.os, "geteuid", return_value=0), \\
+            with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), \
+                 patch.object(migrator.os, "geteuid", return_value=0), \
                  patch.object(sys, "argv", ["migrate-to-docker.py", "--source-dir", str(source), "--apply"]):
                 self.assertEqual(migrator.main(), 0)
             migrated = json.loads((repo / "docker/config/config.json").read_text())
