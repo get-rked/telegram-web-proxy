@@ -4,20 +4,35 @@ set -eu
 DATA_DIR=${MTPROXY_DATA_DIR:-/var/lib/mtproxy}
 SECRET_FILE=${MTPROXY_SECRET_FILE:-/run/secrets/mtproxy_secret}
 REFRESH_INTERVAL=${MTPROXY_REFRESH_INTERVAL:-86400}
-SECRET=
 child=
+set --
+SEEN_SECRETS=" "
 
-if [ -r "$SECRET_FILE" ]; then
-    SECRET=$(tr -d '\r\n ' < "$SECRET_FILE")
-else
+if [ ! -r "$SECRET_FILE" ]; then
     echo "ERROR: MTProxy secret file is missing or unreadable." >&2
     exit 1
 fi
-case "$SECRET" in
-    ''|*[!0-9a-fA-F]*) echo "ERROR: MTProxy secret must be hexadecimal." >&2; exit 1 ;;
-esac
-if [ "${#SECRET}" -ne 32 ]; then
-    echo "ERROR: MTProxy secret must contain exactly 32 hex characters." >&2
+while IFS= read -r raw_secret || [ -n "$raw_secret" ]; do
+    SECRET=$(printf '%s' "$raw_secret" | tr -d '\r\n ' | tr 'A-F' 'a-f')
+    [ -n "$SECRET" ] || continue
+    case "$SECRET" in
+        dd*) SECRET=${SECRET#dd} ;;
+    esac
+    case "$SECRET" in
+        *[!0-9a-f]*) echo "ERROR: MTProxy secret file contains a non-hex value." >&2; exit 1 ;;
+    esac
+    if [ "${#SECRET}" -ne 32 ]; then
+        echo "ERROR: each MTProxy secret must contain exactly 32 hex characters (optional dd prefix)." >&2
+        exit 1
+    fi
+    case "$SEEN_SECRETS" in
+        *" $SECRET "*) echo "ERROR: duplicate MTProxy secret." >&2; exit 1 ;;
+    esac
+    SEEN_SECRETS="$SEEN_SECRETS$SECRET "
+    set -- "$@" -S "$SECRET"
+done < "$SECRET_FILE"
+if [ "$#" -eq 0 ]; then
+    echo "ERROR: MTProxy secret file contains no secrets." >&2
     exit 1
 fi
 case "$REFRESH_INTERVAL" in
@@ -48,7 +63,7 @@ start_proxy() {
     /usr/local/bin/mtproto-proxy \
         -p 8888 \
         -H 2398 \
-        -S "$SECRET" \
+        "$@" \
         --aes-pwd "$DATA_DIR/proxy-secret" "$DATA_DIR/proxy-multi.conf" \
         -M "${MTPROXY_WORKERS:-1}" &
     child=$!
@@ -76,7 +91,7 @@ shutdown() {
 }
 trap shutdown TERM INT
 
-if ! start_proxy; then
+if ! start_proxy "$@"; then
     echo "ERROR: MTProxy failed to start." >&2
     exit 1
 fi
@@ -118,13 +133,13 @@ while kill -0 "$child" 2>/dev/null; do
     chmod 0600 "$DATA_DIR/proxy-multi.conf.new"
     mv "$DATA_DIR/proxy-multi.conf.new" "$DATA_DIR/proxy-multi.conf"
     stop_proxy
-    if start_proxy; then
+    if start_proxy "$@"; then
         rm -f "$DATA_DIR/proxy-multi.conf.previous"
         echo "mtproxy: routing config updated successfully"
     else
         echo "mtproxy: updated config failed to start; restoring previous config" >&2
         mv "$DATA_DIR/proxy-multi.conf.previous" "$DATA_DIR/proxy-multi.conf"
-        if ! start_proxy; then
+        if ! start_proxy "$@"; then
             echo "ERROR: MTProxy could not recover with previous routing config." >&2
             exit 1
         fi
