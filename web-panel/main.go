@@ -685,7 +685,7 @@ func main() {
 	}
 	server := &http.Server{
 		Addr: env("PANEL_LISTEN", "127.0.0.1:18765"), Handler: a.routes(),
-		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 2 * time.Minute,
 		WriteTimeout: 180 * time.Second, IdleTimeout: 60 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
