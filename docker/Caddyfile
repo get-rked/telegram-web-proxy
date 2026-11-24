@@ -5,6 +5,10 @@
 
 {$DOMAIN} {
   encode zstd gzip
+  log {
+    output file /var/log/tproxy-panel/access.log
+    format json
+  }
   handle /admin* {
     reverse_proxy panel:8088 {
       header_up X-Real-IP {remote_host}
