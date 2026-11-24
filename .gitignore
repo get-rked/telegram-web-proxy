@@ -1,0 +1,6 @@
+.env
+/docker/config/config.json
+/docker/config/profiles.json
+/docker/config/token.key
+/docker/mtproxy/secret
+/docker/mtproxy/certs/
