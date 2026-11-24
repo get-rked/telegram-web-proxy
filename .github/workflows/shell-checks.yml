@@ -60,3 +60,32 @@ jobs:
       - name: Build tproxy-server
         working-directory: upstream
         run: go build -trimpath -ldflags="-s -w" -o tproxy-server ./cmd/tproxy-server
+
+  docker-panel:
+    name: Docker panel tests and image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: panel/go.mod
+      - name: Panel tests
+        working-directory: panel
+        run: |
+          go mod tidy
+          go test ./...
+          go vet ./...
+      - name: Build panel image
+        run: docker build -f docker/Dockerfile.panel -t tproxy-panel:test .
+
+  docker-compose:
+    name: Compose configuration validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate Compose model
+        run: |
+          cp .env.example .env
+          sed -i 's/replace-with-at-least-16-random-characters/ci-only-not-a-production-password/' .env
+          docker compose config --quiet
