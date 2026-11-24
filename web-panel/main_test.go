@@ -5,6 +5,7 @@ import (
  "mime/multipart"
  "net/http"
  "net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,4 +115,63 @@ func TestProfileImportUsesValidatedInstallerArguments(t *testing.T) {
  raw,err:=os.ReadFile(capture);if err!=nil{t.Fatal(err)}
  args:=strings.Split(strings.TrimSpace(string(raw)),"\n")
  if len(args)!=6||args[0]!="profile"||args[1]!="import"||args[3]!="--name"||args[4]!="alpha"||args[5]!="--yes"{t.Fatalf("unexpected installer arguments: %#v",args)}
+}
+
+func TestLoginRejectsSQLInjectionUsername(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PANEL_DB", filepath.Join(dir, "panel.db"))
+
+	a := &App{authSem: make(chan struct{}, 2)}
+	if err := a.init(); err != nil {
+		t.Fatal(err)
+	}
+	defer a.db.Close()
+
+	credentials, err := os.ReadFile(filepath.Join(dir, "panel-credentials.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var username, password string
+	for _, line := range strings.Split(strings.TrimSpace(string(credentials)), "\n") {
+		switch {
+		case strings.HasPrefix(line, "LOGIN="):
+			username = strings.TrimPrefix(line, "LOGIN=")
+		case strings.HasPrefix(line, "PASSWORD="):
+			password = strings.TrimPrefix(line, "PASSWORD=")
+		}
+	}
+	if username == "" || password == "" {
+		t.Fatal("bootstrap credentials are missing")
+	}
+
+	// With unsafe SQL string concatenation, this username could turn the
+	// WHERE clause into an always-true expression and select the admin row.
+	form := url.Values{}
+	form.Set("username", "' OR 1=1 --")
+	form.Set("password", password)
+	req := httptest.NewRequest(http.MethodPost, "/"+a.base+"/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	a.login(response, req)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("SQL injection attempt returned status %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+	var sessions int
+	if err := a.db.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Fatalf("SQL injection attempt created %d session(s)", sessions)
+	}
+
+	// A real credential pair must still work after the rejected injection.
+	form.Set("username", username)
+	req = httptest.NewRequest(http.MethodPost, "/"+a.base+"/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response = httptest.NewRecorder()
+	a.login(response, req)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("valid login returned status %d, want %d", response.Code, http.StatusSeeOther)
+	}
 }
