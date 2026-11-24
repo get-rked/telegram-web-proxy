@@ -469,7 +469,7 @@ func (a *application) writeProfiles(doc profileDocument) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err = tmp.Chmod(0640); err != nil {
+	if err = tmp.Chmod(0600); err != nil {
 		_ = tmp.Close()
 		return err
 	}
