@@ -9,12 +9,16 @@ services:
       TPROXY_CONFIG_DIR: /config
       MTPROXY_DIR: /mtproxy
       PROFILES_DIR: /profiles
+      PANEL_AUTH_DIR: /panel-auth
+      PANEL_CREDENTIALS_DIR: /panel-credentials
       TPROXY_UID: "10001"
       TPROXY_GID: "10001"
     volumes:
       - ./docker/config:/config
       - ./docker/mtproxy:/mtproxy
       - ./docker/profiles:/profiles
+      - ./docker/private:/panel-auth
+      - ./docker/private-credentials:/panel-credentials
     restart: "no"
   relay:
     depends_on:
@@ -133,7 +137,7 @@ services:
       panel: {condition: service_started}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./docker/config:/etc/tproxy-config:ro
+      - ./docker/config/panel-route.caddy:/etc/caddy/panel-route.caddy:ro
       - ./docker/security/logs:/var/log/tproxy-panel:rw
       - caddy-data:/data
       - caddy-config:/config
@@ -195,9 +199,9 @@ services:
     restart: unless-stopped
     environment:
       PANEL_ADDR: ":8088"
-      PANEL_AUTH_FILE: /etc/tproxy-config/panel-auth.json
+      PANEL_AUTH_FILE: /etc/tproxy-panel/panel-auth.json
       PANEL_DB: /var/lib/tproxy-panel/panel.db
-      TPROXY_CONFIG: /etc/tproxy-config/config.json
+      TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
       MTPROXY_SECRET_FILE: /run/mtproxy/secret
       PANEL_AUTH_LOG: /var/log/tproxy-panel/auth.log
@@ -208,7 +212,8 @@ services:
       panel-volume-init: {condition: service_completed_successfully}
     volumes:
       - panel-data:/var/lib/tproxy-panel
-      - ./docker/config:/etc/tproxy-config:ro
+      - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
+      - ./docker/private:/etc/tproxy-panel:ro
       - ./docker/profiles:/var/lib/tproxy-profiles:rw
       - ./docker/mtproxy:/run/mtproxy:rw
       - ./docker/security/logs:/var/log/tproxy-panel:rw
