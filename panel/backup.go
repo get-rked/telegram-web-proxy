@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -90,8 +91,8 @@ func (a *application) createBackup() (backupInfo, error) {
 		err = add("config.json", config)
 	}
 	if err == nil {
-		manifest := fmt.Sprintf("{\"version\":1,\"created_at\":%q}\n", now.Format(time.RFC3339))
-		err = add("manifest.json", []byte(manifest))
+		manifest, marshalErr := json.Marshal(map[string]any{"version": 2, "created_at": now.Format(time.RFC3339), "sha256": map[string]string{"profiles.json": fmt.Sprintf("%x", sha256.Sum256(profileData)), "config.json": fmt.Sprintf("%x", sha256.Sum256(config))}})
+		if marshalErr != nil { err = marshalErr } else { err = add("manifest.json", append(manifest, 10)) }
 	}
 	if closeErr := tw.Close(); err == nil {
 		err = closeErr
@@ -275,39 +276,14 @@ func (a *application) restoreBackup(id string) error {
 	if len(profileData) == 0 || !json.Valid(configData) || !json.Valid(manifestData) {
 		return errors.New("backup is incomplete or contains invalid JSON")
 	}
-	var manifest struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(manifestData, &manifest); err != nil || manifest.Version != 1 {
-		return errors.New("unsupported backup manifest")
-	}
+	var manifest struct { Version int `json:"version"`; Files map[string]string `json:"sha256"` }
+	if err := json.Unmarshal(manifestData, &manifest); err != nil || (manifest.Version != 1 && manifest.Version != 2) { return errors.New("unsupported backup manifest") }
+	if manifest.Version == 2 && (manifest.Files["profiles.json"] != fmt.Sprintf("%x", sha256.Sum256(profileData)) || manifest.Files["config.json"] != fmt.Sprintf("%x", sha256.Sum256(configData))) { return errors.New("backup SHA-256 verification failed") }
+
 	var doc profileDocument
 	if err := json.Unmarshal(profileData, &doc); err != nil {
 		return err
 	}
-	if a.mtproxySecret != "" {
-		secretBytes, err := os.ReadFile(a.mtproxySecret)
-		if err != nil {
-			return errors.New("MTProxy secret file is unavailable")
-		}
-		liveSecrets := make(map[string]bool)
-		for _, value := range strings.Fields(string(secretBytes)) {
-			liveSecrets[strings.TrimPrefix(strings.ToLower(value), "dd")] = true
-		}
-		expectedSecrets := make(map[string]bool)
-		for _, item := range doc.Profiles {
-			expectedSecrets[strings.TrimPrefix(strings.ToLower(item.Secret), "dd")] = true
-		}
-		if _, ok := expectedSecrets[""]; ok || len(expectedSecrets) != len(liveSecrets) {
-			return errors.New("backup profile secrets do not match the active MTProxy secret list")
-		}
-		for value := range expectedSecrets {
-			if !liveSecrets[value] {
-				return errors.New("backup profile secrets do not match the active MTProxy secret list")
-			}
-		}
-	}
-
 	temp, err := os.CreateTemp(filepath.Dir(a.profiles), ".restore-validation-*.tmp")
 	if err != nil {
 		return err
@@ -328,5 +304,13 @@ func (a *application) restoreBackup(id string) error {
 	if validationErr != nil {
 		return fmt.Errorf("backup profile validation failed: %w", validationErr)
 	}
-	return a.writeProfiles(doc)
+	originalConfig, err := os.ReadFile(a.config)
+	if err != nil { return err }
+	if err := backupFile(a.config); err != nil { return err }
+	if err := writeAtomicFile(a.config, configData, 0600); err != nil { return err }
+	if err := a.writeProfiles(doc); err != nil {
+		if rollbackErr := writeAtomicFile(a.config, originalConfig, 0600); rollbackErr != nil { return fmt.Errorf("restore failed (%v) and config rollback failed (%v)", err, rollbackErr) }
+		return fmt.Errorf("restore failed; config rolled back: %w", err)
+	}
+	return nil
 }
