@@ -82,8 +82,8 @@ services:
     image: busybox:1.37.0
     user: "0:0"
     volumes:
-      - ./docker/mtproxy-data:/data
-    command: ["sh", "-c", "chown -R 10001:10001 /data && chmod 0700 /data"]
+      - ./docker/mtproxy-data:/opt/telegram-web-proxy/docker/mtproxy-data
+    command: ["sh", "-c", "chown -R 10001:10001 /opt/telegram-web-proxy/docker/mtproxy-data && chmod 0700 /opt/telegram-web-proxy/docker/mtproxy-data"]
     restart: "no"
   stats-bridge:
     build:
