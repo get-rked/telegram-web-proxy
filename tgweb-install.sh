@@ -2575,7 +2575,9 @@ docker_wait_ready() {
     states=()
     ids="$(docker ps -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
     if [[ -n "$ids" ]]; then
-      inspected="$(docker inspect $ids --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
+      local -a container_ids=()
+      read -r -a container_ids <<< "$ids"
+      inspected="$(docker inspect "${container_ids[@]}" --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
       while IFS='|' read -r service state health; do
         [[ -n "$service" ]] && states["$service"]="$state|$health"
       done <<< "$inspected"
@@ -2677,7 +2679,7 @@ docker_install_command() {
     docker_install_fresh_command "$proxy" "$domain" "$email"
   fi
 }
-docker_update_command() {
+docker_update_runtime_command() {
   docker_require_project
   [[ -s "$DOCKER_PROJECT_DIR/.env" ]] || die "Не найден .env. Сначала выполни docker install."
   local proxy choice
@@ -2703,6 +2705,25 @@ docker_update_command() {
   ok "Docker-обновление завершено. Именованные тома и конфигурации сохранены."
 }
 
+docker_update_command() {
+  docker_require_project
+  [[ -d "$DOCKER_PROJECT_DIR/.git" ]] || die "Каталог проекта не является Git-репозиторием; автоматическое обновление кода невозможно."
+  local branch dirty
+  branch="$(git -C "$DOCKER_PROJECT_DIR" branch --show-current)"
+  [[ "$branch" == "$DOCKER_REPO_BRANCH" ]] || die "Ожидалась ветка $DOCKER_REPO_BRANCH, обнаружена $branch."
+  dirty="$(git -C "$DOCKER_PROJECT_DIR" status --porcelain)"
+  [[ -z "$dirty" ]] || {
+    printf '%s\n' "$dirty"
+    die "Есть локальные изменения. Сначала сохрани их отдельно; обновление не запускалось."
+  }
+  info "Обновляю код установщика из origin/$DOCKER_REPO_BRANCH..."
+  git -C "$DOCKER_PROJECT_DIR" fetch --prune origin "$DOCKER_REPO_BRANCH" ||
+    die "Не удалось получить обновления репозитория."
+  git -C "$DOCKER_PROJECT_DIR" merge --ff-only FETCH_HEAD ||
+    die "Обновление не является fast-forward; рабочие файлы не перезаписывались."
+  ok "Код установщика обновлён."
+  exec env TPROXY_BOOTSTRAP_DONE=1 bash "$DOCKER_PROJECT_DIR/tgweb-install.sh" docker update-runtime
+}
 docker_uninstall_command() {
   docker_require_project
   local yes=0
