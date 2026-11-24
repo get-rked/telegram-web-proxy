@@ -25,6 +25,33 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
       - /run:rw,noexec,nosuid,size=8m
+  mtproxy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mtproxy
+    restart: unless-stopped
+    network_mode: service:relay
+    depends_on:
+      relay: {condition: service_healthy}
+    environment:
+      MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
+      MTPROXY_DATA_DIR: /var/lib/mtproxy
+      MTPROXY_WORKERS: ${MTPROXY_WORKERS:-1}
+    volumes:
+      - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:ro
+      - mtproxy-data:/var/lib/mtproxy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8888/stats >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
   caddy:
     profiles: ["caddy"]
     image: caddy:2.11.4-alpine
@@ -92,3 +119,4 @@ volumes:
   panel-data:
   caddy-data:
   caddy-config:
+  mtproxy-data:
