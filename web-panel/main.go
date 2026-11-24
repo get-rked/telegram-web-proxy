@@ -167,6 +167,9 @@ func (a *App) blocked(r *http.Request) bool {
 	defer a.mu.Unlock()
 
 	now := time.Now()
+	if a.failures == nil {
+		a.failures = make(map[string][]time.Time)
+	}
 	kept := a.failures[ip][:0]
 	for _, attempt := range a.failures[ip] {
 		if now.Sub(attempt) < 10*time.Minute {
@@ -181,6 +184,9 @@ func (a *App) badLogin(r *http.Request) {
 	ip := a.remoteIP(r)
 	log.Printf("[AUTH_FAIL] remote=%s", ip)
 	a.mu.Lock()
+	if a.failures == nil {
+		a.failures = make(map[string][]time.Time)
+	}
 	a.failures[ip] = append(a.failures[ip], time.Now())
 	a.mu.Unlock()
 }
