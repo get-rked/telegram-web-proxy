@@ -2819,6 +2819,11 @@ docker_purge_command() {
       *) die "Неизвестный параметр docker purge: $1" ;;
     esac
   done
+  if (($# == 0)) && [[ "$NONINTERACTIVE" != "1" ]]; then
+    local volume_choice
+    read -r -p "Удалить также именованные volumes (панель, TLS, MTProxy)? [y/N]: " volume_choice || die "Ввод прерван."
+    case "$volume_choice" in y|Y|yes|YES) remove_volumes=1 ;; *) remove_volumes=0 ;; esac
+  fi
   ASSUME_YES="$yes"
   ui_header "Очистка Docker-установки"
   echo "Будут удалены контейнеры, сеть и локальные образы проекта."
