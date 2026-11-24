@@ -6,6 +6,8 @@ services:
       dockerfile: docker/Dockerfile.bootstrap
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      RELAY_PORT: ${RELAY_PORT:-8080}
+      ADMIN_PORT: ${ADMIN_PORT:-8081}
       TPROXY_CONFIG_DIR: /config
       MTPROXY_DIR: /mtproxy
       PROFILES_DIR: /profiles
@@ -87,6 +89,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.mtproxy-exporter
+    environment:
+      RELAY_ADMIN_PORT: ${ADMIN_PORT:-8081}
     network_mode: service:relay
     depends_on:
       relay: {condition: service_healthy}
