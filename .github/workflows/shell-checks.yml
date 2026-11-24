@@ -116,7 +116,8 @@ jobs:
           cat > docker/generated/panel-route.nginx.conf <<'NGINX'
           location = /panel-ci-test { return 308 /panel-ci-test/; }
           location ^~ /panel-ci-test/ {
-            rewrite ^/panel-ci-test/(.*)$ /$1 break;\n            proxy_pass http://$panel_upstream;
+            rewrite ^/panel-ci-test/(.*)$ /$1 break;
+            proxy_pass http://$panel_upstream;
           }
           NGINX
           touch docker/security/logs/auth.log docker/security/logs/access.log
