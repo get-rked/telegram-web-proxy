@@ -75,11 +75,25 @@ def check_shared_proxy(source, proxy):
         f = Path("/etc/caddy/Caddyfile")
         names = set()
         if f.is_file():
-            for line in f.read_text(errors="ignore").splitlines():
+            text = f.read_text(errors="ignore")
+            if re.search(r"(?m)^\\s*import\\s+", text):
+                raise MigrationAbort(
+                    "В Caddyfile найден import. Автоматическая проверка подключаемых конфигураций "
+                    "не поддерживается; проверь их вручную перед остановкой Caddy."
+                )
+            for line in text.splitlines():
                 s = line.strip()
-                if s and not s.startswith("#") and "{" in s and not s.startswith(
-                        ("route ", "handle ", "@", "(", "import ", "global", "servers")):
-                    names.update(x.strip().lower() for x in s.split("{", 1)[0].split(",") if x.strip())
+                if not s or s.startswith("#") or "{" not in s or s.startswith(
+                        ("route ", "handle ", "@", "(", "global", "servers")):
+                    continue
+                address = s.split("{", 1)[0].strip()
+                if not address:  # Caddy global-options block
+                    continue
+                for item in address.split(","):
+                    item = item.strip().lower()
+                    if not item or item in ("{$tproxy_hostname}", "{$domain}"):
+                        continue
+                    names.add(item)
     other = sorted(x for x in names if x not in (domain, "localhost", "_", ":80", ":443"))
     if other:
         raise MigrationAbort("Найден общий {} с другими сайтами: {}. Автоматически останавливать его нельзя.".format(
