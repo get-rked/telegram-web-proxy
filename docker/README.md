@@ -23,9 +23,9 @@ cp .env.example .env
 DNS-запись домена должна указывать на сервер, а входящие TCP-порты 80 и 443 должны быть доступны.
 
 ```bash
-docker compose --profile caddy config
-docker compose --profile caddy build
-docker compose --profile caddy up -d
+docker compose --profile caddy --profile mtproxy config
+docker compose --profile caddy --profile mtproxy build
+docker compose --profile caddy --profile mtproxy up -d
 docker compose logs -f caddy
 ```
 
@@ -44,9 +44,9 @@ Nginx ожидает два файла на хосте:
 mkdir -p docker/nginx/certs
 # Поместите fullchain.pem и privkey.pem в эту директорию.
 chmod 600 docker/nginx/certs/privkey.pem
-docker compose --profile nginx config
-docker compose --profile nginx build
-docker compose --profile nginx up -d
+docker compose --profile nginx --profile mtproxy config
+docker compose --profile nginx --profile mtproxy build
+docker compose --profile nginx --profile mtproxy up -d
 docker compose logs -f nginx
 ```
 
