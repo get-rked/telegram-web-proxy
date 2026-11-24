@@ -3064,7 +3064,13 @@ widths = [20, 30, 14, 34, 48]
 def border(left, middle, right, fill):
     return left + middle.join(fill * (width + 2) for width in widths) + right
 def line(values):
-    return "│ " + " │ ".join(str(value).ljust(width) for value, width in zip(values, widths)) + " │"
+    import re
+    cells = []
+    for value, width in zip(values, widths):
+        value = str(value)
+        visible = re.sub(r"\\033\\[[0-9;]*m", "", value)
+        cells.append(value + " " * max(0, width - len(visible)))
+    return "│ " + " │ ".join(cells) + " │"
 
 print()
 print("СОСТОЯНИЕ DOCKER-КОНТЕЙНЕРОВ")
