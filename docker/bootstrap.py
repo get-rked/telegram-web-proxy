@@ -214,8 +214,8 @@ def main():
 
     # Caddy imports this generated route. The secret path is never placed in a public URL or log.
     route = (
-        f"@panel_root path {base_path} {base_path}/*\n"
-        f"redir @panel_root {base_path}/ 308\n"
+        f"@panel_root_no_slash path {base_path}\n"
+        f"redir @panel_root_no_slash {base_path}/ 308\n"
         f"handle_path {base_path}/* {{\n"
         "    reverse_proxy panel:8088 {\n"
         "        header_up X-Real-IP {client_ip}\n"
