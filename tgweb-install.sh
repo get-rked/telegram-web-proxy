@@ -2006,7 +2006,7 @@ EOF
 
 
 run_config() {
-  local cfg="$PROXY_CONFIG_DIR/config.json"
+  local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
   local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output=""
   local public_upstream="" profile_name="" carrier_mode="" carrier_label="" count=0 index=0 choice=1
