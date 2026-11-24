@@ -244,3 +244,60 @@ func TestProfileActionUpdatePassesCarrierAndRotationFlags(t *testing.T) {
 	want := []string{"profile", "update", "alpha", "--carrier-mode", "websocket-lanes", "--generate"}
 	if strings.Join(args, "|") != strings.Join(want, "|") { t.Fatalf("unexpected installer arguments: %#v", args) }
 }
+
+
+func TestMTProxyRuntimeSettingsReadsValidatedValues(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config", "proxy")
+	mtproxyDir := filepath.Join(dir, "config", "mtproxy")
+	if err := os.MkdirAll(configDir, 0700); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(mtproxyDir, 0700); err != nil { t.Fatal(err) }
+	env := "MTPROXY_WORKERS=8\nMTPROXY_MAX_CONNECTIONS=12000\n"
+	if err := os.WriteFile(filepath.Join(mtproxyDir, "mtproxy.env"), []byte(env), 0600); err != nil { t.Fatal(err) }
+	a := &App{configDir: configDir}
+	workers, maxConnections := a.mtproxyRuntimeSettings()
+	if workers != "8" || maxConnections != "12000" {
+		t.Fatalf("unexpected runtime settings: workers=%q max_connections=%q", workers, maxConnections)
+	}
+}
+
+func TestMTProxyRuntimeSettingsUsesSafeDefaultsForInvalidValues(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config", "proxy")
+	mtproxyDir := filepath.Join(dir, "config", "mtproxy")
+	if err := os.MkdirAll(configDir, 0700); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(mtproxyDir, 0700); err != nil { t.Fatal(err) }
+	env := "MTPROXY_WORKERS=999\nMTPROXY_MAX_CONNECTIONS=0\n"
+	if err := os.WriteFile(filepath.Join(mtproxyDir, "mtproxy.env"), []byte(env), 0600); err != nil { t.Fatal(err) }
+	a := &App{configDir: configDir}
+	workers, maxConnections := a.mtproxyRuntimeSettings()
+	if workers != "1" || maxConnections != "4096" {
+		t.Fatalf("invalid settings were not replaced with defaults: workers=%q max_connections=%q", workers, maxConnections)
+	}
+}
+
+func TestProfileActionUpdatePassesRuntimeSettings(t *testing.T) {
+	dir := t.TempDir()
+	capture := filepath.Join(dir, "args.txt")
+	script := filepath.Join(dir, "capture.sh")
+	scriptBody := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0700); err != nil { t.Fatal(err) }
+	t.Setenv("CAPTURE_ARGS", capture)
+	a := &App{base: "panel", script: script}
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader("{\"Action\":\"update\",\"CarrierMode\":\"https\",\"Workers\":\"12\",\"MaxConnections\":\"24000\"}"))
+	response := httptest.NewRecorder()
+	a.profileAction(response, req)
+	if response.Code != http.StatusOK { t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String()) }
+	raw, err := os.ReadFile(capture); if err != nil { t.Fatal(err) }
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	want := []string{"profile", "update", "alpha", "--carrier-mode", "https", "--workers", "12", "--max-connections", "24000"}
+	if strings.Join(args, "|") != strings.Join(want, "|") { t.Fatalf("unexpected installer arguments: %#v", args) }
+}
+
+func TestProfileActionRejectsInvalidRuntimeSettings(t *testing.T) {
+	a := &App{base: "panel"}
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader("{\"Action\":\"update\",\"CarrierMode\":\"https\",\"Workers\":\"257\",\"MaxConnections\":\"4096\"}"))
+	response := httptest.NewRecorder()
+	a.profileAction(response, req)
+	if response.Code != http.StatusBadRequest { t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String()) }
+}
