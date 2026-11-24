@@ -2626,6 +2626,20 @@ PY
   docker_compose --profile "$proxy" --profile mtproxy up -d || die "Не удалось запустить Docker-проект."
   docker_write_state "$proxy"
   docker_wait_ready "$proxy"
+  iptables -S DOCKER-USER >/dev/null 2>&1 ||
+    die "Не создана цепочка DOCKER-USER; Fail2ban не сможет фильтровать Docker-трафик."
+  local http_code domain_value attempt
+  domain_value="$(sed -n 's/^DOMAIN=//p' "$DOCKER_PROJECT_DIR/.env" | head -n 1)"
+  http_code=""
+  for attempt in {1..12}; do
+    http_code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+      --resolve "$domain_value:443:127.0.0.1" "https://$domain_value/" 2>/dev/null || true)"
+    [[ "$http_code" == 200 || "$http_code" == 301 || "$http_code" == 302 ]] && break
+    sleep 5
+  done
+  [[ "$http_code" == 200 || "$http_code" == 301 || "$http_code" == 302 ]] ||
+    die "HTTPS/Web Proxy не прошёл локальную проверку (HTTP ${http_code:-нет ответа}). Проверь docker logs $proxy и relay."
+  ok "HTTPS/Web Proxy отвечает: HTTP $http_code."
   ok "Чистая Docker-установка завершена."
   echo "Конфигурация: $DOCKER_PROJECT_DIR/.env"
   echo "Учётные данные панели: $DOCKER_PROJECT_DIR/docker/private-credentials/panel-credentials.txt"
