@@ -429,15 +429,16 @@ func (a *application) readProfiles() (profileDocument, error) {
 		if err := validateProfileRequest(profileRequest{Name: p.Name, Backend: p.Backend, CarrierMode: p.CarrierMode}); err != nil {
 			return doc, err
 		}
-		secret, err := hex.DecodeString(p.Secret)
+		canonicalSecret := strings.TrimPrefix(strings.ToLower(p.Secret), "dd")
+		secret, err := hex.DecodeString(canonicalSecret)
 		if err != nil || len(secret) != 16 {
-			return doc, errors.New("profile secret must be 16 bytes of hex")
+			return doc, errors.New("profile secret must be 16 bytes of hex, optionally prefixed with dd")
 		}
-		if seenNames[p.Name] || seenSecrets[strings.ToLower(p.Secret)] {
+		if seenNames[p.Name] || seenSecrets[canonicalSecret] {
 			return doc, errors.New("duplicate profile name or secret")
 		}
 		seenNames[p.Name] = true
-		seenSecrets[strings.ToLower(p.Secret)] = true
+		seenSecrets[canonicalSecret] = true
 	}
 	if !seenNames["default"] {
 		return doc, errors.New("default profile is required")
