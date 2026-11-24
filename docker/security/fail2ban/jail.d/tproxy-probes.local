@@ -12,9 +12,9 @@ bantime.maxtime = 1w
 usedns = no
 action = docker-user[name=tproxy-probes]
 
-[nginx-botsearch]
+[tproxy-nginx-probes]
 enabled = true
-filter = nginx-botsearch
+filter = tproxy-nginx-probes
 logpath = /var/log/tproxy-panel/access.log
 backend = auto
 maxretry = 3
@@ -24,4 +24,4 @@ bantime.increment = true
 bantime.factor = 2
 bantime.maxtime = 1w
 usedns = no
-action = docker-user[name=nginx-botsearch]
+action = docker-user[name=tproxy-nginx-probes]
