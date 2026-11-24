@@ -143,7 +143,7 @@ def main():
             if not isinstance(item, dict) or not valid_secret(item.get("secret")):
                 fail("every profile must contain a 16-byte hex secret")
             item["secret"] = "dd" + canonical_secret(item["secret"]).lower()
-        normalized = (json.dumps(profiles_doc, indent=2) + "\\n").encode("utf-8")
+        normalized = (json.dumps(profiles_doc, indent=2) + "\n").encode("utf-8")
         if profiles_path.read_bytes() != normalized:
             atomic_write(profiles_path, normalized, 0o600)
     else:

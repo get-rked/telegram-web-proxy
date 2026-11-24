@@ -130,7 +130,7 @@ class BootstrapTests(unittest.TestCase):
             "name": "default", "secret": raw,
             "backend": "127.0.0.1:2398", "carrier_mode": "https"
         }]}))
-        (self.mtproxy_dir / "secret").write_text(raw + "\\n")
+        (self.mtproxy_dir / "secret").write_text(raw + "\n")
         bootstrap.main()
         profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
         self.assertEqual(profile["secret"], "dd" + raw)
