@@ -18,13 +18,19 @@ class BootstrapTests(unittest.TestCase):
         self.config_dir = root / "config"
         self.mtproxy_dir = root / "mtproxy"
         self.profiles_dir = root / "profiles"
+        self.panel_auth_dir = root / "panel-auth"
+        self.panel_credentials_dir = root / "panel-credentials"
         self.config_dir.mkdir()
         self.mtproxy_dir.mkdir()
         self.profiles_dir.mkdir()
+        self.panel_auth_dir.mkdir()
+        self.panel_credentials_dir.mkdir()
         self.patches = [
             patch.object(bootstrap, "CONFIG_DIR", self.config_dir),
             patch.object(bootstrap, "MTPROXY_DIR", self.mtproxy_dir),
             patch.object(bootstrap, "PROFILES_DIR", self.profiles_dir),
+            patch.object(bootstrap, "PANEL_AUTH_DIR", self.panel_auth_dir),
+            patch.object(bootstrap, "PANEL_CREDENTIALS_DIR", self.panel_credentials_dir),
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
@@ -48,11 +54,11 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.profiles_dir / "profiles.json").stat().st_mode & 0o777, 0o600)
         config = json.loads((self.config_dir / "config.json").read_text())
         self.assertEqual(config["admin_listen"], "127.0.0.1:8081")
-        auth = json.loads((self.config_dir / "panel-auth.json").read_text())
+        auth = json.loads((self.panel_auth_dir / "panel-auth.json").read_text())
         self.assertTrue(auth["base_path"].startswith("/panel-"))
         self.assertEqual(len(bytes.fromhex(auth["password_salt"])), 32)
         self.assertEqual(len(bytes.fromhex(auth["password_hash"])), 32)
-        credentials = (self.config_dir / "panel-credentials.txt").read_text()
+        credentials = (self.panel_credentials_dir / "panel-credentials.txt").read_text()
         self.assertIn(auth["base_path"], credentials)
         self.assertEqual((self.config_dir / "panel-auth.json").stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.config_dir / "panel-credentials.txt").stat().st_mode & 0o777, 0o600)
