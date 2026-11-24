@@ -44,9 +44,15 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=16m
-      - /run:rw,noexec,nosuid,size=8m
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 16777216
+      - type: tmpfs
+        target: /run
+        tmpfs:
+          size: 8388608
   mtproxy-firewall:
     profiles: ["mtproxy"]
     build:
@@ -112,8 +118,11 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=8m
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 8388608
   caddy:
     profiles: ["caddy"]
     image: caddy:2.11.4-alpine
@@ -207,7 +216,11 @@ services:
     networks: [proxy-internal]
     security_opt: [no-new-privileges:true]
     read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=8m]
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 8388608
 networks:
   proxy-internal:
     driver: bridge
