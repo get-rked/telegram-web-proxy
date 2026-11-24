@@ -68,6 +68,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.panel_credentials_dir / "panel-credentials.txt").stat().st_mode & 0o777, 0o600)
         route = (self.panel_route_dir / "panel-route.caddy").read_text()
         self.assertIn("handle_path " + auth["base_path"] + "/*", route)
+        self.assertTrue(route.endswith("\n"), "Caddy route must contain real line endings")
+        self.assertTrue(nginx_route.endswith("\n"), "Nginx route must contain real line endings")
         nginx_route = (self.panel_route_dir / "panel-route.nginx.conf").read_text()
         self.assertIn("location ^~ " + auth["base_path"] + "/", nginx_route)
 
