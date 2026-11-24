@@ -8,6 +8,7 @@ services:
     command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json"]
     volumes:
       - ./docker/config:/etc/tproxy-server:ro
+      - ./docker/site:/srv/tproxy-site:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/tproxy-server", "-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json", "-check"]
       interval: 30s
