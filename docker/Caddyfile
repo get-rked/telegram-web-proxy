@@ -21,6 +21,6 @@
   }
   import /etc/caddy/generated/panel-route.caddy
   handle {
-    reverse_proxy 127.0.0.1:8080
+    reverse_proxy 127.0.0.1:{$RELAY_PORT:8080}
   }
 }
