@@ -2508,10 +2508,10 @@ docker_ensure_engine() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin || die "Не удалось установить Docker Compose plugin."
     fi
   fi
-  command -v iptables >/dev/null 2>&1 || {
+  if ! command -v iptables >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y iptables
-  }
+    DEBIAN_FRONTEND=noninteractive apt-get install -y iptables python3 iproute2
+  fi
   systemctl enable --now docker
   docker info >/dev/null 2>&1 || die "Docker daemon не запустился или недоступен."
   docker compose version
