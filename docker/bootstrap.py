@@ -17,6 +17,8 @@ PANEL_AUTH_DIR = Path(os.environ.get("PANEL_AUTH_DIR", "/panel-auth"))
 PANEL_CREDENTIALS_DIR = Path(os.environ.get("PANEL_CREDENTIALS_DIR", "/panel-credentials"))
 PANEL_ROUTE_DIR = Path(os.environ.get("PANEL_ROUTE_DIR", "/panel-route"))
 DOMAIN = os.environ.get("DOMAIN", "").strip().lower()
+RELAY_PORT = int(os.environ.get("RELAY_PORT", "8080"))
+ADMIN_PORT = int(os.environ.get("ADMIN_PORT", "8081"))
 UID = int(os.environ.get("TPROXY_UID", "10001"))
 GID = int(os.environ.get("TPROXY_GID", "10001"))
 
@@ -84,6 +86,16 @@ def valid_secret(value):
         return False
 
 
+def read_profile_secret(path):
+    try:
+        values = [item.strip().lower() for item in path.read_text(encoding="ascii").splitlines() if item.strip()]
+    except OSError as exc:
+        fail(f"cannot read MTProxy secret file: {exc}")
+    if not values or not valid_secret(values[0]):
+        fail("MTProxy secret file must contain a valid 16-byte hex secret")
+    return values[0]
+
+
 def read_secret_list(path):
     try:
         raw = path.read_text(encoding="ascii")
@@ -100,6 +112,10 @@ def read_secret_list(path):
 def main():
     if not DOMAIN or any(ch.isspace() for ch in DOMAIN) or "/" in DOMAIN:
         fail("DOMAIN must be set to a hostname without scheme, path, or whitespace")
+    if not (1024 <= RELAY_PORT <= 65535 and 1024 <= ADMIN_PORT <= 65535):
+        fail("RELAY_PORT and ADMIN_PORT must be in the range 1024..65535")
+    if RELAY_PORT == ADMIN_PORT:
+        fail("RELAY_PORT and ADMIN_PORT must be different")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     MTPROXY_DIR.mkdir(parents=True, exist_ok=True)
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -126,7 +142,7 @@ def main():
                 fail("every profile must contain a 16-byte hex secret")
     else:
         if secret_path.exists():
-            secret = read_secret_list(secret_path)[0]
+            secret = read_profile_secret(secret_path)
         else:
             secret = secrets.token_hex(16)
         profiles_doc = {"profiles": [{
@@ -146,7 +162,9 @@ def main():
         current_secrets = read_secret_list(secret_path)
         if set(current_secrets) != set(expected_secrets):
             fail("MTProxy secret list does not match profile secrets; refusing to overwrite either")
-    else:
+    if not secret_path.exists() or secret_path.read_text(encoding="ascii").splitlines() != expected_secrets:
+        # The Web Proxy profile may use the dd obfuscation prefix; MTProxy receives
+        # canonical 32-hex values only. Keep both representations synchronized.
         atomic_write(secret_path, ("\n".join(expected_secrets) + "\n").encode("ascii"), 0o600)
 
     if config_path.exists():
@@ -161,6 +179,12 @@ def main():
         if config.get("public_hostname") != DOMAIN:
             config["public_hostname"] = DOMAIN
             changed = True
+        if config.get("listen") != f"127.0.0.1:{RELAY_PORT}":
+            config["listen"] = f"127.0.0.1:{RELAY_PORT}"
+            changed = True
+        if config.get("admin_listen") != f"127.0.0.1:{ADMIN_PORT}":
+            config["admin_listen"] = f"127.0.0.1:{ADMIN_PORT}"
+            changed = True
         if config.get("admin_listen") == "0.0.0.0:8081":
             # Upstream requires a loopback admin listener; the metrics bridge exposes it privately.
             config["admin_listen"] = "127.0.0.1:8081"
@@ -172,8 +196,8 @@ def main():
         config = {
             "public_hostname": DOMAIN,
             "base_path": "",
-            "listen": "127.0.0.1:8080",
-            "admin_listen": "127.0.0.1:8081",
+            "listen": f"127.0.0.1:{RELAY_PORT}",
+            "admin_listen": f"127.0.0.1:{ADMIN_PORT}",
             "public_dir": "/srv/tproxy-site",
             "token_key_file": "/etc/tproxy-server/token.key",
             "static_routes": "exact",
