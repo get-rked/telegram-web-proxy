@@ -104,13 +104,16 @@ jobs:
           cp docker/mtproxy/secret.example docker/mtproxy/secret
           docker compose --profile caddy --profile mtproxy config --quiet
           docker compose --profile nginx --profile mtproxy config --quiet
-          mkdir -p /tmp/nginx-certs
+          mkdir -p /tmp/nginx-certs docker/security/logs
+          touch docker/security/logs/auth.log docker/security/logs/access.log
           openssl req -x509 -nodes -newkey rsa:2048 -days 1 -subj "/CN=localhost" \
             -keyout /tmp/nginx-certs/privkey.pem -out /tmp/nginx-certs/fullchain.pem
           docker run --rm \
             -v "$PWD/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
             -v "/tmp/nginx-certs:/etc/nginx/certs:ro" \
+            -v "$PWD/docker/security/logs:/var/log/tproxy-panel" \
             nginx:1.28-alpine nginx -t
+          docker run --rm --entrypoint fail2ban-client -v "$PWD/docker/security/fail2ban/jail.d:/etc/fail2ban/jail.d:ro" -v "$PWD/docker/security/fail2ban/filter.d:/etc/fail2ban/filter.d:ro" -v "$PWD/docker/security/fail2ban/action.d:/etc/fail2ban/action.d:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel:ro" crazymax/fail2ban:1.1.0 -t
           test -s docker/site/index.html
           python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py migrate-to-docker.py
           python3 -m unittest docker/test_bootstrap.py docker/test_migrate.py
