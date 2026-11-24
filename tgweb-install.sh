@@ -2980,8 +2980,109 @@ docker_purge_command() {
 
 docker_status_command() {
   docker_require_project
-  docker_compose --profile caddy --profile nginx --profile mtproxy ps -a
-  local proxy
+  local ps_json proxy
+  ps_json="$(docker_compose --profile caddy --profile nginx --profile mtproxy ps -a --format json)" ||
+    die "Не удалось получить состояние Docker-контейнеров."
+  printf '%s\n' "$ps_json" | python3 -c '
+import json
+import os
+import sys
+
+raw = sys.stdin.read().strip()
+if not raw:
+    containers = []
+else:
+    try:
+        parsed = json.loads(raw)
+        containers = parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        containers = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    containers.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+colors = {
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "red": "\033[31m",
+    "gray": "\033[90m",
+    "cyan": "\033[36m",
+    "reset": "\033[0m",
+}
+
+def paint(value, color):
+    return colors[color] + value + colors["reset"] if use_color else value
+
+def cell(value, limit=46):
+    value = str(value or "—").replace("\n", " ").replace("\t", " ")
+    return value if len(value) <= limit else value[:limit - 1] + "…"
+
+def ports_of(item):
+    publishers = item.get("Publishers") or item.get("Ports") or []
+    result = []
+    if isinstance(publishers, str):
+        return cell(publishers, 48)
+    for port in publishers:
+        if isinstance(port, dict):
+            published = port.get("PublishedPort")
+            target = port.get("TargetPort")
+            protocol = port.get("Protocol", "tcp")
+            if published:
+                result.append(f"{published}->{target}/{protocol}")
+            elif target:
+                result.append(f"{target}/{protocol}")
+        elif port:
+            result.append(str(port))
+    return cell(", ".join(result) if result else "—", 48)
+
+rows = []
+for item in containers:
+    service = cell(item.get("Service") or item.get("Name") or item.get("Names"), 20)
+    name = cell(item.get("Name") or item.get("Names") or "—", 30)
+    state = str(item.get("State") or item.get("Status") or "unknown").lower()
+    health = str(item.get("Health") or "").lower()
+    status = cell(item.get("Status") or state, 34)
+    if health and health not in status.lower():
+        status = cell(status + " (" + health + ")", 34)
+    if state in ("running", "up") and health not in ("unhealthy",):
+        color = "green" if health in ("healthy", "") else "yellow"
+    elif state in ("created", "paused", "restarting"):
+        color = "yellow"
+    elif state in ("exited", "dead", "removing") or health == "unhealthy":
+        color = "red"
+    else:
+        color = "gray"
+    rows.append((service, name, paint(state, color), paint(status, color), ports_of(item)))
+
+headers = ("СЕРВИС", "КОНТЕЙНЕР", "СОСТОЯНИЕ", "СТАТУС", "ПОРТЫ")
+widths = [20, 30, 14, 34, 48]
+def border(left, middle, right, fill):
+    return left + middle.join(fill * (width + 2) for width in widths) + right
+def line(values):
+    return "│ " + " │ ".join(str(value).ljust(width) for value, width in zip(values, widths)) + " │"
+
+print()
+print("СОСТОЯНИЕ DOCKER-КОНТЕЙНЕРОВ")
+print(border("┌", "┬", "┐", "─"))
+print(line(headers))
+print(border("├", "┼", "┤", "─"))
+if rows:
+    for row in rows:
+        print(line(row))
+else:
+    print(line(("—", "Контейнеры не найдены", "—", "Проект остановлен или пуст", "—")))
+print(border("└", "┴", "┘", "─"))
+print()
+print("Цвета: " + paint("● работает", "green") + "  " +
+      paint("● ожидает / перезапускается", "yellow") + "  " +
+      paint("● ошибка / остановлен", "red") + "  " +
+      paint("● неизвестно", "gray"))
+'
   proxy="$(docker_read_web_server)"
   [[ -n "$proxy" ]] || proxy="не определён"
   printf '\nReverse proxy: %s\n' "$proxy"
