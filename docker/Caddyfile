@@ -6,7 +6,7 @@
 {$DOMAIN} {
   encode zstd gzip
   handle /admin* {
-    reverse_proxy 127.0.0.1:8088
+    reverse_proxy panel:8088
   }
   handle {
     reverse_proxy 127.0.0.1:8080
