@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"embed"
@@ -30,10 +31,21 @@ var assets embed.FS
 
 type authFailure struct { Count int; WindowStart time.Time; BlockedUntil time.Time }
 
+type panelAuthConfig struct {
+	BasePath     string `json:"base_path"`
+	Username     string `json:"username"`
+	PasswordSalt string `json:"password_salt"`
+	PasswordHash string `json:"password_hash"`
+}
+
 type application struct {
 	db       *sql.DB
 	user     string
-	password string
+	basePath string
+	passwordSalt []byte
+	passwordHash []byte
+	sessions map[string]time.Time
+	sessionMu sync.Mutex
 	config   string
 	profiles string
 	mtproxySecret string
@@ -95,6 +107,127 @@ func main() {
 		log.Fatal(err)
 	}
 
+	authConfigPath := env("PANEL_AUTH_FILE", "/etc/tproxy-config/panel-auth.json")
+	authData, err := os.ReadFile(authConfigPath)
+	if err != nil { log.Fatalf("cannot read panel auth config: %v", err) }
+	var authConfig panelAuthConfig
+	if err := json.Unmarshal(authData, &authConfig); err != nil { log.Fatalf("invalid panel auth config: %v", err) }
+	if !regexp.MustCompile(`^/panel-[A-Za-z0-9_-]{20,80}package main
+
+import (
+	"crypto/rand"
+	"crypto/subtle"
+	"database/sql"
+	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"strconv"
+	"sync"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed web/*
+var assets embed.FS
+
+type authFailure struct { Count int; WindowStart time.Time; BlockedUntil time.Time }
+
+type panelAuthConfig struct {
+	BasePath     string `json:"base_path"`
+	Username     string `json:"username"`
+	PasswordSalt string `json:"password_salt"`
+	PasswordHash string `json:"password_hash"`
+}
+
+type application struct {
+	db       *sql.DB
+	user     string
+	basePath string
+	passwordSalt []byte
+	passwordHash []byte
+	sessions map[string]time.Time
+	sessionMu sync.Mutex
+	config   string
+	profiles string
+	mtproxySecret string
+	mu       sync.Mutex
+	monitorClient *http.Client
+	backupRoot string
+	authLog *log.Logger
+	trustProxy bool
+	authMu sync.Mutex
+	authFailures map[string]authFailure
+	banDir string
+}
+
+type profile struct {
+	Name        string `json:"name"`
+	Secret      string `json:"secret"`
+	Backend     string `json:"backend"`
+	CarrierMode string `json:"carrier_mode"`
+}
+
+type profileDocument struct {
+	Profiles []profile `json:"profiles"`
+}
+
+type profileView struct {
+	Name        string `json:"name"`
+	Backend     string `json:"backend"`
+	CarrierMode string `json:"carrier_mode"`
+	SecretSet   bool   `json:"secret_set"`
+}
+
+type profileRequest struct {
+	Name        string `json:"name"`
+	Backend     string `json:"backend"`
+	CarrierMode string `json:"carrier_mode"`
+}
+
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$`)
+
+func env(k, fallback string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func main() {
+	dbPath := env("PANEL_DB", "/var/lib/tproxy-panel/panel.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+		log.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY, event TEXT NOT NULL, created_at TEXT NOT NULL);"); err != nil {
+		log.Fatal(err)
+	}
+
+).MatchString(authConfig.BasePath) || authConfig.Username == "" {
+		log.Fatal("panel auth config has invalid base path or username")
+	}
+	passwordSalt, err := hex.DecodeString(authConfig.PasswordSalt)
+	if err != nil || len(passwordSalt) != 32 { log.Fatal("panel auth config has invalid password salt") }
+	passwordHash, err := hex.DecodeString(authConfig.PasswordHash)
+	if err != nil || len(passwordHash) != 32 { log.Fatal("panel auth config has invalid password hash") }
+
 	authLogPath := env("PANEL_AUTH_LOG", "/var/log/tproxy-panel/auth.log")
 	if err := os.MkdirAll(filepath.Dir(authLogPath), 0750); err != nil { log.Fatal(err) }
 	authFile, err := os.OpenFile(authLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -103,8 +236,11 @@ func main() {
 
 	a := &application{
 		db:       db,
-		user:     env("PANEL_USER", "admin"),
-		password: os.Getenv("PANEL_PASSWORD"),
+		user:     authConfig.Username,
+		basePath: authConfig.BasePath,
+		passwordSalt: passwordSalt,
+		passwordHash: passwordHash,
+		sessions: make(map[string]time.Time),
 		config:   env("TPROXY_CONFIG", "/etc/tproxy-server/config.json"),
 		profiles: env("TPROXY_PROFILES", "/etc/tproxy-server/profiles.json"),
 		mtproxySecret: env("MTPROXY_SECRET_FILE", "/run/secrets/mtproxy_secret"),
@@ -113,22 +249,20 @@ func main() {
 		banDir: env("PANEL_BANLIST_DIR", "/var/log/tproxy-panel/banlist"),
 		trustProxy: env("PANEL_TRUST_PROXY", "false") == "true",
 	}
-	if len(a.password) < 16 {
-		log.Fatal("PANEL_PASSWORD must contain at least 16 characters")
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", a.health)
-	mux.HandleFunc("/admin/api/status", a.auth(a.status))
-	mux.HandleFunc("/admin/api/profiles", a.auth(a.profilesAPI))
-	mux.HandleFunc("/admin/api/profiles/", a.auth(a.profileItemAPI))
-	mux.HandleFunc("/admin/api/diagnostics", a.auth(a.diagnostics))
-	mux.HandleFunc("/admin/api/metrics", a.auth(a.metrics))
-	mux.HandleFunc("/admin/api/backups", a.auth(a.backupsAPI))
-	mux.HandleFunc("/admin/api/backups/", a.auth(a.backupItemAPI))
-	mux.HandleFunc("/admin/app.js", a.auth(a.javascript))
-	mux.HandleFunc("/admin/", a.auth(a.index))
-	mux.HandleFunc("/admin", a.auth(a.index))
+	mux.HandleFunc("/api/session", a.sessionStatus)
+	mux.HandleFunc("/api/login", a.login)
+	mux.HandleFunc("/api/logout", a.auth(a.logout))
+	mux.HandleFunc("/api/status", a.auth(a.status))
+	mux.HandleFunc("/api/profiles", a.auth(a.profilesAPI))
+	mux.HandleFunc("/api/profiles/", a.auth(a.profileItemAPI))
+	mux.HandleFunc("/api/diagnostics", a.auth(a.diagnostics))
+	mux.HandleFunc("/api/metrics", a.auth(a.metrics))
+	mux.HandleFunc("/api/backups", a.auth(a.backupsAPI))
+	mux.HandleFunc("/api/backups/", a.auth(a.backupItemAPI))
+	mux.HandleFunc("/app.js", a.javascript)
+	mux.HandleFunc("/", a.index)
 
 	s := &http.Server{
 		Addr:              env("PANEL_ADDR", ":8088"),
@@ -160,17 +294,68 @@ func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "too many authentication attempts", http.StatusTooManyRequests)
 			return
 		}
-		u, p, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(a.user)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(a.password)) != 1 {
-			a.recordAuthFailure(ip)
-			if a.authLog != nil { a.authLog.Printf("auth_failed ip=%s", ip) }
-			w.Header().Set("WWW-Authenticate", `Basic realm="Telegram Web Proxy"`)
+		cookie, err := r.Cookie("tproxy_session")
+		if err != nil || !a.sessionValid(cookie.Value) {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
-		a.clearAuthFailures(ip)
 		next(w, r)
 	}
+}
+
+func (a *application) sessionValid(token string) bool {
+	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
+	expires, ok := a.sessions[token]
+	if !ok { return false }
+	if time.Now().After(expires) { delete(a.sessions, token); return false }
+	return true
+}
+
+func (a *application) sessionStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet { http.Error(w, "method not allowed", 405); return }
+	cookie, err := r.Cookie("tproxy_session")
+	jsonResponse(w, map[string]bool{"authenticated": err == nil && a.sessionValid(cookie.Value)})
+}
+
+func (a *application) login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
+	if !a.sameOriginMutation(w, r) { return }
+	ip := a.clientIP(r)
+	if a.isFail2banBanned(ip) || a.authIsBlocked(ip) {
+		w.Header().Set("Retry-After", "900")
+		http.Error(w, "too many authentication attempts", 429)
+		return
+	}
+	var input struct { Username string `json:"username"`; Password string `json:"password"` }
+	if err := decodeRequest(w, r, &input); err != nil { http.Error(w, "invalid credentials", 400); return }
+	hashInput := append(append([]byte(nil), a.passwordSalt...), []byte(input.Password)...)
+	hash := sha256.Sum256(hashInput)
+	valid := subtle.ConstantTimeCompare([]byte(input.Username), []byte(a.user)) == 1 &&
+		subtle.ConstantTimeCompare(hash[:], a.passwordHash) == 1
+	if !valid {
+		a.recordAuthFailure(ip)
+		if a.authLog != nil { a.authLog.Printf("auth_failed ip=%s", ip) }
+		http.Error(w, "Неверный логин или пароль", 401)
+		return
+	}
+	a.clearAuthFailures(ip)
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil { http.Error(w, "session creation failed", 500); return }
+	token := hex.EncodeToString(tokenBytes)
+	a.sessionMu.Lock()
+	a.sessions[token] = time.Now().Add(12*time.Hour)
+	a.sessionMu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name:"tproxy_session", Value:token, Path:a.basePath+"/", HttpOnly:true, Secure:true, SameSite:http.SameSiteStrictMode, MaxAge:12*60*60})
+	jsonResponse(w, map[string]bool{"authenticated":true})
+}
+
+func (a *application) logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
+	cookie, err := r.Cookie("tproxy_session")
+	if err == nil { a.sessionMu.Lock(); delete(a.sessions, cookie.Value); a.sessionMu.Unlock() }
+	http.SetCookie(w, &http.Cookie{Name:"tproxy_session", Value:"", Path:a.basePath+"/", HttpOnly:true, Secure:true, SameSite:http.SameSiteStrictMode, MaxAge:-1})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *application) isFail2banBanned(ip string) bool {
