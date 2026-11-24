@@ -26,6 +26,7 @@ services:
       - /tmp:rw,noexec,nosuid,size=16m
       - /run:rw,noexec,nosuid,size=8m
   mtproxy:
+    profiles: ["mtproxy"]
     build:
       context: .
       dockerfile: docker/Dockerfile.mtproxy
