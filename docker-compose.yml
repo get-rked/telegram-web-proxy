@@ -139,6 +139,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      TPROXY_LISTEN: ${TPROXY_LISTEN:-127.0.0.1:8080}
     security_opt: [no-new-privileges:true]
   nginx:
     profiles: ["nginx"]
@@ -148,8 +149,10 @@ services:
     depends_on:
       relay: {condition: service_healthy}
       panel: {condition: service_started}
+    environment:
+      TPROXY_LISTEN: ${TPROXY_LISTEN:-127.0.0.1:8080}
     volumes:
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/default.conf:/etc/nginx/templates/default.conf.template:ro
       - ./docker/security/logs:/var/log/tproxy-panel:rw
       - ./docker/nginx/certs:/etc/nginx/certs:ro
     healthcheck:
