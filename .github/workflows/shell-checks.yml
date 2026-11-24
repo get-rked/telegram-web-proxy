@@ -86,6 +86,8 @@ jobs:
         run: docker build -f docker/Dockerfile.relay -t tproxy-relay:test .
       - name: Build official MTProxy image
         run: docker build -f docker/Dockerfile.mtproxy -t tproxy-mtproxy:test .
+      - name: Build MTProxy stats exporter image
+        run: docker build -f docker/Dockerfile.mtproxy-exporter -t tproxy-mtproxy-exporter:test .
       - name: Build MTProxy firewall image
         run: docker build -f docker/Dockerfile.firewall -t tproxy-firewall:test .
 
@@ -109,7 +111,7 @@ jobs:
             -v "/tmp/nginx-certs:/etc/nginx/certs:ro" \
             nginx:1.28-alpine nginx -t
           test -s docker/site/index.html
-          python3 -m py_compile docker/bootstrap.py
+          python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py
           python3 -m unittest docker/test_bootstrap.py
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           python3 -m json.tool docker/config/config.example.json >/dev/null
