@@ -77,11 +77,11 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("location ^~ " + auth["base_path"] + "/", nginx_route)
 
     def test_first_run_preserves_dd_prefix_for_web_proxy_and_normalizes_mtproxy_secret(self):
-        (self.mtproxy_dir / "secret").write_text("dd" + "ab" * 16 + "\\n")
+        (self.mtproxy_dir / "secret").write_text("dd" + "ab" * 16 + "\n")
         bootstrap.main()
         profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
         self.assertEqual(profile["secret"], "dd" + "ab" * 16)
-        self.assertEqual((self.mtproxy_dir / "secret").read_text(), "ab" * 16 + "\\n")
+        self.assertEqual((self.mtproxy_dir / "secret").read_text(), "ab" * 16 + "\n")
 
     def test_second_run_preserves_secrets_and_token_key(self):
         bootstrap.main()
