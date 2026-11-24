@@ -63,7 +63,7 @@ tproxy_bootstrap_repository() {
   fi
   echo "[3/4] Загружаю репозиторий в $TPROXY_DEPLOY_DIR..."
   rm -rf -- "$clone_tmp"
-  git clone --depth 1 --single-branch --branch "$TPROXY_DEPLOY_BRANCH" "$TPROXY_DEPLOY_REPO" "$clone_tmp" || {
+  git clone --single-branch --branch "$TPROXY_DEPLOY_BRANCH" "$TPROXY_DEPLOY_REPO" "$clone_tmp" || {
     echo "Не удалось загрузить репозиторий; прежняя установка сохранена." >&2
     rm -rf -- "$clone_tmp"
     exit 1
@@ -136,7 +136,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.2.0"
+readonly SCRIPT_VERSION="1.2.1"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -2771,8 +2771,13 @@ docker_update_command() {
   fi
 
   info "Обновляю код установщика из origin/$DOCKER_REPO_BRANCH..."
-  if ! git -C "$DOCKER_PROJECT_DIR" fetch --prune origin "$DOCKER_REPO_BRANCH" ||
-     ! git -C "$DOCKER_PROJECT_DIR" merge --ff-only FETCH_HEAD; then
+  local fetch_ok=0
+  if [[ "$(git -C "$DOCKER_PROJECT_DIR" rev-parse --is-shallow-repository)" == "true" ]]; then
+    git -C "$DOCKER_PROJECT_DIR" fetch --unshallow --prune origin "$DOCKER_REPO_BRANCH" && fetch_ok=1
+  else
+    git -C "$DOCKER_PROJECT_DIR" fetch --prune origin "$DOCKER_REPO_BRANCH" && fetch_ok=1
+  fi
+  if (( ! fetch_ok )) || ! git -C "$DOCKER_PROJECT_DIR" merge --ff-only FETCH_HEAD; then
     [[ -z "$site_backup" ]] || {
       cp -a "$site_backup/." "$DOCKER_PROJECT_DIR/docker/site/"
       rm -rf -- "$site_backup"
