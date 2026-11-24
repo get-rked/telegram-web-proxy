@@ -238,7 +238,7 @@ func (a *App) command(ctx context.Context, args ...string) (string, error) {
 	if a.script == "" {
 		return "", fmt.Errorf("installer script is not configured")
 	}
-	cmd := exec.CommandContext(ctx, a.script, args...)
+	cmd := exec.CommandContext(ctx, "bash", a.script, args...)
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "TERM=dumb")
 	output, err := cmd.CombinedOutput()
 	if len(output) > 64*1024 {
