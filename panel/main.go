@@ -36,6 +36,7 @@ type application struct {
 	profiles string
 	mu       sync.Mutex
 	monitorClient *http.Client
+	backupRoot string
 }
 
 type profile struct {
