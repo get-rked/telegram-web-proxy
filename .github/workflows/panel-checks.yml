@@ -27,15 +27,6 @@ jobs:
       - name: Download pinned modules
         working-directory: web-panel
         run: go mod tidy
-      - name: Commit gofmt output and dependency checksums
-        run: |
-          if [[ -n "$(git status --porcelain -- web-panel)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add web-panel
-            git commit -m "Format panel and pin dependency checksums"
-            git push
-          fi
       - name: Test
         working-directory: web-panel
         run: go test ./...
