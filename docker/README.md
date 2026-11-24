@@ -1,6 +1,6 @@
 # Docker deployment — экспериментальная ветка
 
-Это экспериментальная Docker-native архитектура: закреплённая версия Telegram relay, отдельная панель управления, SQLite для аудита и выбираемый reverse proxy.
+Это Docker-архитектура: закреплённая версия Telegram relay, отдельная панель управления, SQLite для аудита и выбираемый reverse proxy.
 
 **Reverse proxy можно выбрать:**
 - **Caddy** — автоматическое получение и продление TLS-сертификатов Let's Encrypt.
