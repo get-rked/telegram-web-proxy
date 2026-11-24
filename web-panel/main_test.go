@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+ "mime/multipart"
+ "net/http"
+ "net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,4 +87,31 @@ func TestRedactConfigHidesSecretsRecursively(t *testing.T) {
 	if profiles["secret"] != "[REDACTED]" || got["api_token"] != "[REDACTED]" {
 		t.Fatal("sensitive config values were not redacted")
 	}
+}
+
+func TestProfileImportUsesValidatedInstallerArguments(t *testing.T) {
+ dir:=t.TempDir()
+ capture:=filepath.Join(dir,"args.txt")
+ script:=filepath.Join(dir,"capture.sh")
+ scriptBody:="#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"
+ if err:=os.WriteFile(script,[]byte(scriptBody),0700);err!=nil{t.Fatal(err)}
+ t.Setenv("CAPTURE_ARGS",capture)
+
+ var body bytes.Buffer
+ writer:=multipart.NewWriter(&body)
+ part,err:=writer.CreateFormFile("archive","profile.tar.gz");if err!=nil{t.Fatal(err)}
+ if _,err=part.Write([]byte("test-archive"));err!=nil{t.Fatal(err)}
+ if err=writer.WriteField("target","new");err!=nil{t.Fatal(err)}
+ if err=writer.WriteField("name","alpha");err!=nil{t.Fatal(err)}
+ if err=writer.Close();err!=nil{t.Fatal(err)}
+
+ req:=httptest.NewRequest(http.MethodPost,"/panel/api/profiles/import",&body)
+ req.Header.Set("Content-Type",writer.FormDataContentType())
+ response:=httptest.NewRecorder()
+ a:=&App{script:script,backupDir:dir}
+ a.profileImport(response,req)
+ if response.Code!=http.StatusOK{t.Fatalf("unexpected status %d: %s",response.Code,response.Body.String())}
+ raw,err:=os.ReadFile(capture);if err!=nil{t.Fatal(err)}
+ args:=strings.Split(strings.TrimSpace(string(raw)),"\n")
+ if len(args)!=6||args[0]!="profile"||args[1]!="import"||args[3]!="--name"||args[4]!="alpha"||args[5]!="--yes"{t.Fatalf("unexpected installer arguments: %#v",args)}
 }
