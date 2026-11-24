@@ -180,7 +180,7 @@ services:
     volumes:
       - ./docker/panel-data:/opt/telegram-web-proxy/docker/panel-data
       - ./docker/security/logs:/security-logs
-    command: ["sh", "-c", "mkdir -p /security-logs/banlist && touch /security-logs/auth.log /security-logs/access.log && chown -R 10001:10001 /data /security-logs && chmod 0770 /security-logs && chmod 0750 /security-logs/banlist && chmod 0600 /security-logs/auth.log && chmod 0660 /security-logs/access.log"]
+    command: ["sh", "-c", "mkdir -p /opt/telegram-web-proxy/docker/panel-data /security-logs/banlist && touch /security-logs/auth.log /security-logs/access.log && chown -R 10001:10001 /opt/telegram-web-proxy/docker/panel-data /security-logs && chmod 0770 /security-logs && chmod 0750 /security-logs/banlist && chmod 0600 /security-logs/auth.log && chmod 0660 /security-logs/access.log"]
     restart: "no"
   fail2ban:
     image: crazymax/fail2ban:1.1.0
@@ -227,7 +227,7 @@ services:
       - ./docker/private:/opt/telegram-web-proxy/docker/private:ro
       - ./docker/profiles:/opt/telegram-web-proxy/docker/profiles:rw
       - ./docker/mtproxy:/opt/telegram-web-proxy/docker/mtproxy:rw
-      - ./docker/security/logs:/var/log/tproxy-panel:rw
+      - ./docker/security/logs:/opt/telegram-web-proxy/docker/security/logs:rw
       - type: tmpfs
         target: /tmp
         tmpfs:
