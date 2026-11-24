@@ -242,7 +242,7 @@ def main():
             or service_states[name][1] not in ("none", "healthy")
         )
         if not_ready:
-            print("\\nДиагностика неготовых сервисов:")
+            print("\nДиагностика неготовых сервисов:")
             for name in not_ready:
                 state = service_states.get(name, ("missing", "unknown"))
                 print("  {}: state={}, health={}".format(name, state[0], state[1]))
