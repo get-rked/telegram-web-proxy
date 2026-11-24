@@ -6,3 +6,6 @@
 /docker/mtproxy/certs/
 
 /docker/profiles/profiles.json
+
+/docker/config/config.json.backup-*
+/docker/profiles/profiles.json.backup-*
