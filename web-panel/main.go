@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -339,35 +340,107 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(page)
 }
 
-func (a *App) profiles(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
-	defer cancel()
+type profileFile struct {
+	Name        string `json:"name"`
+	Secret      string `json:"secret"`
+	Backend     string `json:"backend"`
+	CarrierMode string `json:"carrier_mode"`
+}
 
+type proxyConfig struct {
+	PublicHostname string `json:"public_hostname"`
+	BasePath       string `json:"base_path"`
+}
+
+func (a *App) readProfile(name string) (profileFile, proxyConfig, error) {
+	var profile profileFile
+	var config proxyConfig
+	if !nameRE.MatchString(name) {
+		return profile, config, fmt.Errorf("invalid profile name")
+	}
+	raw, err := os.ReadFile(filepath.Join(a.configDir, "profiles", name, "profile.json"))
+	if err != nil {
+		return profile, config, err
+	}
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		return profile, config, err
+	}
+	if profile.Name != name || profile.Secret == "" || profile.CarrierMode == "" {
+		return profile, config, fmt.Errorf("invalid profile data")
+	}
+	raw, err = os.ReadFile(filepath.Join(a.configDir, "config.json"))
+	if err != nil {
+		return profile, config, err
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return profile, config, err
+	}
+	if config.PublicHostname == "" {
+		return profile, config, fmt.Errorf("public hostname is missing")
+	}
+	return profile, config, nil
+}
+
+func proxyClientSecret(secret, basePath string) string {
+	if basePath == "" {
+		return secret
+	}
+	payload := append([]byte{'p'}, []byte(secret)...)
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func (a *App) profileDetails(name string) (map[string]string, error) {
+	profile, config, err := a.readProfile(name)
+	if err != nil {
+		return nil, err
+	}
+	server := config.PublicHostname
+	if config.BasePath != "" {
+		server += "/" + strings.Trim(config.BasePath, "/")
+	}
+	secret := proxyClientSecret(profile.Secret, config.BasePath)
+	link := "https://t.me/webproxy?server=" + url.QueryEscape(server) + "&secret=" + url.QueryEscape(secret)
+	return map[string]string{
+		"name": profile.Name, "carrier_mode": profile.CarrierMode,
+		"secret": secret, "server": server, "link": link,
+	}, nil
+}
+
+func (a *App) profiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		output, err := a.command(ctx, "profile", "list")
+		entries, err := os.ReadDir(filepath.Join(a.configDir, "profiles"))
 		if err != nil {
 			errOut(w, http.StatusInternalServerError, "Не удалось получить список профилей")
 			return
 		}
-		items := []map[string]string{}
-		for _, line := range strings.Split(output, "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 3 && fields[0] != "ИМЯ" {
-				items = append(items, map[string]string{
-					"name": fields[0], "carrier_mode": fields[1], "backend": fields[2],
-				})
+		items := make([]map[string]string, 0, len(entries))
+		for _, entry := range entries {
+			if !entry.IsDir() || !nameRE.MatchString(entry.Name()) {
+				continue
 			}
+			details, err := a.profileDetails(entry.Name())
+			if err != nil {
+				log.Printf("profile read failed name=%q: %v", entry.Name(), err)
+				continue
+			}
+			items = append(items, details)
 		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i]["name"] == "default" { return true }
+			if items[j]["name"] == "default" { return false }
+			return items[i]["name"] < items[j]["name"]
+		})
 		jsonOut(w, items)
 		return
 	}
-
 	if r.Method == http.MethodPost {
 		var body struct{ Name string }
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil || !nameRE.MatchString(body.Name) {
 			errOut(w, http.StatusBadRequest, "Некорректное имя профиля")
 			return
 		}
+		ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+		defer cancel()
 		if _, err := a.command(ctx, "profile", "add", body.Name, "--generate"); err != nil {
 			errOut(w, http.StatusConflict, "Не удалось создать профиль")
 			return
@@ -376,6 +449,43 @@ func (a *App) profiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (a *App) profileConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"+a.base+"/api/profiles/"), "/config")
+	details, err := a.profileDetails(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	jsonOut(w, details)
+}
+
+func (a *App) profileQR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"+a.base+"/api/profiles/"), "/qr")
+	details, err := a.profileDetails(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "qrencode", "-o", "-", "-t", "PNG", "-s", "8", "-m", "2", details["link"]).Output()
+	if err != nil {
+		http.Error(w, "Не удалось сформировать QR-код", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(output)
 }
 
 func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
@@ -388,31 +498,57 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 		errOut(w, http.StatusBadRequest, "Некорректное имя профиля")
 		return
 	}
-	var body struct{ Action string }
+	var body struct {
+		Action string
+		CarrierMode string
+		RegenerateSecret bool
+	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
 		errOut(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	var args []string
 	switch body.Action {
 	case "delete":
 		args = []string{"profile", "delete", name, "--yes"}
-	case "backup":
+	case "backup", "export":
 		args = []string{"profile", "backup", name}
+	case "update":
+		switch body.CarrierMode {
+		case "https", "https-lanes", "websocket", "websocket-lanes":
+		default:
+			errOut(w, http.StatusBadRequest, "Некорректный Carrier mode")
+			return
+		}
+		args = []string{"profile", "update", name, "--carrier-mode", body.CarrierMode}
+		if body.RegenerateSecret {
+			args = append(args, "--generate")
+		}
 	default:
 		errOut(w, http.StatusBadRequest, "Неизвестная операция")
 		return
 	}
-	if _, err := a.command(ctx, args...); err != nil {
+	output, err := a.command(ctx, args...)
+	if err != nil {
+		log.Printf("profile action failed name=%q action=%q: %v: %s", name, body.Action, err, output)
 		errOut(w, http.StatusConflict, "Операция не выполнена")
+		return
+	}
+	if body.Action == "export" {
+		files, _ := filepath.Glob(filepath.Join(a.backupDir, "profile-backups", "trpoxy-profile-backup-"+name+"-*.tar.gz"))
+		sort.Sort(sort.Reverse(sort.StringSlice(files)))
+		if len(files) == 0 {
+			errOut(w, http.StatusInternalServerError, "Архив создан, но файл не найден")
+			return
+		}
+		jsonOut(w, map[string]string{"status": "exported", "download_url": "/" + a.base + "/api/profile-backups/" + filepath.Base(files[0])})
 		return
 	}
 	jsonOut(w, map[string]string{"status": "ok"})
 }
-
 
 func (a *App) profileImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -657,12 +793,15 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc(prefix+"/", a.home)
 	mux.HandleFunc(prefix+"/api/profiles", a.auth(a.profiles))
 	mux.HandleFunc(prefix+"/api/profiles/import", a.auth(a.profileImport))
-	mux.HandleFunc(prefix+"/api/profiles/", a.auth(a.profileAction))
+	mux.HandleFunc(prefix+"/api/profiles/", a.auth(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/config") { a.profileConfig(w, r); return }
+		if strings.HasSuffix(r.URL.Path, "/qr") { a.profileQR(w, r); return }
+		if strings.HasSuffix(r.URL.Path, "/") { http.NotFound(w, r); return }
+		a.profileAction(w, r)
+	}))
 	mux.HandleFunc(prefix+"/api/profile-backups/", a.auth(a.profileBackupDownload))
-	mux.HandleFunc(prefix+"/api/config", a.auth(a.configuration))
 	mux.HandleFunc(prefix+"/api/diagnostics", a.auth(a.diagnostics))
 	mux.HandleFunc(prefix+"/api/backups", a.auth(a.backups))
-	mux.HandleFunc(prefix+"/api/qr", a.auth(a.qr))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
