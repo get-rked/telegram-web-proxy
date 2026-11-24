@@ -157,6 +157,7 @@ Usage:
   sudo ./tgweb-install.sh profile list
   sudo ./tgweb-install.sh profile add ИМЯ (--secret СЕКРЕТ | --generate) [--carrier-mode MODE]
   sudo ./tgweb-install.sh profile set-carrier ИМЯ MODE
+  sudo ./tgweb-install.sh profile update ИМЯ --carrier-mode MODE [--generate]
   sudo ./tgweb-install.sh profile delete ИМЯ --yes
   sudo ./tgweb-install.sh profile backup ИМЯ
   sudo ./tgweb-install.sh profile import ARCHIVE (--name ИМЯ | --replace-default) [--entry PATH] --yes
@@ -4407,7 +4408,7 @@ profile_cli() {
         rm -rf "$rollback"; die "Импорт не прошёл проверку; исходная конфигурация восстановлена."
       fi
       rm -rf "$rollback"; ok "Профиль импортирован: $target" ;;
-    *) die "profile {list|add|set-carrier|delete|backup|import} ..." ;;
+    *) die "profile {list|add|set-carrier|update|delete|backup|import} ..." ;;
   esac
 }
 
