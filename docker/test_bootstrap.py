@@ -48,14 +48,28 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.profiles_dir / "profiles.json").stat().st_mode & 0o777, 0o600)
         config = json.loads((self.config_dir / "config.json").read_text())
         self.assertEqual(config["admin_listen"], "127.0.0.1:8081")
+        auth = json.loads((self.config_dir / "panel-auth.json").read_text())
+        self.assertTrue(auth["base_path"].startswith("/panel-"))
+        self.assertEqual(len(bytes.fromhex(auth["password_salt"])), 32)
+        self.assertEqual(len(bytes.fromhex(auth["password_hash"])), 32)
+        credentials = (self.config_dir / "panel-credentials.txt").read_text()
+        self.assertIn(auth["base_path"], credentials)
+        self.assertEqual((self.config_dir / "panel-auth.json").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.config_dir / "panel-credentials.txt").stat().st_mode & 0o777, 0o600)
+        route = (self.config_dir / "panel-route.caddy").read_text()
+        self.assertIn("handle_path " + auth["base_path"] + "/*", route)
 
     def test_second_run_preserves_secrets_and_token_key(self):
         bootstrap.main()
         secret_before = (self.mtproxy_dir / "secret").read_bytes()
         token_before = (self.config_dir / "token.key").read_bytes()
+        panel_auth_before = (self.config_dir / "panel-auth.json").read_bytes()
+        panel_credentials_before = (self.config_dir / "panel-credentials.txt").read_bytes()
         bootstrap.main()
         self.assertEqual((self.mtproxy_dir / "secret").read_bytes(), secret_before)
         self.assertEqual((self.config_dir / "token.key").read_bytes(), token_before)
+        self.assertEqual((self.config_dir / "panel-auth.json").read_bytes(), panel_auth_before)
+        self.assertEqual((self.config_dir / "panel-credentials.txt").read_bytes(), panel_credentials_before)
 
     def test_mismatched_existing_secrets_fail_closed(self):
         (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [{
