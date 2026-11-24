@@ -205,21 +205,51 @@ def main():
 
         print("\n[6/6] Запуск Docker")
         cmd(["docker", "compose"] + profiles + ["up", "-d"], timeout=1800, show=True)
-        deadline = time.time() + 180
+        required = {"relay", "panel", "fail2ban", "mtproxy", "mtproxy-firewall", proxy}
+        deadline = time.time() + 240
+        service_states = {}
         while time.time() < deadline:
-            state, _ = cmd(["docker", "compose", "ps", "--format", "json"], False)
-            rows = [x for x in state.splitlines() if x.strip()]
-            if rows and all(("running" in x.lower() or "healthy" in x.lower()) for x in rows):
+            ids, ids_rc = cmd(["docker", "compose", "ps", "-q", "--all"], False)
+            service_states = {}
+            if ids_rc == 0 and ids.strip():
+                inspected, inspect_rc = cmd([
+                    "docker", "inspect", *ids.split(),
+                    "--format",
+                    '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+                ], False)
+                if inspect_rc == 0:
+                    for line in inspected.splitlines():
+                        parts = line.split("|", 2)
+                        if len(parts) == 3 and parts[0]:
+                            service_states[parts[0]] = (parts[1].lower(), parts[2].lower())
+
+            ready = all(
+                name in service_states
+                and service_states[name][0] == "running"
+                and service_states[name][1] in ("none", "healthy")
+                for name in required
+            )
+            if ready:
                 break
             time.sleep(5)
 
-        status, _ = cmd(["docker", "compose", "ps"], False)
+        status, _ = cmd(["docker", "compose", "ps", "-a"], False)
         print(status)
-        running, _ = cmd(["docker", "compose", "ps", "--services", "--status", "running"], False)
-        required = {"relay", "panel", "fail2ban", "mtproxy", proxy}
-        missing = sorted(required - set(running.splitlines()))
-        if missing:
-            raise MigrationAbort("Не все обязательные контейнеры работают: " + ", ".join(missing))
+        not_ready = sorted(
+            name for name in required
+            if name not in service_states
+            or service_states[name][0] != "running"
+            or service_states[name][1] not in ("none", "healthy")
+        )
+        if not_ready:
+            print("\\nДиагностика неготовых сервисов:")
+            for name in not_ready:
+                state = service_states.get(name, ("missing", "unknown"))
+                print("  {}: state={}, health={}".format(name, state[0], state[1]))
+                logs, _ = cmd(["docker", "compose", "logs", "--no-color", "--tail=100", name], False)
+                if logs:
+                    print(logs)
+            raise MigrationAbort("Не готовы обязательные сервисы: " + ", ".join(not_ready))
         _, rc = cmd(["iptables", "-S", "DOCKER-USER"], False)
         if rc:
             raise MigrationAbort("Не создана цепочка DOCKER-USER: Fail2ban не сможет блокировать Docker-трафик.")
