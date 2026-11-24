@@ -2786,7 +2786,7 @@ PY
   info "Собираю локальные образы..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Первоначальная подготовка данных Docker..."
-  docker_compose run --rm --no-deps bootstrap || die "Не удалось подготовить данные первоначальной установки."
+  docker_compose run --rm --no-deps -e PANEL_RESET_CREDENTIALS=1 bootstrap || die "Не удалось подготовить данные первоначальной установки."
   info "Проверяю права публичного сайта..."
   docker_prepare_public_site_permissions
   info "Исправляю права доступа к конфигурациям Docker..."
