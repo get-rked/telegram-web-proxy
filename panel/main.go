@@ -188,7 +188,7 @@ func (a *application) recordAuthFailure(ip string) {
 	now := time.Now()
 	if len(a.authFailures) >= 10000 {
 		for key, item := range a.authFailures {
-			if now.Sub(item.WindowStart) > 10*time.Minute || (!item.BlockedUntil.IsZero() && now.After(item.BlockedUntil)) { delete(a.authFailures, key) }
+			if (!item.BlockedUntil.IsZero() && now.After(item.BlockedUntil)) || (item.BlockedUntil.IsZero() && now.Sub(item.WindowStart) > 10*time.Minute) { delete(a.authFailures, key) }
 		}
 		if len(a.authFailures) >= 10000 { return }
 	}
