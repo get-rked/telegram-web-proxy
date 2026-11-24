@@ -52,7 +52,7 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <section class="card wide"><h2>Диагностика</h2><button onclick="loadDiagnostics()">Запустить диагностику</button><pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre></section>
 <section class="card wide"><h2>Резервные копии и перенос профилей</h2>
 <div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="loadBackups()">Обновить список архивов</button></div>
-<div class="formline"><select id="exportProfile"><option value="">Выберите профиль для экспорта</option></select><button onclick="exportProfile()">Экспортировать профиль</button></div>
+<div class="formline"><select id="exportProfileSelect"><option value="">Выберите профиль для экспорта</option></select><button onclick="exportSelectedProfile()">Экспортировать профиль</button></div>
 <div class="meta">Экспорт создаёт архив выбранного профиля и сразу начинает его скачивание.</div>
 <div class="field"><label>Импорт профиля из архива</label><div class="formline"><input id="importArchive" type="file" accept=".tar.gz,.tgz"><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select><input id="importName" placeholder="Имя целевого профиля"><input id="importEntry" placeholder="Путь profile.json (если несколько)"><button class="primary" onclick="importProfile()">Импортировать</button></div></div>
 <div class="meta">Если в архиве несколько профилей, укажите путь к нужному profile.json.</div>
@@ -103,7 +103,7 @@ async function loadProfiles(){
  try{
   const profiles=await api(base+'/api/profiles');
   document.querySelector('#profiles').innerHTML=profiles.map(p=>'<article class="profile"><div class="profile-head"><div><div class="name">'+esc(p.name)+'</div><div class="meta">Carrier mode: '+esc(p.carrier_mode)+'</div><div class="meta">Секрет: '+esc(p.secret)+'</div></div></div><div class="actions"><button class="primary" onclick="showProfileConfig(\''+esc(p.name)+'\')">Конфигурация</button><button onclick="editProfile(\''+esc(p.name)+'\',\''+esc(p.carrier_mode)+'\')">Изменить</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></article>').join('')||'Профили не найдены';
-  const select=document.querySelector('#exportProfile');const selected=select.value;
+  const select=document.querySelector('#exportProfileSelect');const selected=select.value;
   select.innerHTML='<option value="">Выберите профиль для экспорта</option>'+profiles.map(p=>'<option value="'+esc(p.name)+'">'+esc(p.name)+'</option>').join('');
   if(profiles.some(p=>p.name===selected))select.value=selected;
  }catch(error){notify(error)}
@@ -140,7 +140,7 @@ async function saveProfile(){
   closeDialog('editDialog');await loadProfiles();alert('Профиль обновлён');
  }catch(error){notify(error)}
 }
-async function exportProfile(){
+async function exportSelectedProfile(){
  const name=document.querySelector('#exportProfile').value;if(!name){notify(Error('Выберите профиль'));return}
  try{const result=await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'export'})});const link=document.createElement('a');link.href=result.download_url;link.download='';document.body.appendChild(link);link.click();link.remove();await loadBackups()}
  catch(error){notify(error)}
