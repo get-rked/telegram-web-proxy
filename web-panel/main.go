@@ -572,12 +572,12 @@ func (a *App) routes() http.Handler {
 
 func main() {
 	a := &App{
-		script: env("PANEL_SCRIPT", "/opt/telegram-web-proxy/tgweb-install.sh"),
+		script:    env("PANEL_SCRIPT", "/opt/telegram-web-proxy/tgweb-install.sh"),
 		backupDir: env("PANEL_BACKUP_DIR", "/opt/telegram-web-proxy/backups"),
-		qrFile: env("PANEL_QR", "/opt/telegram-web-proxy/qr/proxy-qr.png"),
+		qrFile:    env("PANEL_QR", "/opt/telegram-web-proxy/qr/proxy-qr.png"),
 		configDir: env("PANEL_CONFIG_DIR", "/opt/telegram-web-proxy/config/proxy"),
-		failures: map[string][]time.Time{},
-		authSem: make(chan struct{}, 2),
+		failures:  map[string][]time.Time{},
+		authSem:   make(chan struct{}, 2),
 	}
 	if err := a.init(); err != nil {
 		log.Fatal(err)
