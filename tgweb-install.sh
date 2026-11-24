@@ -3068,7 +3068,7 @@ def line(values):
     cells = []
     for value, width in zip(values, widths):
         value = str(value)
-        visible = re.sub(r"\\033\\[[0-9;]*m", "", value)
+        visible = re.sub(r"\033\[[0-9;]*m", "", value)
         cells.append(value + " " * max(0, width - len(visible)))
     return "│ " + " │ ".join(cells) + " │"
 
