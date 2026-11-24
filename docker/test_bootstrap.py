@@ -56,7 +56,7 @@ class BootstrapTests(unittest.TestCase):
             "name": "default", "secret": "00" * 16,
             "backend": "127.0.0.1:2398", "carrier_mode": "https"
         }]}))
-        (self.mtproxy_dir / "secret").write_text("11" * 16 + "\\n")
+        (self.mtproxy_dir / "secret").write_text("11" * 16 + "\n")
         with self.assertRaises(SystemExit):
             bootstrap.main()
 
