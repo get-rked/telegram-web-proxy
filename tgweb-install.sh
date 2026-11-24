@@ -2788,7 +2788,7 @@ list_backup_archives() {
 restore_command() {
   local selection="${1:-}" archive="" i size
   local -a archives=()
-  if [[ "${2:-}" == "--yes" && $# -eq 2 ]]; then ASSUME_YES=1
+  if [[ "$2" == "--yes" && $# -eq 2 ]]; then ASSUME_YES=1
   elif (( $# > 1 )); then die "restore принимает только номер архива и необязательный --yes"; fi
   mapfile -d '' -t archives < <(list_backup_archives)
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
@@ -4360,6 +4360,7 @@ upstream_cli() {
   ok "Настройка публичного сайта обновлена."
 }
 
+
 install_admin_panel() {
   require_root
   local source_tmp repo_dir panel_base panel_url candidate
@@ -4386,10 +4387,15 @@ install_admin_panel() {
   mv -f "$candidate" "$BIN_DIR/tproxy-panel"
   cd - >/dev/null
 
-  if ! dpkg-query -W -f='${Status}' fail2ban 2>/dev/null | grep -q '^install ok installed
+  if ! dpkg -s fail2ban >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
+      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
+    }
+  fi
+  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
+  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
   install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
   install -m 0644 "$repo_dir/web-panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
-  install -d -m 0755 /etc/fail2ban/jail.d
   install -m 0644 "$repo_dir/web-panel/fail2ban-jail.conf" /etc/fail2ban/jail.d/tproxy-panel.local
 
   panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" PANEL_SCRIPT="$BASE_DIR/tgweb-install.sh" "$BIN_DIR/tproxy-panel" -print-basepath)"
