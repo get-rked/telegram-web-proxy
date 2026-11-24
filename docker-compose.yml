@@ -1,0 +1,61 @@
+name: telegram-web-proxy
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.relay
+    restart: unless-stopped
+    command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json"]
+    volumes:
+      - ./docker/config:/etc/tproxy-server:ro
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    networks: [proxy-internal]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /run:rw,noexec,nosuid,size=8m
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    network_mode: service:relay
+    depends_on:
+      relay: {condition: service_started}
+      panel: {condition: service_started}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    security_opt: [no-new-privileges:true]
+  panel:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.panel
+    restart: unless-stopped
+    environment:
+      PANEL_ADDR: ":8088"
+      PANEL_USER: ${PANEL_USER:-admin}
+      PANEL_PASSWORD: ${PANEL_PASSWORD:?Set PANEL_PASSWORD in .env}
+      PANEL_DB: /var/lib/tproxy-panel/panel.db
+      TPROXY_CONFIG: /etc/tproxy-server/config.json
+      TPROXY_PROFILES: /etc/tproxy-server/profiles.json
+    volumes:
+      - panel-data:/var/lib/tproxy-panel
+      - ./docker/config:/etc/tproxy-server:ro
+    networks: [proxy-internal]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp:rw,noexec,nosuid,size=8m]
+networks:
+  proxy-internal:
+    driver: bridge
+volumes:
+  panel-data:
+  caddy-data:
+  caddy-config:
