@@ -4446,7 +4446,7 @@ path = pathlib.Path("/etc/caddy/Caddyfile")
 base, relay = sys.argv[1:3]
 text = path.read_text()
 if f"handle /{base}/*" not in text:
-    match = re.search(r"(?m)^[ \\t]*reverse_proxy 127\\.0\\.0\\.1:" + re.escape(relay) + r"(?:[ \\t]*\\{)?[ \\t]*$", text)
+    match = re.search(r"(?m)^[ \t]*reverse_proxy[ \t]+127\.0\.0\.1:" + re.escape(relay) + r"[ \t]*(?:\{[ \t]*)?$", text)
     if not match:
         raise SystemExit("Caddyfile relay route not found")
     block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765 {{\n\t\t\theader_up X-Real-IP {{http.request.remote.host}}\n\t\t}}\n\t}}\n\n\t"
