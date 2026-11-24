@@ -238,18 +238,21 @@ func TestFailedAuthenticationIsLoggedWithTrustedClientIP(t *testing.T) {
 
 func TestAuthenticationThrottlesRepeatedFailures(t *testing.T) {
 	a := testApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"admin","password":"wrong-password"}`))
-	request.RemoteAddr = "203.0.113.25:1234"
-	request.Host = "proxy.example.com"
-	request.Header.Set("Origin", "https://proxy.example.com")
-	request.Header.Set("X-TProxy-Request", "1")
+	newRequest := func() *http.Request {
+		request := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"admin","password":"wrong-password"}`))
+		request.RemoteAddr = "203.0.113.25:1234"
+		request.Host = "proxy.example.com"
+		request.Header.Set("Origin", "https://proxy.example.com")
+		request.Header.Set("X-TProxy-Request", "1")
+		return request
+	}
 	for i := 0; i < 10; i++ {
 		response := httptest.NewRecorder()
-		a.login(response, request)
+		a.login(response, newRequest())
 		if response.Code != http.StatusUnauthorized { t.Fatalf("attempt %d status=%d, want 401", i+1, response.Code) }
 	}
 	response := httptest.NewRecorder()
-	a.login(response, request)
+	a.login(response, newRequest())
 	if response.Code != http.StatusTooManyRequests { t.Fatalf("blocked attempt status=%d, want 429", response.Code) }
 	if response.Header().Get("Retry-After") != "900" { t.Fatalf("missing Retry-After: %q", response.Header().Get("Retry-After")) }
 }
