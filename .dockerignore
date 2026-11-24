@@ -12,3 +12,7 @@ docker/config/token.key
 docker/profiles/profiles.json*
 docker/mtproxy/secret
 docker/nginx/certs/
+
+# Preserve migration snapshots outside Git and Docker build context
+docker/site.before-migration*/
+docker/site.failed-migration*/
