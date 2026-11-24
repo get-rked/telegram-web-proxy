@@ -100,11 +100,12 @@ jobs:
       - name: Validate Compose model
         run: |
           cp .env.example .env
-          sed -i 's/replace-with-at-least-16-random-characters/ci-only-not-a-production-password/' .env
           cp docker/mtproxy/secret.example docker/mtproxy/secret
           docker compose --profile caddy --profile mtproxy config --quiet
           docker compose --profile nginx --profile mtproxy config --quiet
-          mkdir -p /tmp/nginx-certs docker/security/logs
+          mkdir -p /tmp/nginx-certs docker/security/logs docker/generated docker/private docker/private-credentials
+          printf '@panel_access path /panel-ci-test /panel-ci-test/*\\nlog_skip @panel_access\\n@panel_root_no_slash path /panel-ci-test\\nredir @panel_root_no_slash /panel-ci-test/ 308\\nhandle_path /panel-ci-test/* { reverse_proxy panel:8088 }\\n' > docker/generated/panel-route.caddy
+          printf 'location = /panel-ci-test { return 308 /panel-ci-test/; }\\nlocation ^~ /panel-ci-test/ { proxy_pass http://$panel_upstream/; }\\n' > docker/generated/panel-route.nginx.conf
           touch docker/security/logs/auth.log docker/security/logs/access.log
           openssl req -x509 -nodes -newkey rsa:2048 -days 1 -subj "/CN=localhost" \
             -keyout /tmp/nginx-certs/privkey.pem -out /tmp/nginx-certs/fullchain.pem
@@ -113,7 +114,7 @@ jobs:
             -v "/tmp/nginx-certs:/etc/nginx/certs:ro" \
             -v "$PWD/docker/security/logs:/var/log/tproxy-panel" \
             nginx:1.28-alpine nginx -t
-          docker run --rm -e DOMAIN=proxy.example.com -e ACME_EMAIL=admin@example.com -v "$PWD/docker/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel" caddy:2.11.4-alpine caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --validate
+          docker run --rm -e DOMAIN=proxy.example.com -e ACME_EMAIL=admin@example.com -v "$PWD/docker/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$PWD/docker/generated:/etc/caddy/generated:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel" caddy:2.11.4-alpine caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --validate
           docker run --rm --entrypoint fail2ban-client -v "$PWD/docker/security/fail2ban/jail.d:/etc/fail2ban/jail.d:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-panel.conf:/etc/fail2ban/filter.d/tproxy-panel.conf:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-caddy-probes.conf:/etc/fail2ban/filter.d/tproxy-caddy-probes.conf:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-nginx-probes.conf:/etc/fail2ban/filter.d/tproxy-nginx-probes.conf:ro" -v "$PWD/docker/security/fail2ban/action.d/docker-user.conf:/etc/fail2ban/action.d/docker-user.conf:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel:ro" crazymax/fail2ban:1.1.0 -t
           printf '2026/11/24 12:00:00 auth_failed ip=203.0.113.10\n' > docker/security/logs/auth-fixture.log
           printf '{"request":{"client_ip":"203.0.113.11","uri":"/.env"},"status":404}\n' > docker/security/logs/caddy-fixture.log
@@ -126,7 +127,7 @@ jobs:
           node --check panel/web/app.js
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           docker compose build bootstrap relay
-          docker compose run --rm --no-deps bootstrap
+          docker compose run --rm --no-deps -e PANEL_PRINT_CREDENTIALS=0 bootstrap
           docker run --rm \
             -v "$PWD/docker/config:/etc/tproxy-server:ro" \
             -v "$PWD/docker/site:/srv/tproxy-site:ro" \
