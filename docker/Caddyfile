@@ -19,11 +19,7 @@
     }
     format json
   }
-  handle /admin* {
-    reverse_proxy panel:8088 {
-      header_up X-Real-IP {client_ip}
-    }
-  }
+  import /etc/tproxy-config/panel-route.caddy
   handle {
     reverse_proxy 127.0.0.1:8080
   }
