@@ -76,7 +76,7 @@ func TestRestoreSynchronizesDefaultSecret(t *testing.T) {
 type monitorRoundTripper func(*http.Request) (*http.Response,error)
 func (fn monitorRoundTripper) RoundTrip(req *http.Request)(*http.Response,error){return fn(req)}
 
-func TestDiagnosticsChecksRelayAndMTProxy(t *testing.T) {
+func TestDiagnosticsChecksPublicWebProxyAndBackend(t *testing.T) {
 	a:=testApp(t)
 	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
 		body:="ok\n"
@@ -88,11 +88,11 @@ func TestDiagnosticsChecksRelayAndMTProxy(t *testing.T) {
 	if response.Code!=http.StatusOK{t.Fatalf("status=%d body=%s",response.Code,response.Body.String())}
 	var result diagnosticsResponse
 	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
-	if len(result.Checks)!=4{t.Fatalf("expected four checks, got %+v",result.Checks)}
+	if len(result.Checks)!=5{t.Fatalf("expected five checks, got %+v",result.Checks)}
 	for _,check:=range result.Checks{if check.Status!="ok"{t.Fatalf("check failed: %+v",check)}}
 }
 
-func TestMetricsEndpointCollectsRelayAndMTProxyData(t *testing.T) {
+func TestMetricsEndpointCollectsRelayAndBackendData(t *testing.T) {
 	a:=testApp(t)
 	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
 		body:="tproxy_sessions_live 7\n"
@@ -105,7 +105,7 @@ func TestMetricsEndpointCollectsRelayAndMTProxyData(t *testing.T) {
 	var result map[string]any
 	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
 	if result["relay"].(map[string]any)["tproxy_sessions_live"]!=float64(7){t.Fatalf("relay metric missing: %s",response.Body.String())}
-	if result["mtproxy"].(map[string]any)["uptime"]!="321"{t.Fatalf("MTProxy metric missing: %s",response.Body.String())}
+	if result["backend"].(map[string]any)["uptime"]!="321"{t.Fatalf("backend metric missing: %s",response.Body.String())}
 }
 
 func TestRestoreRejectsSHA256Mismatch(t *testing.T) {
