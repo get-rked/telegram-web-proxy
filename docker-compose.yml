@@ -23,6 +23,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile.relay
     restart: unless-stopped
+    environment:
+      TPROXY_CONFIG: /etc/tproxy-server/config.json
+      TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
     command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json"]
     volumes:
       - ./docker/config:/etc/tproxy-server:ro
