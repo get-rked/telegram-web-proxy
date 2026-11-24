@@ -2622,6 +2622,23 @@ docker_prompt_secret() {
   validate_secret "$SECRET_ARG" >/dev/null || die "Неверный секрет Web Proxy."
 }
 
+docker_repair_bind_mount_permissions() {
+  local dir file
+  for dir in docker/config docker/mtproxy docker/profiles docker/private; do
+    [[ -d "$DOCKER_PROJECT_DIR/$dir" ]] || continue
+    chown 10001:10001 "$DOCKER_PROJECT_DIR/$dir" || die "Не удалось назначить владельца 10001:10001 для $dir."
+    chmod 0750 "$DOCKER_PROJECT_DIR/$dir" || die "Не удалось установить права 0750 для $dir."
+  done
+  for file in docker/config/config.json docker/config/token.key docker/mtproxy/secret docker/profiles/profiles.json docker/private/panel-auth.json; do
+    [[ -f "$DOCKER_PROJECT_DIR/$file" ]] || continue
+    chown 10001:10001 "$DOCKER_PROJECT_DIR/$file" || die "Не удалось назначить владельца 10001:10001 для $file."
+    case "$file" in
+      docker/config/config.json) chmod 0640 "$DOCKER_PROJECT_DIR/$file" ;;
+      *) chmod 0600 "$DOCKER_PROJECT_DIR/$file" ;;
+    esac || die "Не удалось исправить права файла $file."
+  done
+}
+
 docker_install_fresh_command() {
   local proxy="$1" domain="$2" email="$3" relay_port="$4" admin_port="$5" secret="$6" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
   if [[ -z "$domain" ]]; then read -e -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
@@ -2756,6 +2773,8 @@ PY
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы."
   info "Собираю локальные образы..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  info "Исправляю права доступа к конфигурациям Docker..."
+  docker_repair_bind_mount_permissions
   info "Запускаю Telegram Web Proxy..."
   docker_compose --profile "$proxy" --profile mtproxy up -d || die "Не удалось запустить Docker-проект."
   docker_write_state "$proxy"
@@ -2876,6 +2895,8 @@ docker_update_runtime_command() {
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы."
   info "Сборка обновлённых образов..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  info "Исправление прав доступа к конфигурациям Docker..."
+  docker_repair_bind_mount_permissions
   info "Применение обновления..."
   docker_compose --profile "$proxy" --profile mtproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
   docker_compose ps
