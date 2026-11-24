@@ -429,7 +429,7 @@ func (a *App) backups(w http.ResponseWriter, r *http.Request) {
 			errOut(w, 400, "Некорректное имя архива")
 			return
 		}
-		files, _ := filepath.Glob(filepath.Join(a.backups, "tproxy-backup-*.tar.gz"))
+		files, _ := filepath.Glob(filepath.Join(a.backupDir, "tproxy-backup-*.tar.gz"))
 		sort.Sort(sort.Reverse(sort.StringSlice(files)))
 		idx := 0
 		for i, f := range files {
