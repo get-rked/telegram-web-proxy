@@ -213,3 +213,18 @@ func TestAuthenticationThrottlesRepeatedFailures(t *testing.T) {
 	if response.Code != http.StatusTooManyRequests { t.Fatalf("blocked attempt status=%d, want 429", response.Code) }
 	if response.Header().Get("Retry-After") != "900" { t.Fatalf("missing Retry-After: %q", response.Header().Get("Retry-After")) }
 }
+
+func TestFail2banBanlistBlocksTrustedProxyClient(t *testing.T) {
+	a := testApp(t)
+	a.trustProxy = true
+	a.banDir = filepath.Join(t.TempDir(), "banlist")
+	if err := os.MkdirAll(a.banDir, 0700); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(a.banDir, "203.0.113.44"), []byte("banned"), 0600); err != nil { t.Fatal(err) }
+	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	request.RemoteAddr = "172.20.0.2:1234"
+	request.Header.Set("X-Real-IP", "203.0.113.44")
+	request.SetBasicAuth("admin", "a-long-test-password")
+	response := httptest.NewRecorder()
+	a.auth(a.index)(response, request)
+	if response.Code != http.StatusTooManyRequests { t.Fatalf("status=%d, want 429", response.Code) }
+}
