@@ -24,7 +24,7 @@ services:
       dockerfile: docker/Dockerfile.relay
     restart: unless-stopped
     environment:
-      TPROXY_CONFIG: /etc/tproxy-config/config.json
+      TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
     command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json"]
     volumes:
@@ -197,7 +197,7 @@ services:
       PANEL_ADDR: ":8088"
       PANEL_AUTH_FILE: /etc/tproxy-config/panel-auth.json
       PANEL_DB: /var/lib/tproxy-panel/panel.db
-      TPROXY_CONFIG: /etc/tproxy-server/config.json
+      TPROXY_CONFIG: /etc/tproxy-config/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
       MTPROXY_SECRET_FILE: /run/mtproxy/secret
       PANEL_AUTH_LOG: /var/log/tproxy-panel/auth.log
