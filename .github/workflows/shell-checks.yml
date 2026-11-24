@@ -31,6 +31,7 @@ jobs:
           sh -n docker/mtproxy/entrypoint.sh
           sh -n docker/relay-supervisor.sh
           sh -n docker/mtproxy/firewall.sh
+          shellcheck --severity=warning --shell=sh docker/mtproxy/entrypoint.sh docker/relay-supervisor.sh docker/mtproxy/firewall.sh
 
       - name: ShellCheck
         run: shellcheck --severity=warning --shell=bash tgweb-install.sh
@@ -90,6 +91,8 @@ jobs:
         run: docker build -f docker/Dockerfile.mtproxy-exporter -t tproxy-mtproxy-exporter:test .
       - name: Build MTProxy firewall image
         run: docker build -f docker/Dockerfile.firewall -t tproxy-firewall:test .
+      - name: Build MTProxy stats exporter image
+        run: docker build -f docker/Dockerfile.mtproxy-exporter -t tproxy-mtproxy-exporter:test .
 
   docker-compose:
     name: Compose configuration validation
@@ -112,6 +115,7 @@ jobs:
             nginx:1.28-alpine nginx -t
           test -s docker/site/index.html
           python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py
+          node --check panel/web/app.js
           python3 -m unittest docker/test_bootstrap.py
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           python3 -m json.tool docker/config/config.example.json >/dev/null
