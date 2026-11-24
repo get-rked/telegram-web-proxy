@@ -19,9 +19,11 @@ class BootstrapTests(unittest.TestCase):
         self.mtproxy_dir = root / "mtproxy"
         self.config_dir.mkdir()
         self.mtproxy_dir.mkdir()
+        (root / "profiles").mkdir()
         self.patches = [
             patch.object(bootstrap, "CONFIG_DIR", self.config_dir),
             patch.object(bootstrap, "MTPROXY_DIR", self.mtproxy_dir),
+            patch.object(bootstrap, "PROFILES_DIR", root / "profiles"),
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
