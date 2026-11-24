@@ -273,6 +273,26 @@ def main():
             if code not in ("200", "301", "302"):
                 raise MigrationAbort("Панель не отвечает по сгенерированному Base Path через HTTPS (HTTP {}).".format(code or "нет ответа"))
             print("Панель: HTTP " + code + " ({})".format(url))
+            web_url = "https://{}/".format(domain)
+            web_code = ""
+            for attempt in range(12):
+                web_code, _ = cmd([
+                    "curl", "-k", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                    "--max-time", "10", "--resolve", "{}:443:127.0.0.1".format(domain), web_url
+                ], False)
+                if web_code in ("200", "301", "302"):
+                    break
+                time.sleep(5)
+            if web_code not in ("200", "301", "302"):
+                proxy_logs, _ = cmd(["docker", "compose", "logs", "--no-color", "--tail=80", proxy, "relay"], False)
+                if proxy_logs:
+                    print("\\nЛоги reverse proxy и relay:\\n" + proxy_logs)
+                raise MigrationAbort(
+                    "Web Proxy не отвечает через HTTPS (HTTP {}). Проверка upstream не пройдена.".format(
+                        web_code or "нет ответа"
+                    )
+                )
+            print("Web Proxy: HTTP " + web_code + " ({})".format(web_url))
         print("\nDocker-миграция запущена. Проверь Web Proxy и MTProxy с внешнего устройства.")
         return 0
     except Exception as error:
