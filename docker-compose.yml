@@ -26,7 +26,6 @@ services:
     environment:
       TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
-      MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
     command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json"]
     volumes:
       - ./docker/config:/etc/tproxy-server:ro
@@ -168,6 +167,7 @@ services:
       PANEL_DB: /var/lib/tproxy-panel/panel.db
       TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
+      MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
     depends_on:
       bootstrap: {condition: service_completed_successfully}
       panel-volume-init: {condition: service_completed_successfully}
