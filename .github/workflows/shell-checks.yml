@@ -101,6 +101,8 @@ jobs:
         run: |
           cp .env.example .env
           cp docker/mtproxy/secret.example docker/mtproxy/secret
+          python3 -m json.tool docker/config/config.example.json >/dev/null
+          python3 -m json.tool docker/config/profiles.example.json >/dev/null
           docker compose --profile caddy --profile mtproxy config --quiet
           docker compose --profile nginx --profile mtproxy config --quiet
           mkdir -p /tmp/nginx-certs docker/security/logs docker/generated docker/private docker/private-credentials
@@ -149,5 +151,3 @@ jobs:
             --entrypoint /usr/local/bin/tproxy-server telegram-web-proxy-relay:latest \
             -config /opt/telegram-web-proxy/docker/config/config.json \
             -profiles-file /opt/telegram-web-proxy/docker/profiles/profiles.json -check
-          python3 -m json.tool docker/config/config.example.json >/dev/null
-          python3 -m json.tool docker/config/profiles.example.json >/dev/null
