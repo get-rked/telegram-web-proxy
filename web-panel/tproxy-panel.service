@@ -11,6 +11,7 @@ Environment=PANEL_DB=/opt/telegram-web-proxy/data/panel/panel.db
 Environment=PANEL_SCRIPT=/opt/telegram-web-proxy/tgweb-install.sh
 Environment=PANEL_BACKUP_DIR=/opt/telegram-web-proxy/backups
 Environment=PANEL_QR=/opt/telegram-web-proxy/qr/proxy-qr.png
+Environment=PANEL_CONFIG_DIR=/opt/telegram-web-proxy/config/proxy
 ExecStart=/opt/telegram-web-proxy/bin/tproxy-panel
 Restart=on-failure
 RestartSec=3
