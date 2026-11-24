@@ -37,6 +37,8 @@ class BootstrapTests(unittest.TestCase):
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "RELAY_PORT", 18080),
             patch.object(bootstrap, "ADMIN_PORT", 18081),
+            patch.object(bootstrap, "LEGACY_PUBLIC_DIR", root / "legacy-site"),
+            patch.object(bootstrap, "LEGACY_TOKEN_KEY_FILE", root / "legacy-token.key"),
             patch.dict(os.environ, {"PANEL_PRINT_CREDENTIALS": "0"}),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
@@ -131,6 +133,43 @@ class BootstrapTests(unittest.TestCase):
         bootstrap.main()
         self.assertEqual(self.config_dir.stat().st_mode & 0o777, 0o750)
         self.assertEqual(config_path.stat().st_mode & 0o777, 0o640)
+
+    def test_legacy_default_paths_are_migrated_and_token_key_is_preserved(self):
+        bootstrap.main()
+        config_path = self.config_dir / "config.json"
+        config = json.loads(config_path.read_text())
+        legacy_site = bootstrap.LEGACY_PUBLIC_DIR
+        legacy_site.mkdir()
+        (legacy_site / "index.html").write_text("legacy site")
+        legacy_key = b"\x5a" * 32
+        bootstrap.LEGACY_TOKEN_KEY_FILE.write_bytes(legacy_key)
+        (self.config_dir / "token.key").unlink()
+        config["public_dir"] = str(legacy_site)
+        config["token_key_file"] = str(bootstrap.LEGACY_TOKEN_KEY_FILE)
+        config_path.write_text(json.dumps(config))
+
+        bootstrap.main()
+
+        migrated = json.loads(config_path.read_text())
+        self.assertEqual(migrated["public_dir"], "/opt/telegram-web-proxy/docker/site")
+        self.assertEqual(migrated["token_key_file"], str(self.config_dir / "token.key"))
+        self.assertEqual((self.config_dir / "token.key").read_bytes(), legacy_key)
+        self.assertTrue(list(self.config_dir.glob("config.json.backup-*")))
+
+    def test_custom_public_dir_is_not_rewritten(self):
+        bootstrap.main()
+        config_path = self.config_dir / "config.json"
+        custom_site = self.config_dir.parent / "custom-site"
+        custom_site.mkdir()
+        (custom_site / "index.html").write_text("custom")
+        config = json.loads(config_path.read_text())
+        config["public_dir"] = str(custom_site)
+        config_path.write_text(json.dumps(config))
+
+        bootstrap.main()
+
+        migrated = json.loads(config_path.read_text())
+        self.assertEqual(migrated["public_dir"], str(custom_site))
 
     def test_hostname_change_backs_up_existing_config(self):
         bootstrap.main()
