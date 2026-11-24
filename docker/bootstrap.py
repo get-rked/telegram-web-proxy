@@ -203,24 +203,24 @@ def main():
             "password_salt": salt.hex(),
             "password_hash": password_hash,
         }
-        atomic_write(panel_auth_path, (json.dumps(auth, indent=2) + "\\n").encode(), 0o600)
+        atomic_write(panel_auth_path, (json.dumps(auth, indent=2) + "\n").encode(), 0o600)
         credentials = (
-            f"URL: https://{DOMAIN}{base_path}/\\n"
-            f"LOGIN: {username}\\n"
-            f"PASSWORD: {password}\\n"
+            f"URL: https://{DOMAIN}{base_path}/\n"
+            f"LOGIN: {username}\n"
+            f"PASSWORD: {password}\n"
         )
         atomic_write(panel_credentials_path, credentials.encode("utf-8"), 0o600)
         credentials_created = True
 
     # Caddy imports this generated route. The secret path is never placed in a public URL or log.
     route = (
-        f"@panel_root path {base_path} {base_path}/*\\n"
-        f"redir @panel_root {base_path}/ 308\\n"
-        f"handle_path {base_path}/* {{\\n"
-        "    reverse_proxy panel:8088 {\\n"
-        "        header_up X-Real-IP {client_ip}\\n"
-        "    }\\n"
-        "}\\n"
+        f"@panel_root path {base_path} {base_path}/*\n"
+        f"redir @panel_root {base_path}/ 308\n"
+        f"handle_path {base_path}/* {{\n"
+        "    reverse_proxy panel:8088 {\n"
+        "        header_up X-Real-IP {client_ip}\n"
+        "    }\n"
+        "}\n"
     )
     if not panel_route_path.exists() or panel_route_path.read_text(encoding="utf-8") != route:
         atomic_write(panel_route_path, route.encode("utf-8"), 0o640)
