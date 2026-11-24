@@ -35,6 +35,8 @@ class BootstrapTests(unittest.TestCase):
             patch.object(bootstrap, "PANEL_CREDENTIALS_DIR", self.panel_credentials_dir),
             patch.object(bootstrap, "PANEL_ROUTE_DIR", self.panel_route_dir),
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
+            patch.object(bootstrap, "RELAY_PORT", 18080),
+            patch.object(bootstrap, "ADMIN_PORT", 18081),
             patch.dict(os.environ, {"PANEL_PRINT_CREDENTIALS": "0"}),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
@@ -57,7 +59,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.config_dir / "token.key").stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.profiles_dir / "profiles.json").stat().st_mode & 0o777, 0o600)
         config = json.loads((self.config_dir / "config.json").read_text())
-        self.assertEqual(config["admin_listen"], "127.0.0.1:8081")
+        self.assertEqual(config["listen"], "127.0.0.1:18080")
+        self.assertEqual(config["admin_listen"], "127.0.0.1:18081")
         auth = json.loads((self.panel_auth_dir / "panel-auth.json").read_text())
         self.assertTrue(auth["base_path"].startswith("/panel-"))
         self.assertEqual(len(bytes.fromhex(auth["password_salt"])), 32)
@@ -72,6 +75,13 @@ class BootstrapTests(unittest.TestCase):
         nginx_route = (self.panel_route_dir / "panel-route.nginx.conf").read_text()
         self.assertTrue(nginx_route.endswith("\n"), "Nginx route must contain real line endings")
         self.assertIn("location ^~ " + auth["base_path"] + "/", nginx_route)
+
+    def test_first_run_preserves_dd_prefix_for_web_proxy_and_normalizes_mtproxy_secret(self):
+        (self.mtproxy_dir / "secret").write_text("dd" + "ab" * 16 + "\\n")
+        bootstrap.main()
+        profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
+        self.assertEqual(profile["secret"], "dd" + "ab" * 16)
+        self.assertEqual((self.mtproxy_dir / "secret").read_text(), "ab" * 16 + "\\n")
 
     def test_second_run_preserves_secrets_and_token_key(self):
         bootstrap.main()
