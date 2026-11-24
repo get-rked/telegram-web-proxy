@@ -69,7 +69,7 @@ func TestProfilesRejectNonGetLegacyHandler(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/profiles", nil)
 	request.SetBasicAuth("admin", "a-long-test-password")
 	response := httptest.NewRecorder()
-	a.auth(a.listProfiles)(response, request)
+	a.auth(a.profilesAPI)(response, request)
 	if response.Code != http.StatusMethodNotAllowed { t.Fatalf("status=%d, want 405", response.Code) }
 }
 
