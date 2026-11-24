@@ -78,6 +78,7 @@ jobs:
           go mod tidy
           go test ./...
           go vet ./...
+          node --check web/app.js
       - name: Build panel image
         run: docker build -f docker/Dockerfile.panel -t tproxy-panel:test .
       - name: Build relay image
