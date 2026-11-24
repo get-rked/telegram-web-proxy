@@ -107,7 +107,7 @@ def copy_tree_atomic(src: Path, dst: Path):
 
 def backup_paths(paths, backup_root: Path):
     backup_root.mkdir(parents=True, exist_ok=True); os.chmod(backup_root, 0o700)
-    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
     archive = backup_root / f'docker-migration-{stamp}.tar.gz'
     with tarfile.open(archive, 'w:gz') as tar:
         for p in paths:
@@ -134,8 +134,7 @@ def main():
     ap.add_argument('--web-server', choices=('caddy','nginx'))
     ap.add_argument('--apply', action='store_true', help='Выполнить перенос. Без этого флага работает только проверка.')
     args = ap.parse_args()
-    source, repo = args.source_dir.resolve(), REPO
-    config_src = source / 'config/proxy/config.json'
+    if os.geteuid() != 0:\n        raise MigrationError('Запусти скрипт от root: sudo python3 migrate-to-docker.py')\n    source, repo = args.source_dir.resolve(), REPO\n    config_src = source / 'config/proxy/config.json'
     if not config_src.is_file(): raise MigrationError(f'Не найден файл действующей конфигурации: {config_src}')
     config = read_json(config_src)
     if not isinstance(config, dict): raise MigrationError('config.json должен содержать JSON-объект.')
@@ -179,8 +178,8 @@ def main():
             nat_info = f'{ipaddress.IPv4Address(match.group(1))}:{ipaddress.IPv4Address(match.group(2))}'
         except ipaddress.AddressValueError:
             raise MigrationError('MTPROXY_NAT_ARGS содержит некорректные IPv4-адреса.')
-    generated_panel_password = not bool(env.get('PANEL_PASSWORD'))
-    env.update(DOMAIN=domain, ACME_EMAIL=email, PANEL_USER=env.get('PANEL_USER','admin'), PANEL_PASSWORD=env.get('PANEL_PASSWORD') or secrets.token_urlsafe(24), MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'))
+    generated_panel_password = len(env.get('PANEL_PASSWORD', '')) < 16
+    env.update(DOMAIN=domain, ACME_EMAIL=email, PANEL_USER=env.get('PANEL_USER','admin'), PANEL_PASSWORD=env.get('PANEL_PASSWORD') if len(env.get('PANEL_PASSWORD', '')) >= 16 else secrets.token_urlsafe(24), MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'))
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_WORKERS']): env['MTPROXY_WORKERS']='1'
     env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_NAT_INFO': nat_info}
     env_text = update_env_text(env_path, env_updates).decode()
@@ -192,7 +191,7 @@ def main():
         (env_path, env_text.encode(), 0o600),
     ]
     certs = nginx_certificates(repo, domain) if selected == 'nginx' else []
-    backup_root = Path('/var/backups/telegram-web-proxy-docker-migration')
+    site_previous = repo/'docker/site.before-migration'\n    if site_previous.exists():\n        raise MigrationError(f'Остался предыдущий каталог миграции: {site_previous}; проверь его вручную.')\n    backup_root = Path('/var/backups/telegram-web-proxy-docker-migration')
     backup_candidates = [source/'config/proxy', source/'config/mtproxy', site_path, env_path, repo/'docker/config', repo/'docker/profiles', repo/'docker/mtproxy/secret', repo/'docker/site', repo/'docker/nginx/certs'] + [src for src, _, _ in certs]
     print(f'Источник: {source}')
     print(f'Домен: {domain}; reverse proxy: {selected}; профилей: {len(profiles)}')
