@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-CONFIG=${TPROXY_CONFIG:-/etc/tproxy-server/config.json}
-PROFILES=${TPROXY_PROFILES:-/etc/tproxy-server/profiles.json}
+CONFIG=${TPROXY_CONFIG:-/opt/telegram-web-proxy/docker/config/config.json}
+PROFILES=${TPROXY_PROFILES:-/opt/telegram-web-proxy/docker/profiles/profiles.json}
 SERVER=/usr/local/bin/tproxy-server
 child=
 stopping=0
