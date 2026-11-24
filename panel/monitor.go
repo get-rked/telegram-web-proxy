@@ -67,7 +67,7 @@ func (a *application) diagnostics(w http.ResponseWriter,r *http.Request){
 		result.Checks=append(result.Checks,check)
 	}
 	stats,err:=a.backendStats(ctx);mt:=diagnosticCheck{Name:"backend_stats",Status:"error"}
-	if err!=nil{mt.Detail="статистика MTProxy недоступна"}else if strings.TrimSpace(stats)==""{mt.Detail="пустой ответ"}else{mt.Status="ok";mt.Detail="статистика получена"}
+	if err!=nil{mt.Detail="статистика внутреннего backend недоступна"}else if strings.TrimSpace(stats)==""{mt.Detail="пустой ответ"}else{mt.Status="ok";mt.Detail="статистика получена"}
 	result.Checks=append(result.Checks,mt)
 	if _,err:=os.Stat(a.profiles);err!=nil{result.Checks=append(result.Checks,diagnosticCheck{Name:"profiles_file",Status:"error",Detail:"файл профилей недоступен"})}else{result.Checks=append(result.Checks,diagnosticCheck{Name:"profiles_file",Status:"ok",Detail:"файл профилей доступен"})}
 	jsonResponse(w,result)
@@ -77,7 +77,7 @@ func (a *application) metrics(w http.ResponseWriter,r *http.Request){
 	ctx,cancel:=context.WithTimeout(r.Context(),5*time.Second);defer cancel()
 	out:=map[string]any{"system":readSystemMetrics(),"sampled_at":time.Now().UTC()}
 	_,relay,_,err:=a.relayRequest(ctx,"/metrics");if err==nil{out["relay"]=parsePrometheus(relay)}else{out["relay_error"]="relay metrics unavailable"}
-	mt,err:=a.backendStats(ctx);if err==nil{out["backend"]=parseTabStats(mt)}else{out["backend_error"]="MTProxy metrics unavailable"}
+	mt,err:=a.backendStats(ctx);if err==nil{out["backend"]=parseTabStats(mt)}else{out["backend_error"]="backend metrics unavailable"}
 	jsonResponse(w,out)
 }
 func readSystemMetrics()systemMetrics{
