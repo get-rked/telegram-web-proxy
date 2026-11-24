@@ -33,14 +33,15 @@ tproxy_bootstrap_repository() {
       echo "Не удалось получить обновления из $TPROXY_DEPLOY_BRANCH; локальная версия не изменена." >&2
       exit 1
     fi
-    # Обновляем checkout принудительно: curl может перезаписать tracked-файл
-    # прямо внутри репозитория, и обычный checkout тогда блокирует обновление.
-    # Принудительно заменяем только отслеживаемые Git файлы; untracked-файлы
-    # и пользовательские данные не удаляем.
-    if ! git -C "$TPROXY_DEPLOY_DIR" checkout --force -B "$TPROXY_DEPLOY_BRANCH" FETCH_HEAD; then
-      echo "Не удалось загрузить актуальную версию $TPROXY_DEPLOY_BRANCH." >&2
+    # Сбрасываем только отслеживаемые файлы к полученному коммиту.
+    # Это также исправляет случай, когда curl сохранил новый установщик
+    # поверх tracked tgweb-install.sh внутри существующего checkout.
+    if ! git -C "$TPROXY_DEPLOY_DIR" reset --hard FETCH_HEAD; then
+      echo "Не удалось обновить отслеживаемые файлы до $TPROXY_DEPLOY_BRANCH." >&2
       exit 1
     fi
+    git -C "$TPROXY_DEPLOY_DIR" branch -f "$TPROXY_DEPLOY_BRANCH" FETCH_HEAD
+    git -C "$TPROXY_DEPLOY_DIR" symbolic-ref HEAD "refs/heads/$TPROXY_DEPLOY_BRANCH"
     printf 'Актуальная версия ветки %s загружена: %s\n' "$TPROXY_DEPLOY_BRANCH" "$(git -C "$TPROXY_DEPLOY_DIR" rev-parse --short HEAD)"
     exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
   fi
