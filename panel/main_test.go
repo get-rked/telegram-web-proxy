@@ -175,11 +175,11 @@ func TestWriteProfilesSynchronizesAllMTProxySecrets(t *testing.T) {
 	a.mtproxySecret = secretPath
 	doc, err := a.readProfiles()
 	if err != nil { t.Fatal(err) }
-	doc.Profiles = append(doc.Profiles, profile{Name:"mobile", Secret:"ddffeeddccbbaa998877665544332211", Backend:"127.0.0.1:2398", CarrierMode:"websocket"})
+	doc.Profiles = append(doc.Profiles, profile{Name:"mobile", Secret:"ddffeeddccbbaa99887766554433221100", Backend:"127.0.0.1:2398", CarrierMode:"websocket"})
 	if err := a.writeProfiles(doc); err != nil { t.Fatal(err) }
 	got, err := os.ReadFile(secretPath)
 	if err != nil { t.Fatal(err) }
-	want := "00112233445566778899aabbccddeeff\nffeeddccbbaa998877665544332211\n"
+	want := "00112233445566778899aabbccddeeff\nffeeddccbbaa99887766554433221100\n"
 	if string(got) != want { t.Fatalf("secret file mismatch: %q", got) }
 }
 
