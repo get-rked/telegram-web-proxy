@@ -35,6 +35,7 @@ class BootstrapTests(unittest.TestCase):
             patch.object(bootstrap, "PANEL_CREDENTIALS_DIR", self.panel_credentials_dir),
             patch.object(bootstrap, "PANEL_ROUTE_DIR", self.panel_route_dir),
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
+            patch.dict(os.environ, {"PANEL_PRINT_CREDENTIALS": "0"}),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
         ]
