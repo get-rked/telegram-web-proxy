@@ -54,6 +54,17 @@ func TestStatusDoesNotExposeTokenKeyPath(t *testing.T) {
 	if strings.Contains(response.Body.String(), "token.key") { t.Fatal("status response leaked token key path") }
 }
 
+func TestReadProfilesAcceptsDDPrefixedLegacySecret(t *testing.T) {
+	a := testApp(t)
+	data := []byte(`{"profiles":[{"name":"default","secret":"dd00112233445566778899aabbccddeeff","backend":"127.0.0.1:2398","carrier_mode":"https"}]}`)
+	if err := os.WriteFile(a.profiles, data, 0600); err != nil { t.Fatal(err) }
+	doc, err := a.readProfiles()
+	if err != nil { t.Fatal(err) }
+	if doc.Profiles[0].Secret != "dd00112233445566778899aabbccddeeff" {
+		t.Fatal("legacy dd-prefixed profile secret was not preserved")
+	}
+}
+
 func TestProfilesDoNotExposeSecrets(t *testing.T) {
 	a := testApp(t)
 	response := httptest.NewRecorder()
