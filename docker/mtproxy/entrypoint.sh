@@ -51,6 +51,7 @@ if [ -n "$NAT_INFO" ]; then
         *.*:*.*) ;;
         *) echo "ERROR: MTPROXY_NAT_INFO must be privateIPv4:publicIPv4." >&2; exit 1 ;;
     esac
+    set -- "$@" --nat-info "$NAT_INFO"
 fi
 
 mkdir -p "$DATA_DIR"
