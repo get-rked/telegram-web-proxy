@@ -30,5 +30,46 @@ class RunningContainerCheckTests(unittest.TestCase):
                 runner.running_project_containers()
 
 
+    def test_caddy_global_and_nested_directives_are_not_mistaken_for_sites(self):
+        caddyfile = """
+{
+    email {$ACME_EMAIL}
+    admin off
+    servers {
+        protocols h1 h2
+    }
+}
+{$TPROXY_HOSTNAME} {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8090 {
+        transport http {
+            keepalive 30s
+        }
+    }
+    handle_errors {
+        respond "unavailable" 503
+    }
+}
+"""
+        self.assertEqual(runner.caddy_site_names(caddyfile), set())
+
+    def test_caddy_parser_detects_a_second_top_level_site(self):
+        caddyfile = """
+{
+    email admin@example.test
+}
+proxy.example.test {
+    respond "one"
+}
+other.example.test {
+    respond "two"
+}
+"""
+        self.assertEqual(
+            runner.caddy_site_names(caddyfile),
+            {"proxy.example.test", "other.example.test"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
