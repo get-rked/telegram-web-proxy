@@ -771,7 +771,7 @@ preflight_system() {
   if command -v go >/dev/null 2>&1; then
     version="$(go version 2>/dev/null || true)"
     go_minor="$(go env GOVERSION 2>/dev/null | sed -E 's/^go1\.([0-9]+).*/\1/')"
-    if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 20 )); then
+    if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 24 )); then
       printf '  %-24s %s\n' "Go" "$(status_mark ok) $version"
     else
       printf '  %-24s %s\n' "Go" "$(status_mark warn) версия ниже 1.20; потребуется Go $GO_FALLBACK_VERSION"
@@ -1229,7 +1229,7 @@ ensure_go() {
   if command -v go >/dev/null 2>&1; then
     local minor
     minor="$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')"
-    if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 20 )); then
+    if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 24 )); then
       GO_BIN="$(command -v go)"
       ok "Go: $(go version)"
       return 0
