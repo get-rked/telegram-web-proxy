@@ -28,6 +28,8 @@ import (
 //go:embed web/*
 var assets embed.FS
 
+type authFailure struct { Count int; WindowStart time.Time; BlockedUntil time.Time }
+
 type application struct {
 	db       *sql.DB
 	user     string
@@ -40,6 +42,8 @@ type application struct {
 	backupRoot string
 	authLog *log.Logger
 	trustProxy bool
+	authMu sync.Mutex
+	authFailures map[string]authFailure
 }
 
 type profile struct {
@@ -148,15 +152,39 @@ func headers(next http.Handler) http.Handler {
 
 func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ip := a.clientIP(r)
+		if a.authIsBlocked(ip) {
+			w.Header().Set("Retry-After", "900")
+			http.Error(w, "too many authentication attempts", http.StatusTooManyRequests)
+			return
+		}
 		u, p, ok := r.BasicAuth()
 		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(a.user)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(a.password)) != 1 {
-			if a.authLog != nil { a.authLog.Printf("auth_failed ip=%s", a.clientIP(r)) }
+			a.recordAuthFailure(ip)
+			if a.authLog != nil { a.authLog.Printf("auth_failed ip=%s", ip) }
 			w.Header().Set("WWW-Authenticate", `Basic realm="Telegram Web Proxy"`)
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
 		next(w, r)
 	}
+}
+
+func (a *application) authIsBlocked(ip string) bool {
+	a.authMu.Lock(); defer a.authMu.Unlock()
+	state := a.authFailures[ip]
+	return time.Now().Before(state.BlockedUntil)
+}
+
+func (a *application) recordAuthFailure(ip string) {
+	a.authMu.Lock(); defer a.authMu.Unlock()
+	if a.authFailures == nil { a.authFailures = make(map[string]authFailure) }
+	now := time.Now()
+	state := a.authFailures[ip]
+	if state.WindowStart.IsZero() || now.Sub(state.WindowStart) > 10*time.Minute { state = authFailure{WindowStart: now} }
+	state.Count++
+	if state.Count >= 10 { state.BlockedUntil = now.Add(15*time.Minute) }
+	a.authFailures[ip] = state
 }
 
 func (a *application) clientIP(r *http.Request) string {
