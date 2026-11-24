@@ -2811,7 +2811,8 @@ docker_uninstall_command() {
 
 docker_purge_command() {
   docker_require_project
-  local yes=0 remove_volumes=0 phrase
+  local yes=0 remove_volumes=0 phrase had_args=0
+  (($#)) && had_args=1
   while (($#)); do
     case "$1" in
       --yes|-y) yes=1; shift ;;
@@ -2819,7 +2820,7 @@ docker_purge_command() {
       *) die "Неизвестный параметр docker purge: $1" ;;
     esac
   done
-  if (($# == 0)) && [[ "$NONINTERACTIVE" != "1" ]]; then
+  if (( had_args == 0 )) && [[ "$NONINTERACTIVE" != "1" ]]; then
     local volume_choice
     read -r -p "Удалить также именованные volumes (панель, TLS, MTProxy)? [y/N]: " volume_choice || die "Ввод прерван."
     case "$volume_choice" in y|Y|yes|YES) remove_volumes=1 ;; *) remove_volumes=0 ;; esac
