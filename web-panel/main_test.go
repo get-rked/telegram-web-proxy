@@ -190,7 +190,7 @@ func TestProxyClientSecretMatchesInstallerFormat(t *testing.T) {
 
 func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 	dir := t.TempDir()
-	configDir := filepath.Join(dir, "config")
+	configDir := filepath.Join(dir, "config", "proxy")
 	profileDir := filepath.Join(configDir, "profiles", "alpha")
 	if err := os.MkdirAll(profileDir, 0700); err != nil { t.Fatal(err) }
 	config := `{"public_hostname":"proxy.example.test","base_path":"random-path"}`
