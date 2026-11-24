@@ -9,3 +9,7 @@
 
 /docker/config/config.json.backup-*
 /docker/profiles/profiles.json.backup-*
+
+# Preserve migration snapshots outside Git and Docker build context
+docker/site.before-migration*/
+docker/site.failed-migration*/
