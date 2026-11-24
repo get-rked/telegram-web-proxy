@@ -218,6 +218,8 @@ def main():
 
     # Caddy imports this generated route. The secret path is never placed in a public URL or log.
     route = (
+        f"@panel_access path {base_path} {base_path}/*\n"
+        "log_skip @panel_access\n"
         f"@panel_root_no_slash path {base_path}\n"
         f"redir @panel_root_no_slash {base_path}/ 308\n"
         f"handle_path {base_path}/* {{\n"
