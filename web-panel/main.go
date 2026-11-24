@@ -425,7 +425,434 @@ func (a *App) backups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Action == "restore" {
-		if !regexp.MustCompile(`^tproxy-backup-[0-9]{8}-[0-9]{6}.tar.gz$`).MatchString(b.Name) {
+		if !regexp.MustCompile(`^tproxy-backup-[0-9]{8}-[0-9]{6}\.tar\.gzpackage main
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/argon2"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+type App struct {
+	db                                         *sql.DB
+	base, script, backupDir, qrFile, configDir string
+	mu                                         sync.Mutex
+	failures                                   map[string][]time.Time
+	authSem                                    chan struct{}
+}
+
+var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+func env(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+func random(n int) (string, error) {
+	b := make([]byte, n)
+	if _, e := rand.Read(b); e != nil {
+		return "", e
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+func derive(p string, s []byte) []byte { return argon2.IDKey([]byte(p), s, 3, 64*1024, 2, 32) }
+func (a *App) init() error {
+	if e := os.MkdirAll(filepath.Dir(env("PANEL_DB", "/opt/telegram-web-proxy/data/panel/panel.db")), 0700); e != nil {
+		return e
+	}
+	path := env("PANEL_DB", "/opt/telegram-web-proxy/data/panel/panel.db")
+	db, e := sql.Open("sqlite3", path+"?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=on")
+	if e != nil {
+		return e
+	}
+	a.db = db
+	db.SetMaxOpenConns(1)
+	_, e = db.Exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY,salt BLOB NOT NULL,hash BLOB NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY,username TEXT NOT NULL,csrf TEXT NOT NULL,expires INTEGER NOT NULL);")
+	if e != nil {
+		return e
+	}
+	var n int
+	if e = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&n); e != nil {
+		return e
+	}
+	if n == 0 {
+		a.base, e = random(24)
+		if e != nil {
+			return e
+		}
+		u, e := random(6)
+		if e != nil {
+			return e
+		}
+		p, e := random(24)
+		if e != nil {
+			return e
+		}
+		login := "admin-" + u
+		salt := make([]byte, 16)
+		if _, e = rand.Read(salt); e != nil {
+			return e
+		}
+		if _, e = db.Exec("INSERT INTO settings VALUES('base_path',?)", a.base); e != nil {
+			return e
+		}
+		if _, e = db.Exec("INSERT INTO users VALUES(?,?,?)", login, salt, derive(p, salt)); e != nil {
+			return e
+		}
+		cred := fmt.Sprintf("URL_PATH=/%s/\nLOGIN=%s\nPASSWORD=%s\n", a.base, login, p)
+		credPath := filepath.Join(filepath.Dir(path), "panel-credentials.txt")
+		_ = os.Remove(credPath)
+		f, e := os.OpenFile(credPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if e == nil {
+			_, e = f.WriteString(cred)
+			ce := f.Close()
+			if e == nil {
+				e = ce
+			}
+		}
+		if e != nil && !os.IsExist(e) {
+			return e
+		}
+		log.Printf("ADMIN_BOOTSTRAP credentials_file=%s", credPath)
+	} else {
+		if e = db.QueryRow("SELECT value FROM settings WHERE key='base_path'").Scan(&a.base); e != nil {
+			return e
+		}
+	}
+	_, _ = db.Exec("DELETE FROM sessions WHERE expires < ?", time.Now().Unix())
+	return os.Chmod(path, 0600)
+}
+func (a *App) remote(r *http.Request) string {
+	h, _, e := net.SplitHostPort(r.RemoteAddr)
+	if e != nil {
+		h = r.RemoteAddr
+	}
+	if h == "127.0.0.1" || h == "::1" {
+		candidate := r.Header.Get("X-Real-IP")
+		if candidate == "" {
+			candidate = strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0])
+		}
+		if ip := net.ParseIP(candidate); ip != nil {
+			return ip.String()
+		}
+	}
+	return h
+}
+func (a *App) blocked(r *http.Request) bool {
+	h := a.remote(r)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now()
+	v := a.failures[h][:0]
+	for _, t := range a.failures[h] {
+		if now.Sub(t) < 10*time.Minute {
+			v = append(v, t)
+		}
+	}
+	a.failures[h] = v
+	return len(v) >= 8
+}
+func (a *App) badLogin(r *http.Request) {
+	h := a.remote(r)
+	log.Printf("[AUTH_FAIL] remote=%s", h)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.failures[h] = append(a.failures[h], time.Now())
+}
+func (a *App) session(r *http.Request) (string, string, bool) {
+	c, e := r.Cookie("tproxy_panel")
+	if e != nil {
+		return "", "", false
+	}
+	s := sha256.Sum256([]byte(c.Value))
+	var u, csrf string
+	var exp int64
+	e = a.db.QueryRow("SELECT username,csrf,expires FROM sessions WHERE token_hash=?", hex.EncodeToString(s[:])).Scan(&u, &csrf, &exp)
+	return u, csrf, e == nil && exp > time.Now().Unix()
+}
+func (a *App) cookie(w http.ResponseWriter, v string, exp time.Time) {
+	http.SetCookie(w, &http.Cookie{Name: "tproxy_panel", Value: v, Path: "/" + a.base + "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: exp, MaxAge: int(time.Until(exp).Seconds())})
+}
+func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, csrf, ok := a.session(r)
+		if !ok {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("X-CSRF-Token") != csrf {
+			http.Error(w, "csrf failed", 403)
+			return
+		}
+		w.Header().Set("X-CSRF-Token", csrf)
+		next(w, r)
+	}
+}
+func jsonOut(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(v)
+}
+func errOut(w http.ResponseWriter, n int, s string) {
+	w.WriteHeader(n)
+	jsonOut(w, map[string]string{"error": s})
+}
+func (a *App) cmd(ctx context.Context, args ...string) (string, error) {
+	c := exec.CommandContext(ctx, a.script, args...)
+	c.Env = append(os.Environ(), "NO_COLOR=1", "TERM=dumb")
+	b, e := c.CombinedOutput()
+	if len(b) > 65536 {
+		b = b[len(b)-65536:]
+	}
+	if e != nil {
+		return string(b), e
+	}
+	return string(b), nil
+}
+func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, loginHTML)
+		return
+	}
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if a.blocked(r) {
+		http.Error(w, "too many attempts", 429)
+		return
+	}
+	_ = r.ParseForm()
+	var salt, hash []byte
+	e := a.db.QueryRow("SELECT salt,hash FROM users WHERE username=?", r.FormValue("username")).Scan(&salt, &hash)
+	select {
+	case a.authSem <- struct{}{}:
+		defer func() { <-a.authSem }()
+	case <-r.Context().Done():
+		return
+	}
+	got := derive(r.FormValue("password"), salt)
+	if e != nil || !hmac.Equal(got, hash) {
+		a.badLogin(r)
+		http.Error(w, "Неверный логин или пароль", 401)
+		return
+	}
+	token, e := random(32)
+	if e != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	csrf, e := random(24)
+	if e != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	sum := sha256.Sum256([]byte(token))
+	exp := time.Now().Add(12 * time.Hour)
+	_, e = a.db.Exec("INSERT INTO sessions VALUES(?,?,?,?)", hex.EncodeToString(sum[:]), r.FormValue("username"), csrf, exp.Unix())
+	if e != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	a.cookie(w, token, exp)
+	http.Redirect(w, r, "/"+a.base+"/", 303)
+}
+func (a *App) logout(w http.ResponseWriter, r *http.Request) {
+	if c, e := r.Cookie("tproxy_panel"); e == nil {
+		s := sha256.Sum256([]byte(c.Value))
+		_, _ = a.db.Exec("DELETE FROM sessions WHERE token_hash=?", hex.EncodeToString(s[:]))
+	}
+	a.cookie(w, "", time.Unix(1, 0))
+	http.Redirect(w, r, "/"+a.base+"/login", 303)
+}
+func (a *App) home(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := a.session(r); !ok {
+		http.Redirect(w, r, "/"+a.base+"/login", 303)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, dashboardHTML)
+}
+func (a *App) profiles(w http.ResponseWriter, r *http.Request) {
+	ctx, c := context.WithTimeout(r.Context(), 25*time.Second)
+	defer c()
+	if r.Method == "GET" {
+		out, e := a.cmd(ctx, "profile", "list")
+		if e != nil {
+			errOut(w, 500, "Не удалось получить профили")
+			return
+		}
+		items := []map[string]string{}
+		for _, line := range strings.Split(out, "\n") {
+			f := strings.Fields(line)
+			if len(f) >= 3 && f[0] != "ИМЯ" {
+				items = append(items, map[string]string{"name": f[0], "carrier_mode": f[1], "backend": f[2]})
+			}
+		}
+		jsonOut(w, items)
+		return
+	}
+	if r.Method == "POST" {
+		var b struct{ Name string }
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&b) != nil || !nameRE.MatchString(b.Name) {
+			errOut(w, 400, "Некорректное имя профиля")
+			return
+		}
+		if _, e := a.cmd(ctx, "profile", "add", b.Name, "--generate"); e != nil {
+			errOut(w, 409, "Не удалось создать профиль")
+			return
+		}
+		jsonOut(w, map[string]string{"status": "created"})
+		return
+	}
+	http.Error(w, "method not allowed", 405)
+}
+func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/"+a.base+"/api/profiles/")
+	if !nameRE.MatchString(name) {
+		errOut(w, 400, "Некорректное имя")
+		return
+	}
+	var b struct{ Action string }
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&b) != nil {
+		errOut(w, 400, "Некорректный запрос")
+		return
+	}
+	ctx, c := context.WithTimeout(r.Context(), 35*time.Second)
+	defer c()
+	var args []string
+	switch b.Action {
+	case "delete":
+		args = []string{"profile", "delete", name, "--yes"}
+	case "backup":
+		args = []string{"profile", "backup", name}
+	default:
+		errOut(w, 400, "Неизвестная операция")
+		return
+	}
+	if _, e := a.cmd(ctx, args...); e != nil {
+		errOut(w, 409, "Операция не выполнена")
+		return
+	}
+	jsonOut(w, map[string]string{"status": "ok"})
+}
+func (a *App) configuration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	out := map[string]any{}
+	for _, name := range []string{"config.json", "profiles.json"} {
+		raw, e := os.ReadFile(filepath.Join(a.configDir, name))
+		if e != nil {
+			errOut(w, 500, "Не удалось прочитать конфигурацию")
+			return
+		}
+		var value any
+		if json.Unmarshal(raw, &value) != nil {
+			errOut(w, 500, "Конфигурация содержит некорректный JSON")
+			return
+		}
+		out[name] = redactConfig(value)
+	}
+	jsonOut(w, out)
+}
+func redactConfig(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, value := range x {
+			lk := strings.ToLower(k)
+			if strings.Contains(lk, "secret") || strings.Contains(lk, "password") || strings.Contains(lk, "token") {
+				x[k] = "[REDACTED]"
+			} else {
+				x[k] = redactConfig(value)
+			}
+		}
+		return x
+	case []any:
+		for i, value := range x {
+			x[i] = redactConfig(value)
+		}
+		return x
+	default:
+		return v
+	}
+}
+func (a *App) diagnostics(w http.ResponseWriter, r *http.Request) {
+	ctx, c := context.WithTimeout(r.Context(), 50*time.Second)
+	defer c()
+	out, e := a.cmd(ctx, "diagnostics")
+	status := "ok"
+	if e != nil {
+		status = "warning"
+	}
+	jsonOut(w, map[string]string{"status": status, "output": out})
+}
+func (a *App) backups(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		files, _ := filepath.Glob(filepath.Join(a.backupDir, "tproxy-backup-*.tar.gz"))
+		sort.Sort(sort.Reverse(sort.StringSlice(files)))
+		out := []map[string]any{}
+		for _, f := range files {
+			if s, e := os.Stat(f); e == nil {
+				out = append(out, map[string]any{"name": filepath.Base(f), "size": s.Size(), "modified": s.ModTime()})
+			}
+		}
+		jsonOut(w, out)
+		return
+	}
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var b struct {
+		Action string
+		Name   string
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&b) != nil {
+		errOut(w, 400, "Некорректный запрос")
+		return
+	}
+	ctx, c := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer c()
+	if b.Action == "create" {
+		out, e := a.cmd(ctx, "backup")
+		if e != nil {
+			errOut(w, 500, "Не удалось создать архив")
+			return
+		}
+		jsonOut(w, map[string]string{"status": "created", "message": out})
+		return
+	}
+	if b.Action == "restore" {
+		if !regexp.MustCompile().MatchString(b.Name) {
 			errOut(w, 400, "Некорректное имя архива")
 			return
 		}
