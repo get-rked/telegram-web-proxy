@@ -9,7 +9,6 @@ import (
  "encoding/base64"
  "encoding/hex"
  "encoding/json"
- "errors"
  "fmt"
  "io"
  "log"
@@ -107,5 +106,5 @@ async function loadBackups(){try{let b=await api(base+'/api/backups');document.q
 async function backup(){if(!confirm('Создать полную резервную копию?'))return;try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'create'})});loadBackups()}catch(e){show(e)}}
 async function restore(n){if(!confirm('ВНИМАНИЕ: восстановление заменит текущую конфигурацию. Продолжить?'))return;try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'restore',Name:n})});alert('Восстановление завершено');loadAll()}catch(e){show(e)}}
 async function logout(){try{await api(base+'/logout',{method:'POST',body:'{}'})}catch(e){location.href='login'}}
-function loadAll(){loadProfiles();loadBackups()}loadAll();
+function loadAll(){loadProfiles().then(loadBackups)}loadAll();
 </script></body></html>`;
