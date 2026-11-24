@@ -1,5 +1,7 @@
 FROM python:3.13-alpine
-COPY docker/mtproxy/stats-exporter.py /usr/local/bin/stats-exporter.py
+# The exporter runs as an unprivileged UID; make the source readable regardless
+# of the mode recorded for the file in the Git checkout.
+COPY --chmod=0444 docker/mtproxy/stats-exporter.py /usr/local/bin/stats-exporter.py
 USER 10001:10001
 EXPOSE 9090
 ENTRYPOINT ["python3", "/usr/local/bin/stats-exporter.py"]
