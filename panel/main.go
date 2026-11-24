@@ -44,6 +44,7 @@ type application struct {
 	trustProxy bool
 	authMu sync.Mutex
 	authFailures map[string]authFailure
+	banDir string
 }
 
 type profile struct {
@@ -109,6 +110,7 @@ func main() {
 		mtproxySecret: env("MTPROXY_SECRET_FILE", "/run/secrets/mtproxy_secret"),
 		monitorClient: &http.Client{Timeout: 3*time.Second},
 		authLog: log.New(authFile, "", log.LstdFlags),
+		banDir: env("PANEL_BANLIST_DIR", "/var/log/tproxy-panel/banlist"),
 		trustProxy: env("PANEL_TRUST_PROXY", "false") == "true",
 	}
 	if len(a.password) < 16 {
@@ -153,7 +155,7 @@ func headers(next http.Handler) http.Handler {
 func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := a.clientIP(r)
-		if a.authIsBlocked(ip) {
+		if a.isFail2banBanned(ip) || a.authIsBlocked(ip) {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many authentication attempts", http.StatusTooManyRequests)
 			return
@@ -169,6 +171,14 @@ func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 		a.clearAuthFailures(ip)
 		next(w, r)
 	}
+}
+
+func (a *application) isFail2banBanned(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || a.banDir == "" { return false }
+	info, err := os.Lstat(filepath.Join(a.banDir, parsed.String()))
+	if err != nil || !info.Mode().IsRegular() { return false }
+	return time.Since(info.ModTime()) < 7*24*time.Hour
 }
 
 func (a *application) authIsBlocked(ip string) bool {
