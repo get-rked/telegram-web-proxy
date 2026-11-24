@@ -23,6 +23,8 @@ services:
       - ./docker/private:/opt/telegram-web-proxy/docker/private
       - ./docker/private-credentials:/opt/telegram-web-proxy/docker/private-credentials
       - ./docker/generated:/opt/telegram-web-proxy/docker/generated
+      - ./docker/panel-data:/opt/telegram-web-proxy/docker/panel-data
+      - ./docker/mtproxy-data:/opt/telegram-web-proxy/docker/mtproxy-data
     restart: "no"
   relay:
     depends_on:
