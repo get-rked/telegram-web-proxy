@@ -8,7 +8,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/tproxy-server ./cm
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/* && groupadd --system --gid 10001 tproxy && useradd --system --uid 10001 --gid tproxy --home-dir /nonexistent --shell /usr/sbin/nologin tproxy
 COPY --from=build /out/tproxy-server /usr/local/bin/tproxy-server
+COPY docker/relay-supervisor.sh /usr/local/bin/relay-supervisor
+RUN chmod 0755 /usr/local/bin/relay-supervisor
 USER 10001:10001
 EXPOSE 8080 8081
-ENTRYPOINT ["/usr/local/bin/tproxy-server"]
-CMD ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json"]
+ENTRYPOINT ["/usr/local/bin/relay-supervisor"]
