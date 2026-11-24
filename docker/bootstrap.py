@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Idempotent first-run bootstrap for the Docker deployment."""
+import hashlib
 import json
 import os
 import secrets
@@ -103,6 +104,9 @@ def main():
     profiles_path = PROFILES_DIR / "profiles.json"
     token_path = CONFIG_DIR / "token.key"
     secret_path = MTPROXY_DIR / "secret"
+    panel_auth_path = CONFIG_DIR / "panel-auth.json"
+    panel_credentials_path = CONFIG_DIR / "panel-credentials.txt"
+    panel_route_path = CONFIG_DIR / "panel-route.caddy"
 
     # Validate and preserve an existing profile file; otherwise create one.
     if profiles_path.exists():
@@ -176,15 +180,69 @@ def main():
     else:
         atomic_write(token_path, secrets.token_bytes(32), 0o600)
 
-    for path in (config_path, token_path, profiles_path):
+    # Generate the private panel URL and credentials exactly once.
+    credentials_created = False
+    if panel_auth_path.exists():
+        auth = load_json(panel_auth_path)
+        if not isinstance(auth, dict) or not isinstance(auth.get("base_path"), str) or not isinstance(auth.get("username"), str) or not isinstance(auth.get("password_salt"), str) or not isinstance(auth.get("password_hash"), str):
+            fail("panel-auth.json is invalid; refusing to replace panel credentials")
+        base_path = auth["base_path"]
+        if not base_path.startswith("/panel-") or "/" in base_path[1:]:
+            fail("panel-auth.json contains an invalid base_path")
+        if not panel_credentials_path.exists():
+            fail("panel-credentials.txt is missing; refusing to rotate credentials automatically")
+    else:
+        base_path = "/panel-" + secrets.token_urlsafe(24)
+        username = "admin_" + secrets.token_hex(4)
+        password = secrets.token_urlsafe(24)
+        salt = secrets.token_bytes(32)
+        password_hash = hashlib.sha256(salt + password.encode("utf-8")).hexdigest()
+        auth = {
+            "base_path": base_path,
+            "username": username,
+            "password_salt": salt.hex(),
+            "password_hash": password_hash,
+        }
+        atomic_write(panel_auth_path, (json.dumps(auth, indent=2) + "\\n").encode(), 0o600)
+        credentials = (
+            f"URL: https://{DOMAIN}{base_path}/\\n"
+            f"LOGIN: {username}\\n"
+            f"PASSWORD: {password}\\n"
+        )
+        atomic_write(panel_credentials_path, credentials.encode("utf-8"), 0o600)
+        credentials_created = True
+
+    # Caddy imports this generated route. The secret path is never placed in a public URL or log.
+    route = (
+        f"@panel_root path {base_path} {base_path}/*\\n"
+        f"redir @panel_root {base_path}/ 308\\n"
+        f"handle_path {base_path}/* {{\\n"
+        "    reverse_proxy panel:8088 {\\n"
+        "        header_up X-Real-IP {client_ip}\\n"
+        "    }\\n"
+        "}\\n"
+    )
+    if not panel_route_path.exists() or panel_route_path.read_text(encoding="utf-8") != route:
+        atomic_write(panel_route_path, route.encode("utf-8"), 0o640)
+
+    for path in (config_path, token_path, profiles_path, panel_auth_path, panel_route_path):
         os.chown(path, UID, GID)
     os.chown(secret_path, UID, GID)
     os.chown(PROFILES_DIR, UID, GID)
     os.chmod(PROFILES_DIR, 0o750)
     os.chmod(profiles_path, 0o600)
     os.chmod(token_path, 0o600)
+    os.chmod(panel_auth_path, 0o600)
+    os.chmod(panel_route_path, 0o640)
+    os.chmod(panel_credentials_path, 0o600)
+    os.chown(panel_credentials_path, UID, GID)
     os.chmod(secret_path, 0o600)
     print("bootstrap: configuration validated; existing secrets preserved; initialization complete")
+    if credentials_created:
+        print("bootstrap: PANEL CREDENTIALS (shown once; also saved in panel-credentials.txt):")
+        print(f"  URL: https://{DOMAIN}{base_path}/")
+        print(f"  LOGIN: {username}")
+        print(f"  PASSWORD: {password}")
 
 
 if __name__ == "__main__":
