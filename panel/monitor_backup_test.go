@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -35,7 +37,9 @@ func TestBackupCreateListRestore(t *testing.T) {
 	if err!=nil { t.Fatal(err) }
 	if item.Size<=0 { t.Fatalf("invalid backup size: %+v",item) }
 	if err:=os.WriteFile(a.profiles,[]byte(`{"profiles":[{"name":"default","secret":"ffeeddccbbaa99887766554433221100","backend":"127.0.0.1:2398","carrier_mode":"https"}]}`),0600);err!=nil{t.Fatal(err)}
+	if err:=os.WriteFile(a.config,[]byte("{\"public_hostname\":\"changed.example\"}"),0600);err!=nil{t.Fatal(err)}
 	if err:=a.restoreBackup(item.ID);err!=nil{t.Fatal(err)}
+	config,err:=os.ReadFile(a.config);if err!=nil{t.Fatal(err)};if !bytes.Contains(config,[]byte("proxy.example.com")){t.Fatalf("config was not restored: %s",config)}
 	doc,err:=a.readProfiles();if err!=nil{t.Fatal(err)}
 	if doc.Profiles[0].Secret!="00112233445566778899aabbccddeeff"{t.Fatal("restore did not restore profile secret")}
 	items,err:=a.listBackups();if err!=nil{t.Fatal(err)}
@@ -99,4 +103,41 @@ func TestMetricsEndpointCollectsRelayAndMTProxyData(t *testing.T) {
 	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
 	if result["relay"].(map[string]any)["tproxy_sessions_live"]!=float64(7){t.Fatalf("relay metric missing: %s",response.Body.String())}
 	if result["mtproxy"].(map[string]any)["uptime"]!="321"{t.Fatalf("MTProxy metric missing: %s",response.Body.String())}
+}
+
+func TestRestoreRejectsSHA256Mismatch(t *testing.T) {
+	a := testApp(t)
+	a.backupRoot = filepath.Join(t.TempDir(), "backups")
+	item, err := a.createBackup()
+	if err != nil { t.Fatal(err) }
+	path := filepath.Join(a.backupDir(), item.ID+".tar.gz")
+	input, err := os.Open(path)
+	if err != nil { t.Fatal(err) }
+	gz, err := gzip.NewReader(input)
+	if err != nil { t.Fatal(err) }
+	tr := tar.NewReader(gz)
+	var profileData, configData, manifestData []byte
+	for {
+		h, nextErr := tr.Next()
+		if nextErr == io.EOF { break }
+		if nextErr != nil { t.Fatal(nextErr) }
+		data, readErr := io.ReadAll(tr)
+		if readErr != nil { t.Fatal(readErr) }
+		switch h.Name { case "profiles.json": profileData=data; case "config.json": configData=data; case "manifest.json": manifestData=data }
+	}
+	_ = gz.Close()
+	_ = input.Close()
+	profileData = bytes.Replace(profileData, []byte("default"), []byte("changed"), 1)
+	out, err := os.Create(path)
+	if err != nil { t.Fatal(err) }
+	zw := gzip.NewWriter(out)
+	tw := tar.NewWriter(zw)
+	for _, entry := range []struct{name string; data []byte}{{"profiles.json",profileData},{"config.json",configData},{"manifest.json",manifestData}} {
+		if err := tw.WriteHeader(&tar.Header{Name:entry.name,Mode:0600,Size:int64(len(entry.data)),Typeflag:tar.TypeReg});err!=nil{t.Fatal(err)}
+		if _,err:=tw.Write(entry.data);err!=nil{t.Fatal(err)}
+	}
+	if err:=tw.Close();err!=nil{t.Fatal(err)}
+	if err:=zw.Close();err!=nil{t.Fatal(err)}
+	if err:=out.Close();err!=nil{t.Fatal(err)}
+	if err:=a.restoreBackup(item.ID);err==nil{t.Fatal("restore accepted a SHA-256 mismatch")}
 }
