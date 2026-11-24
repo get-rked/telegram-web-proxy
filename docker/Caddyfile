@@ -9,8 +9,14 @@
 
 {$DOMAIN} {
   encode zstd gzip
+  @skip_security_log not path /.env* /.git* /wp-login.php* /wp-admin* /phpmyadmin* /xmlrpc.php* /vendor/phpunit* /actuator/env* /server-status* /cgi-bin* /HNAP1* /manager/html*
+  log_skip @skip_security_log
   log {
-    output file /var/log/tproxy-panel/access.log
+    output file /var/log/tproxy-panel/access.log {
+      roll_size 10MiB
+      roll_keep 5
+      roll_keep_for 168h
+    }
     format json
   }
   handle /admin* {
