@@ -147,7 +147,8 @@ sudo python3 migrate-to-docker.py --source-dir /opt/telegram-web-proxy --apply
 Для Nginx он также копирует текущие TLS-файлы в `docker/nginx/certs`; для Caddy
 сертификат будет выпущен заново контейнером Caddy. Префикс `dd` остаётся в
 профильном JSON и корректно нормализуется только для MTProxy. NAT-параметры
-переносятся в `MTPROXY_NAT_INFO`.
+переносятся в `MTPROXY_NAT_INFO`; значения `MTPROXY_WORKERS` и
+`MTPROXY_MAX_CONNECTIONS` также сохраняются в `.env` и передаются MTProxy.
 
 Перед записью создаётся проверяемый архив в
 `/var/backups/telegram-web-proxy-docker-migration/` с правами `0600`.
