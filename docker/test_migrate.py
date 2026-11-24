@@ -95,6 +95,41 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("MTPROXY_NAT_INFO=10.0.0.2:203.0.113.4", env)
             self.assertEqual(config_path.read_bytes(), original_config)
 
+    def test_site_copy_preserves_previous_destination_and_verifies_new_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "native-site"
+            destination = root / "docker/site"
+            source.mkdir()
+            destination.mkdir(parents=True)
+            (source / "index.html").write_text("new native site")
+            (source / "assets").mkdir()
+            (source / "assets/app.js").write_text("console.log('new')")
+            (destination / "index.html").write_text("tracked Docker placeholder")
+
+            migrator.copy_tree_atomic(source, destination)
+
+            self.assertEqual((destination / "index.html").read_text(), "new native site")
+            self.assertEqual((destination / "assets/app.js").read_text(), "console.log('new')")
+            previous = list(root.glob("docker/site.before-migration.*"))
+            self.assertEqual(len(previous), 1)
+            self.assertEqual((previous[0] / "index.html").read_text(), "tracked Docker placeholder")
+            self.assertEqual(migrator.tree_manifest(source), migrator.tree_manifest(destination))
+
+    def test_backup_paths_verifies_archive_and_writes_sha256_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            (source / "secret.txt").write_text("backup payload")
+            archive = migrator.backup_paths([source], root / "backups")
+            checksum = archive.with_suffix(archive.suffix + ".sha256")
+            self.assertTrue(archive.is_file())
+            self.assertTrue(checksum.is_file())
+            self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(checksum.stat().st_mode & 0o777, 0o600)
+            self.assertIn(archive.name, checksum.read_text())
+
     def test_env_update_preserves_comments_and_unrelated_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / ".env"
