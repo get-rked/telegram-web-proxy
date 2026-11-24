@@ -1,0 +1,27 @@
+[tproxy-caddy-probes]
+enabled = true
+filter = tproxy-caddy-probes
+logpath = /var/log/tproxy-panel/access.log
+backend = auto
+maxretry = 3
+findtime = 10m
+bantime = 1d
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 1w
+usedns = no
+action = docker-user[name=tproxy-probes]
+
+[nginx-botsearch]
+enabled = true
+filter = nginx-botsearch
+logpath = /var/log/tproxy-panel/access.log
+backend = auto
+maxretry = 3
+findtime = 10m
+bantime = 1d
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 1w
+usedns = no
+action = docker-user[name=nginx-botsearch]
