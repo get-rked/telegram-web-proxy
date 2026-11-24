@@ -1,10 +1,14 @@
 # Docker deployment — экспериментальная ветка
 
-Это первый этап Docker-native архитектуры: сборка закреплённой версии Telegram Desktop relay из исходников, панель в отдельном непривилегированном контейнере, SQLite для журнала аудита и Caddy как TLS reverse proxy.
+Это экспериментальная Docker-native архитектура: закреплённая версия Telegram relay, отдельная панель управления, SQLite для аудита и выбираемый reverse proxy.
 
-**Это пока не полная замена установщику.** Контейнер MTProxy, генерация конфигурации и секретов при первом запуске, изменение профилей из UI, резервное копирование, метрики и миграция существующей установки ещё не реализованы. Не разворачивайте этот этап на рабочем прокси.
+**Reverse proxy можно выбрать:**
+- **Caddy** — автоматическое получение и продление TLS-сертификатов Let's Encrypt.
+- **Nginx** — отдельная конфигурация для TLS-сертификата, который вы заранее размещаете на хосте.
 
-Подготовка:
+Запускайте только один reverse proxy одновременно: оба используют опубликованные relay порты 80 и 443.
+
+## Подготовка
 
 ```bash
 cp .env.example .env
@@ -15,13 +19,46 @@ cp docker/config/profiles.example.json docker/config/profiles.json
 # Замените hostname, секрет и backend на реальные значения.
 ```
 
-Запуск после реализации полного набора сервисов:
+## Вариант 1: Caddy (автоматический TLS)
+
+DNS-запись домена должна указывать на сервер, а входящие TCP-порты 80 и 443 должны быть доступны.
 
 ```bash
-docker compose config
-docker compose build
-docker compose up -d
-docker compose logs -f
+docker compose --profile caddy config
+docker compose --profile caddy build
+docker compose --profile caddy up -d
+docker compose logs -f caddy
 ```
 
-Панель будет доступна по `https://DOMAIN/admin/`. SQLite хранится в именованном томе `panel-data`. Конфиги прокси монтируются в панель только для чтения. Docker socket и host network не используются.
+Caddy самостоятельно запросит и будет продлевать сертификат. Данные сертификатов хранятся в volume `caddy-data`.
+
+## Вариант 2: Nginx (свой TLS-сертификат)
+
+Nginx ожидает два файла на хосте:
+
+- `docker/nginx/certs/fullchain.pem` — сертификат и цепочка.
+- `docker/nginx/certs/privkey.pem` — закрытый ключ.
+
+Получите сертификат любым удобным способом (например, Certbot на хосте), затем:
+
+```bash
+mkdir -p docker/nginx/certs
+# Поместите fullchain.pem и privkey.pem в эту директорию.
+chmod 600 docker/nginx/certs/privkey.pem
+docker compose --profile nginx config
+docker compose --profile nginx build
+docker compose --profile nginx up -d
+docker compose logs -f nginx
+```
+
+Nginx перенаправляет HTTP на HTTPS, обслуживает панель по `/admin` и передаёт остальные запросы relay. Автоматическое получение/обновление сертификатов для Nginx пока не входит в эту конфигурацию — обновляйте файлы сертификата на хосте и перезапускайте Nginx после обновления:
+
+```bash
+docker compose --profile nginx restart nginx
+```
+
+## Панель и ограничения текущего этапа
+
+Панель будет доступна по `https://DOMAIN/admin/`. SQLite хранится в именованном томе `panel-data`. Сейчас панель предоставляет просмотр статуса и списка профилей; изменение профилей из UI ещё не реализовано.
+
+Контейнер MTProxy, автоматическая генерация конфигурации/секретов, CRUD профилей, безопасный reload, backup/restore, расширенные метрики и миграция существующей установки ещё не реализованы. **Не разворачивайте эту экспериментальную ветку на рабочем прокси.**
