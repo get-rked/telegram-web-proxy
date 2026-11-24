@@ -57,6 +57,10 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(len(bytes.fromhex(secret)), 16)
         self.assertEqual((self.config_dir / "token.key").stat().st_size, 32)
         self.assertEqual((self.config_dir / "token.key").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.config_dir / "config.json").stat().st_mode & 0o777, 0o640)
+        self.assertEqual(self.config_dir.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(self.mtproxy_dir.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(self.panel_auth_dir.stat().st_mode & 0o777, 0o750)
         self.assertEqual((self.profiles_dir / "profiles.json").stat().st_mode & 0o777, 0o600)
         config = json.loads((self.config_dir / "config.json").read_text())
         self.assertEqual(config["listen"], "127.0.0.1:18080")
@@ -114,6 +118,15 @@ class BootstrapTests(unittest.TestCase):
         (self.mtproxy_dir / "secret").write_text("12" * 16 + "\n" + mobile + "\n")
         bootstrap.main()
         self.assertEqual((self.mtproxy_dir / "secret").read_text().splitlines(), ["12" * 16, mobile])
+
+    def test_second_run_repairs_restrictive_config_permissions(self):
+        bootstrap.main()
+        config_path = self.config_dir / "config.json"
+        os.chmod(self.config_dir, 0o700)
+        os.chmod(config_path, 0o600)
+        bootstrap.main()
+        self.assertEqual(self.config_dir.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(config_path.stat().st_mode & 0o777, 0o640)
 
     def test_hostname_change_backs_up_existing_config(self):
         bootstrap.main()
