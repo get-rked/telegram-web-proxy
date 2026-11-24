@@ -4298,7 +4298,7 @@ profile_cli() {
       systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
       ok "Carrier mode профиля $name изменён." ;;
     update)
-      (($# >= 1)) || die "profile update ИМЯ --carrier-mode MODE [--generate]"
+      (($# >= 1)) || die "profile update ИМЯ --carrier-mode MODE [--workers N] [--max-connections N] [--generate]"
       name="$1"; shift
       while (($#)); do case "$1" in
         --carrier-mode) (($# >= 2)) || die "--carrier-mode требует значение"; mode="$2"; shift 2 ;;
@@ -4344,7 +4344,8 @@ profile_cli() {
       fi
       tmp="$(mktemp "$file.XXXXXX")"
       if ! jq --arg s "$secret" --arg m "$mode" '.secret=$s | .carrier_mode=$m' "$file" > "$tmp"; then
-        rm -f "$tmp" "$backup_tmp"; die "Не удалось обновить профиль."
+        [[ -z "$env_backup" ]] || cp -a "$env_backup" "$MT_ENV"
+        rm -f "$tmp" "$backup_tmp" "$env_backup" "$env_tmp"; die "Не удалось обновить профиль."
       fi
       chown root:tproxy "$tmp"; chmod 0640 "$tmp"; mv -f "$tmp" "$file"
       if ! profile_manifest_sync || ! write_mtproxy_secrets || ! patch_mtproxy_unit ||
