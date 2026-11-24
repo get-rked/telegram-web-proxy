@@ -19,3 +19,6 @@ docker/site.failed-migration*/
 /docker/private-credentials/panel-credentials.txt
 /docker/generated/panel-route.caddy
 /docker/generated/panel-route.nginx.conf
+
+# Local Docker manager state (selected reverse proxy)
+/docker/private/.manager-state
