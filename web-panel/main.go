@@ -48,7 +48,14 @@ func(a *App)init()error{
  }else{if e=db.QueryRow("SELECT value FROM settings WHERE key='base_path'").Scan(&a.base);e!=nil{return e}}
  _,_=db.Exec("DELETE FROM sessions WHERE expires < ?",time.Now().Unix());return os.Chmod(path,0600)
 }
-func(a *App)remote(r *http.Request)string{h,_,e:=net.SplitHostPort(r.RemoteAddr);if e!=nil{return r.RemoteAddr};return h}
+func(a *App)remote(r *http.Request)string{
+ h,_,e:=net.SplitHostPort(r.RemoteAddr);if e!=nil{h=r.RemoteAddr}
+ if h=="127.0.0.1"||h=="::1" {
+  candidate:=r.Header.Get("X-Real-IP");if candidate==""{candidate=strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"),",")[0])}
+  if ip:=net.ParseIP(candidate);ip!=nil{return ip.String()}
+ }
+ return h
+}
 func(a *App)blocked(r *http.Request)bool{h:=a.remote(r);a.mu.Lock();defer a.mu.Unlock();now:=time.Now();v:=a.failures[h][:0];for _,t:=range a.failures[h]{if now.Sub(t)<10*time.Minute{v=append(v,t)}};a.failures[h]=v;return len(v)>=8}
 func(a *App)badLogin(r *http.Request){h:=a.remote(r);log.Printf("[AUTH_FAIL] remote=%s",h);a.mu.Lock();defer a.mu.Unlock();a.failures[h]=append(a.failures[h],time.Now())}
 func(a *App)session(r *http.Request)(string,string,bool){c,e:=r.Cookie("tproxy_panel");if e!=nil{return "","",false};s:=sha256.Sum256([]byte(c.Value));var u,csrf string;var exp int64;e=a.db.QueryRow("SELECT username,csrf,expires FROM sessions WHERE token_hash=?",hex.EncodeToString(s[:])).Scan(&u,&csrf,&exp);return u,csrf,e==nil&&exp>time.Now().Unix()}
