@@ -46,20 +46,18 @@ tproxy_bootstrap_repository() {
         echo "Не удалось загрузить актуальный архив проекта; существующая установка не изменена." >&2
         exit 1
       fi
-      if ! command -v rsync >/dev/null 2>&1; then
-        echo "Устанавливаю отсутствующую зависимость rsync..."
-        apt-get update
-        DEBIAN_FRONTEND=noninteractive apt-get install -y rsync
-      fi
-      if ! rsync -a \
-        --exclude='/.git/***' --exclude='/.env' --exclude='/docker-compose.override.yml' \
-        --exclude='/docker/config/***' --exclude='/docker/mtproxy/***' \
-        --exclude='/docker/profiles/***' --exclude='/docker/private/***' \
-        --exclude='/docker/private-credentials/***' --exclude='/docker/generated/***' \
-        --exclude='/docker/site/***' --exclude='/docker/panel-data/***' \
-        --exclude='/docker/mtproxy-data/***' --exclude='/docker/security/logs/***' \
-        --exclude='/docker/nginx/certs/***' \
-        "$source_dir/" "$TPROXY_DEPLOY_DIR/"; then
+      # Не требуем rsync и не запускаем APT при обновлении. GNU tar уже входит
+      # в базовые зависимости; архив накладывается поверх проекта без удаления
+      # файлов, а пользовательские данные и секреты исключены из потока.
+      if ! tar -C "$source_dir" \
+        --exclude='./.git' --exclude='./.env' --exclude='./docker-compose.override.yml' \
+        --exclude='./docker/config' --exclude='./docker/mtproxy' \
+        --exclude='./docker/profiles' --exclude='./docker/private' \
+        --exclude='./docker/private-credentials' --exclude='./docker/generated' \
+        --exclude='./docker/site' --exclude='./docker/panel-data' \
+        --exclude='./docker/mtproxy-data' --exclude='./docker/security/logs' \
+        --exclude='./docker/nginx/certs' \
+        -cf - . | tar -C "$TPROXY_DEPLOY_DIR" -xf -; then
         rm -rf -- "$sync_tmp"
         echo "Не удалось синхронизировать исходники; рабочие данные сохранены." >&2
         exit 1
