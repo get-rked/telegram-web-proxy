@@ -143,11 +143,11 @@ jobs:
           docker compose build bootstrap relay
           RELAY_PORT=18080 ADMIN_PORT=18081 docker compose run --rm --no-deps -e PANEL_PRINT_CREDENTIALS=0 bootstrap
           docker run --rm \
-            -v "$PWD/docker/config:/etc/tproxy-server:ro" \
-            -v "$PWD/docker/site:/srv/tproxy-site:ro" \
-            -v "$PWD/docker/profiles:/var/lib/tproxy-profiles:ro" \
+            -v "$PWD/docker/config:/opt/telegram-web-proxy/docker/config:ro" \
+            -v "$PWD/docker/site:/opt/telegram-web-proxy/docker/site:ro" \
+            -v "$PWD/docker/profiles:/opt/telegram-web-proxy/docker/profiles:ro" \
             --entrypoint /usr/local/bin/tproxy-server telegram-web-proxy-relay:latest \
-            -config /etc/tproxy-server/config.json \
-            -profiles-file /var/lib/tproxy-profiles/profiles.json -check
+            -config /opt/telegram-web-proxy/docker/config/config.json \
+            -profiles-file /opt/telegram-web-proxy/docker/profiles/profiles.json -check
           python3 -m json.tool docker/config/config.example.json >/dev/null
           python3 -m json.tool docker/config/profiles.example.json >/dev/null
