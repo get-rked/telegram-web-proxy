@@ -104,7 +104,13 @@ def main():
     for name in ("python3", "docker", "systemctl", "ss", "tar", "iptables"):
         need(name)
     cmd(["docker", "compose", "version"])
-    security, _ = cmd(["docker", "info", "--format", "{{json .SecurityOptions}}"], False)
+    security, info_rc = cmd(["docker", "info", "--format", "{{json .SecurityOptions}}"], False)
+    if info_rc:
+        raise MigrationAbort("Docker daemon не запущен или недоступен текущему пользователю.")
+    existing, _ = cmd(["docker", "compose", "ps", "--services", "--status", "running"], False)
+    if existing.strip():
+        raise MigrationAbort("В этом Docker-проекте уже работают контейнеры: " + existing.replace("\\n", ", ") +
+                             ". Сначала разберись с существующим запуском; автоматическая миграция остановлена.")
     if "rootless" in security.lower():
         raise MigrationAbort("Rootless Docker несовместим с текущей схемой Fail2ban/DOCKER-USER.")
 
