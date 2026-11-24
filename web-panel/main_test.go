@@ -206,3 +206,38 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 	if got["carrier_mode"] != "https-lanes" || got["name"] != "alpha" { t.Fatalf("unexpected profile metadata: %#v", got) }
 	if !strings.Contains(got["link"], "https://t.me/webproxy?") { t.Fatalf("unexpected Telegram link: %q", got["link"]) }
 }
+
+func TestProfileActionExportReturnsDownloadURL(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backups")
+	script := filepath.Join(dir, "export.sh")
+	body := "#!/bin/sh\nmkdir -p \"$TEST_BACKUP_DIR/profile-backups\"\n: > \"$TEST_BACKUP_DIR/profile-backups/trpoxy-profile-backup-alpha-20261124-120000.tar.gz\"\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil { t.Fatal(err) }
+	t.Setenv("TEST_BACKUP_DIR", backupDir)
+	a := &App{base: "panel", script: script, backupDir: backupDir}
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader(`{"Action":"export"}`))
+	response := httptest.NewRecorder()
+	a.profileAction(response, req)
+	if response.Code != http.StatusOK { t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String()) }
+	if !strings.Contains(response.Body.String(), `"download_url":"/panel/api/profile-backups/trpoxy-profile-backup-alpha-20261124-120000.tar.gz"`) {
+		t.Fatalf("export did not return the generated archive URL: %s", response.Body.String())
+	}
+}
+
+func TestProfileActionUpdatePassesCarrierAndRotationFlags(t *testing.T) {
+	dir := t.TempDir()
+	capture := filepath.Join(dir, "args.txt")
+	script := filepath.Join(dir, "capture.sh")
+	scriptBody := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0700); err != nil { t.Fatal(err) }
+	t.Setenv("CAPTURE_ARGS", capture)
+	a := &App{base: "panel", script: script}
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader(`{"Action":"update","CarrierMode":"websocket-lanes","RegenerateSecret":true}`))
+	response := httptest.NewRecorder()
+	a.profileAction(response, req)
+	if response.Code != http.StatusOK { t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String()) }
+	raw, err := os.ReadFile(capture); if err != nil { t.Fatal(err) }
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	want := []string{"profile", "update", "alpha", "--carrier-mode", "websocket-lanes", "--generate"}
+	if strings.Join(args, "|") != strings.Join(want, "|") { t.Fatalf("unexpected installer arguments: %#v", args) }
+}
