@@ -73,7 +73,7 @@ class BootstrapTests(unittest.TestCase):
             {"name": "default", "secret": default, "backend": "127.0.0.1:2398", "carrier_mode": "https"},
             {"name": "mobile", "secret": mobile, "backend": "127.0.0.1:2398", "carrier_mode": "websocket"}
         ]}))
-        (self.mtproxy_dir / "secret").write_text("12" * 16 + "\\n" + mobile + "\\n")
+        (self.mtproxy_dir / "secret").write_text("12" * 16 + "\n" + mobile + "\n")
         bootstrap.main()
         self.assertEqual((self.mtproxy_dir / "secret").read_text().splitlines(), ["12" * 16, mobile])
 
