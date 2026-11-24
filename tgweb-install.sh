@@ -1451,6 +1451,7 @@ prepare_layout() {
   if [[ -n "$installer_source" && -f "$installer_source" && "$installer_source" != "$BASE_DIR/tgweb-install.sh" ]]; then
     install -o root -g root -m 0750 "$installer_source" "$BASE_DIR/tgweb-install.sh"
   fi
+  if [[ -f "$BASE_DIR/tgweb-install.sh" ]]; then chown root:root "$BASE_DIR/tgweb-install.sh"; chmod 0750 "$BASE_DIR/tgweb-install.sh"; fi
   # The legacy standalone manager is no longer used; all its functions live here.
   rm -f "$BIN_DIR/tproxy-advanced"
 }
