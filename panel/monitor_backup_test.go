@@ -144,3 +144,22 @@ func TestRestoreRejectsSHA256Mismatch(t *testing.T) {
 	if err:=out.Close();err!=nil{t.Fatal(err)}
 	if err:=a.restoreBackup(item.ID);err==nil{t.Fatal("restore accepted a SHA-256 mismatch")}
 }
+
+func TestRestoreRollsBackConfigAndProfilesWhenSecretSyncFails(t *testing.T) {
+	a := testApp(t)
+	a.backupRoot = filepath.Join(t.TempDir(), "backups")
+	item, err := a.createBackup()
+	if err != nil { t.Fatal(err) }
+	changedProfiles := []byte("{\"profiles\":[{\"name\":\"default\",\"secret\":\"ffeeddccbbaa99887766554433221100\",\"backend\":\"127.0.0.1:2398\",\"carrier_mode\":\"https\"}]}")
+	changedConfig := []byte("{\"public_hostname\":\"changed.example\"}")
+	if err := os.WriteFile(a.profiles, changedProfiles, 0600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(a.config, changedConfig, 0600); err != nil { t.Fatal(err) }
+	a.mtproxySecret = filepath.Join(t.TempDir(), "missing-dir", "secret")
+	if err := a.restoreBackup(item.ID); err == nil { t.Fatal("restore unexpectedly succeeded with an unavailable secret directory") }
+	gotProfiles, err := os.ReadFile(a.profiles)
+	if err != nil { t.Fatal(err) }
+	gotConfig, err := os.ReadFile(a.config)
+	if err != nil { t.Fatal(err) }
+	if !bytes.Equal(gotProfiles, changedProfiles) { t.Fatalf("profiles were not rolled back: %s", gotProfiles) }
+	if !bytes.Equal(gotConfig, changedConfig) { t.Fatalf("config was not rolled back: %s", gotConfig) }
+}
