@@ -60,6 +60,13 @@ func (a *application) restoreBackup(id string)error{
 	}
 	if !foundProfiles||!foundConfig||!foundManifest||!json.Valid(configData){return errors.New("backup is incomplete or contains invalid config")}
 	var doc profileDocument;if err:=json.Unmarshal(profileData,&doc);err!=nil{return err}
+	if a.mtproxySecret!="" {
+		secretBytes,secretErr:=os.ReadFile(a.mtproxySecret)
+		if secretErr!=nil{return errors.New("MTProxy secret file is unavailable")}
+		liveSecret:=strings.TrimSpace(string(secretBytes))
+		defaultIndex:=findProfile(doc.Profiles,"default")
+		if defaultIndex<0||!strings.EqualFold(liveSecret,doc.Profiles[defaultIndex].Secret){return errors.New("backup default profile secret does not match the active MTProxy secret")}
+	}
 	tmpPath:=a.profiles+".restore-validation";if err:=os.WriteFile(tmpPath,profileData,0600);err!=nil{return err}
 	original:=a.profiles;a.profiles=tmpPath;_,validationErr:=a.readProfiles();a.profiles=original;_ = os.Remove(tmpPath)
 	if validationErr!=nil{return fmt.Errorf("backup profile validation failed: %w",validationErr)}
