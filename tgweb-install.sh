@@ -2514,6 +2514,50 @@ docker_compose() {
     -f "$DOCKER_PROJECT_DIR/docker-compose.yml" "$@"
 }
 
+docker_registry_dns_diagnostic() {
+  local resolver_file="/etc/resolv.conf"
+  echo
+  warn "Диагностика DNS для Docker Hub (registry-1.docker.io):"
+  if [[ -r "$resolver_file" ]]; then
+    echo "  /etc/resolv.conf:"
+    grep -E '^[[:space:]]*(nameserver|search|domain|options)[[:space:]]' "$resolver_file" | sed 's/^/    /' || true
+    if grep -Eq '^[[:space:]]*nameserver[[:space:]]+127\.' "$resolver_file"; then
+      warn "В resolv.conf указан локальный DNS stub. Проверяем systemd-resolved."
+    fi
+  else
+    warn "Файл /etc/resolv.conf недоступен для чтения."
+  fi
+  if command -v resolvectl >/dev/null 2>&1; then
+    echo "  systemd-resolved:"
+    systemctl is-active systemd-resolved 2>/dev/null | sed 's/^/    active: /' || true
+    resolvectl query registry-1.docker.io 2>&1 | sed 's/^/    /' || true
+  fi
+  if command -v getent >/dev/null 2>&1; then
+    echo "  Проверка системного resolver:"
+    getent ahostsv4 registry-1.docker.io 2>&1 | head -n 4 | sed 's/^/    /' || true
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    echo "  Проверка HTTPS до Docker Registry (ответ 401 здесь нормален):"
+    curl -sS -I --connect-timeout 5 --max-time 10 https://registry-1.docker.io/v2/ 2>&1 | head -n 5 | sed 's/^/    /' || true
+  fi
+  echo
+  echo "  Если DNS-проверки завершаются ошибкой, сначала восстанови DNS хоста:"
+  echo "    sudo systemctl restart systemd-resolved"
+  echo "    sudo resolvectl flush-caches"
+  echo "    getent ahostsv4 registry-1.docker.io"
+  echo "  Если ошибка повторяется, проверь /etc/resolv.conf, статус systemd-resolved"
+  echo "  и правила firewall для UDP/TCP 53 и loopback. Не меняй Docker daemon.json"
+  echo "  вслепую: параметр dns в нём задаёт DNS контейнерам, а не исправляет DNS dockerd."
+}
+
+docker_pull_external_images() {
+  if ! docker_compose "$@"; then
+    warn "Не удалось получить один или несколько образов из Docker Hub."
+    docker_registry_dns_diagnostic
+    return 1
+  fi
+}
+
 docker_read_web_server() {
   local value=""
   if [[ -r "$DOCKER_STATE_FILE" ]]; then value="$(cat "$DOCKER_STATE_FILE" 2>/dev/null || true)"; fi
@@ -2782,7 +2826,7 @@ print(f"Подготовлено профилей: {len(profiles)}; секрет
 PY
   docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Загружаю внешние образы..."
-  docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы."
+  docker_pull_external_images --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы. Причина и диагностика DNS выведены выше."
   info "Собираю локальные образы..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Первоначальная подготовка данных Docker..."
@@ -2909,7 +2953,7 @@ docker_update_runtime_command() {
     docker_write_state "$proxy"
   fi
   info "Загрузка внешних образов..."
-  docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы."
+  docker_pull_external_images --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы. Причина и диагностика DNS выведены выше."
   info "Сборка обновлённых образов..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Проверка Compose-конфигурации..."
