@@ -183,6 +183,38 @@ func (a *application) profilesAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
+func (a *application) backupsAPI(w http.ResponseWriter,r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		items,err:=a.listBackups();if err!=nil{http.Error(w,"backup list unavailable",500);return};jsonResponse(w,map[string]any{"backups":items})
+	case http.MethodPost:
+		if !a.sameOriginMutation(w,r){return}
+		a.mu.Lock();defer a.mu.Unlock()
+		item,err:=a.createBackup();if err!=nil{http.Error(w,"backup creation failed",500);return}
+		a.audit("backup.create:"+item.ID);jsonResponse(w,item)
+	default: http.Error(w,"method not allowed",405)
+	}
+}
+
+func (a *application) backupItemAPI(w http.ResponseWriter,r *http.Request) {
+	parts:=strings.Split(strings.TrimPrefix(r.URL.Path,"/admin/api/backups/"),"/")
+	if len(parts)==1 && r.Method==http.MethodGet {
+		if !backupIDPattern.MatchString(parts[0]){http.Error(w,"invalid backup id",400);return}
+		file,err:=os.Open(filepath.Join(a.backupDir(),parts[0]+".tar.gz"));if err!=nil{http.NotFound(w,r);return};defer file.Close()
+		w.Header().Set("Content-Type","application/gzip")
+		w.Header().Set("Content-Disposition",fmt.Sprintf("attachment; filename=%q",parts[0]+".tar.gz"))
+		_,_=io.Copy(w,file);return
+	}
+	if len(parts)==2 && parts[1]=="restore" && r.Method==http.MethodPost {
+		if !a.sameOriginMutation(w,r){return}
+		a.mu.Lock();defer a.mu.Unlock()
+		if err:=a.restoreBackup(parts[0]);err!=nil{http.Error(w,"backup restore failed: "+err.Error(),400);return}
+		a.audit("backup.restore:"+parts[0]);jsonResponse(w,map[string]string{"status":"restored","note":"Relay will validate and apply the restored profile file."});return
+	}
+	http.Error(w,"not found",404)
+}
+
 func (a *application) profileItemAPI(w http.ResponseWriter, r *http.Request) {
 	if !a.sameOriginMutation(w, r) {
 		return
