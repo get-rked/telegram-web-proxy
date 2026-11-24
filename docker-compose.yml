@@ -155,7 +155,7 @@ services:
     volumes:
       - panel-data:/data
       - ./docker/security/logs:/security-logs
-    command: ["sh", "-c", "chown -R 10001:10001 /data /security-logs"]
+    command: ["sh", "-c", "mkdir -p /security-logs && touch /security-logs/auth.log /security-logs/access.log && chown -R 10001:10001 /data /security-logs && chmod 0750 /security-logs && chmod 0600 /security-logs/auth.log && chmod 0640 /security-logs/access.log"]
     restart: "no"
   fail2ban:
     image: crazymax/fail2ban:1.1.0
