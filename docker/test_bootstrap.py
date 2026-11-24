@@ -45,6 +45,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(len(bytes.fromhex(secret)), 16)
         self.assertEqual((self.config_dir / "token.key").stat().st_size, 32)
         self.assertEqual((self.config_dir / "token.key").stat().st_mode & 0o777, 0o600)
+        config = json.loads((self.config_dir / "config.json").read_text())
+        self.assertEqual(config["admin_listen"], "127.0.0.1:8081")
 
     def test_second_run_preserves_secrets_and_token_key(self):
         bootstrap.main()
