@@ -2867,7 +2867,8 @@ docker_logs_command() {
   fi
 }
 
-docker_backup_command() {
+docker_# shellcheck disable=SC2120 # Retained for the legacy native rollback workflow.
+backup_command() {
   docker_require_project
   local backup_root="/var/backups/telegram-web-proxy-docker" stamp archive
   install -d -o root -g root -m 0700 "$backup_root"
