@@ -134,7 +134,7 @@ class BootstrapTests(unittest.TestCase):
         bootstrap.main()
         profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
         self.assertEqual(profile["secret"], "dd" + raw)
-        self.assertEqual((self.mtproxy_dir / "secret").read_text(), raw + "\\n")
+        self.assertEqual((self.mtproxy_dir / "secret").read_text(), raw + "\n")
 
     def test_mismatched_existing_secrets_fail_closed(self):
         (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [{
