@@ -4,6 +4,7 @@ set -eu
 DATA_DIR=${MTPROXY_DATA_DIR:-/var/lib/mtproxy}
 SECRET_FILE=${MTPROXY_SECRET_FILE:-/run/secrets/mtproxy_secret}
 REFRESH_INTERVAL=${MTPROXY_REFRESH_INTERVAL:-86400}
+NAT_INFO=${MTPROXY_NAT_INFO:-}
 child=
 set --
 SEEN_SECRETS=" "
@@ -42,6 +43,15 @@ if [ "$REFRESH_INTERVAL" -lt 60 ]; then
     echo "ERROR: MTPROXY_REFRESH_INTERVAL must be at least 60 seconds." >&2
     exit 1
 fi
+if [ -n "$NAT_INFO" ]; then
+    case "$NAT_INFO" in
+        *[!0-9.:]*) echo "ERROR: MTPROXY_NAT_INFO must be privateIPv4:publicIPv4." >&2; exit 1 ;;
+    esac
+    case "$NAT_INFO" in
+        *.*:*.*) ;;
+        *) echo "ERROR: MTPROXY_NAT_INFO must be privateIPv4:publicIPv4." >&2; exit 1 ;;
+    esac
+fi
 
 mkdir -p "$DATA_DIR"
 if [ ! -s "$DATA_DIR/proxy-secret" ]; then
@@ -64,6 +74,7 @@ start_proxy() {
         -p 8888 \
         -H 2398 \
         "$@" \
+        ${NAT_INFO:+--nat-info "$NAT_INFO"} \
         --aes-pwd "$DATA_DIR/proxy-secret" "$DATA_DIR/proxy-multi.conf" \
         -M "${MTPROXY_WORKERS:-1}" &
     child=$!
