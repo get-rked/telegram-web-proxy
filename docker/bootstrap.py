@@ -13,6 +13,8 @@ from pathlib import Path
 CONFIG_DIR = Path(os.environ.get("TPROXY_CONFIG_DIR", "/config"))
 MTPROXY_DIR = Path(os.environ.get("MTPROXY_DIR", "/mtproxy"))
 PROFILES_DIR = Path(os.environ.get("PROFILES_DIR", "/profiles"))
+PANEL_AUTH_DIR = Path(os.environ.get("PANEL_AUTH_DIR", "/panel-auth"))
+PANEL_CREDENTIALS_DIR = Path(os.environ.get("PANEL_CREDENTIALS_DIR", "/panel-credentials"))
 DOMAIN = os.environ.get("DOMAIN", "").strip().lower()
 UID = int(os.environ.get("TPROXY_UID", "10001"))
 GID = int(os.environ.get("TPROXY_GID", "10001"))
@@ -100,12 +102,14 @@ def main():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     MTPROXY_DIR.mkdir(parents=True, exist_ok=True)
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    PANEL_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    PANEL_CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
     config_path = CONFIG_DIR / "config.json"
     profiles_path = PROFILES_DIR / "profiles.json"
     token_path = CONFIG_DIR / "token.key"
     secret_path = MTPROXY_DIR / "secret"
-    panel_auth_path = CONFIG_DIR / "panel-auth.json"
-    panel_credentials_path = CONFIG_DIR / "panel-credentials.txt"
+    panel_auth_path = PANEL_AUTH_DIR / "panel-auth.json"
+    panel_credentials_path = PANEL_CREDENTIALS_DIR / "panel-credentials.txt"
     panel_route_path = CONFIG_DIR / "panel-route.caddy"
 
     # Validate and preserve an existing profile file; otherwise create one.
@@ -235,7 +239,6 @@ def main():
     os.chmod(panel_auth_path, 0o600)
     os.chmod(panel_route_path, 0o640)
     os.chmod(panel_credentials_path, 0o600)
-    os.chown(panel_credentials_path, UID, GID)
     os.chmod(secret_path, 0o600)
     print("bootstrap: configuration validated; existing secrets preserved; initialization complete")
     if credentials_created:
