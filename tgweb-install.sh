@@ -2714,20 +2714,47 @@ docker_update_runtime_command() {
 docker_update_command() {
   docker_require_project
   [[ -d "$DOCKER_PROJECT_DIR/.git" ]] || die "Каталог проекта не является Git-репозиторием; автоматическое обновление кода невозможно."
-  local branch dirty
+  local branch dirty site_backup="" stamp
   branch="$(git -C "$DOCKER_PROJECT_DIR" branch --show-current)"
   [[ "$branch" == "$DOCKER_REPO_BRANCH" ]] || die "Ожидалась ветка $DOCKER_REPO_BRANCH, обнаружена $branch."
+
+  # docker/site is user content. Preserve the full site while allowing the
+  # tracked default index.html to be refreshed underneath it.
+  if ! git -C "$DOCKER_PROJECT_DIR" diff --quiet -- docker/site/index.html; then
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    install -d -o root -g root -m 0700 /var/backups/telegram-web-proxy
+    site_backup="$(mktemp -d "/var/backups/telegram-web-proxy/site-before-update-$stamp.XXXXXX")"
+    cp -a "$DOCKER_PROJECT_DIR/docker/site/." "$site_backup/"
+    git -C "$DOCKER_PROJECT_DIR" restore --source=HEAD -- docker/site/index.html ||
+      die "Не удалось временно подготовить штатную страницу сайта к обновлению."
+  fi
+
   dirty="$(git -C "$DOCKER_PROJECT_DIR" status --porcelain)"
-  [[ -z "$dirty" ]] || {
+  if [[ -n "$dirty" ]]; then
+    [[ -z "$site_backup" ]] || {
+      cp -a "$site_backup/." "$DOCKER_PROJECT_DIR/docker/site/"
+      rm -rf -- "$site_backup"
+    }
     printf '%s\n' "$dirty"
-    die "Есть локальные изменения. Сначала сохрани их отдельно; обновление не запускалось."
-  }
+    die "Есть локальные изменения вне сайта. Сначала сохрани их отдельно; обновление не запускалось."
+  fi
+
   info "Обновляю код установщика из origin/$DOCKER_REPO_BRANCH..."
-  git -C "$DOCKER_PROJECT_DIR" fetch --prune origin "$DOCKER_REPO_BRANCH" ||
-    die "Не удалось получить обновления репозитория."
-  git -C "$DOCKER_PROJECT_DIR" merge --ff-only FETCH_HEAD ||
-    die "Обновление не является fast-forward; рабочие файлы не перезаписывались."
-  ok "Код установщика обновлён."
+  if ! git -C "$DOCKER_PROJECT_DIR" fetch --prune origin "$DOCKER_REPO_BRANCH" ||
+     ! git -C "$DOCKER_PROJECT_DIR" merge --ff-only FETCH_HEAD; then
+    [[ -z "$site_backup" ]] || {
+      cp -a "$site_backup/." "$DOCKER_PROJECT_DIR/docker/site/"
+      rm -rf -- "$site_backup"
+    }
+    die "Обновление не удалось; пользовательский сайт восстановлен."
+  fi
+  if [[ -n "$site_backup" ]]; then
+    rm -rf -- "$DOCKER_PROJECT_DIR/docker/site"
+    install -d -m 0755 "$DOCKER_PROJECT_DIR/docker/site"
+    cp -a "$site_backup/." "$DOCKER_PROJECT_DIR/docker/site/"
+    rm -rf -- "$site_backup"
+  fi
+  ok "Код установщика обновлён; пользовательский сайт сохранён."
   exec env TPROXY_BOOTSTRAP_DONE=1 bash "$DOCKER_PROJECT_DIR/tgweb-install.sh" docker update-runtime
 }
 docker_uninstall_command() {
