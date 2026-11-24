@@ -4440,16 +4440,16 @@ install_admin_panel() {
 
   if [[ "$WEB_SERVER" == "caddy" ]]; then
     python3 - "$panel_base" "$RELAY_PORT" <<'PYTHON'
-import pathlib, sys
+import pathlib, re, sys
 path = pathlib.Path("/etc/caddy/Caddyfile")
 base, relay = sys.argv[1:3]
 text = path.read_text()
-needle = f"reverse_proxy 127.0.0.1:{relay} {{"
 if f"handle /{base}/*" not in text:
-    if needle not in text:
+    match = re.search(r"(?m)^[ \\t]*reverse_proxy 127\\.0\\.0\\.1:" + re.escape(relay) + r"(?:[ \\t]*\\{)?[ \\t]*$", text)
+    if not match:
         raise SystemExit("Caddyfile relay route not found")
     block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765 {{\n\t\t\theader_up X-Real-IP {{http.request.remote.host}}\n\t\t}}\n\t}}\n\n\t"
-    text = text.replace(needle, block + needle, 1)
+    text = text[:match.start()] + block + text[match.start():]
     path.write_text(text)
 PYTHON
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || {
