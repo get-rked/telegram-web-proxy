@@ -26,6 +26,7 @@ services:
     environment:
       TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
+      MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
     command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json"]
     volumes:
       - ./docker/config:/etc/tproxy-server:ro
@@ -174,6 +175,7 @@ services:
       - panel-data:/var/lib/tproxy-panel
       - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
       - ./docker/profiles:/var/lib/tproxy-profiles:rw
+      - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:ro
     networks: [proxy-internal]
     security_opt: [no-new-privileges:true]
     read_only: true
