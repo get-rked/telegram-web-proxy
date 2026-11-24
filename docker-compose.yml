@@ -1,6 +1,7 @@
 name: telegram-web-proxy
 services:
   bootstrap:
+    profiles: ["setup"]
     build:
       context: .
       dockerfile: docker/Dockerfile.bootstrap
