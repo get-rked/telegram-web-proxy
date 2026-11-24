@@ -286,7 +286,7 @@ func (a *application) backupItemAPI(w http.ResponseWriter,r *http.Request) {
 	}
 	if len(parts)==2 && parts[1]=="restore" && r.Method==http.MethodPost {
 		if !a.sameOriginMutation(w,r){return}
-		if err:=a.restoreBackup(parts[0]);err!=nil{http.Error(w,"backup restore failed; archive or secret consistency check did not pass",400);return}
+		if err:=a.restoreBackup(parts[0]);err!=nil{http.Error(w,"backup validation or restore failed; check panel logs",400);return}
 		a.audit("backup.restore:"+parts[0]);jsonResponse(w,map[string]string{"status":"restored","note":"Relay will validate the restored configuration; MTProxy will reload the synchronized secret list."});return
 	}
 	http.Error(w,"not found",404)
