@@ -82,6 +82,7 @@ start_proxy() {
     /usr/local/bin/mtproto-proxy \
         -p 8888 \
         -H 2398 \
+        --http-stats \
         "$@" \
         --aes-pwd "$DATA_DIR/proxy-secret" "$DATA_DIR/proxy-multi.conf" \
         -M "${MTPROXY_WORKERS:-1}" \
