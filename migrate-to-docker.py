@@ -256,7 +256,16 @@ def main():
         if alt.is_file(): token_src = alt
     token_data = token_src.read_bytes() if token_src.is_file() else secrets.token_bytes(32)
     if len(token_data) != 32: raise MigrationError(f'token.key должен содержать ровно 32 байта: {token_src}')
-    config.update(public_hostname=domain, listen='127.0.0.1:8080', admin_listen='127.0.0.1:8081', public_dir='/srv/tproxy-site', token_key_file='/etc/tproxy-server/token.key')
+    listen = config.get('listen', '127.0.0.1:8080')
+    if not isinstance(listen, str) or ':' not in listen:
+        raise MigrationError('Поле listen должно содержать loopback IP и TCP-порт.')
+    listen_host, listen_port = listen.rsplit(':', 1)
+    try:
+        if not ipaddress.ip_address(listen_host.strip('[]')).is_loopback or not 1 <= int(listen_port) <= 65535:
+            raise ValueError()
+    except ValueError:
+        raise MigrationError('Поле listen должно содержать loopback IP и допустимый TCP-порт.')
+    config.update(public_hostname=domain, admin_listen='127.0.0.1:8081', public_dir='/srv/tproxy-site', token_key_file='/etc/tproxy-server/token.key')
     config.pop('profiles_file', None)
     nat_info = ''
     nat_args = mt_env.get('MTPROXY_NAT_ARGS', '').strip()
@@ -273,7 +282,7 @@ def main():
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_WORKERS']): env['MTPROXY_WORKERS']='1'
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_MAX_CONNECTIONS']):
         raise MigrationError('MTPROXY_MAX_CONNECTIONS в mtproxy.env должен быть положительным целым числом.')
-    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_MAX_CONNECTIONS': env['MTPROXY_MAX_CONNECTIONS'], 'MTPROXY_NAT_INFO': nat_info}
+    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'TPROXY_LISTEN': listen, 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_MAX_CONNECTIONS': env['MTPROXY_MAX_CONNECTIONS'], 'MTPROXY_NAT_INFO': nat_info}
     env_text = update_env_text(env_path, env_updates).decode()
     outputs = [
         (repo/'docker/config/config.json', (json.dumps(config, indent=2)+'\n').encode(), 0o600),
