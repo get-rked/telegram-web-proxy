@@ -2841,7 +2841,6 @@ restore_command() {
     mtproxy.service
     tproxy-server.service
     tproxy-firewall.service
-    tproxy-panel.service
     refresh-mtproxy-config.timer
   )
   web_server="$(cat "$CONFIG_DIR/web-server" 2>/dev/null || true)"
