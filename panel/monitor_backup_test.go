@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,4 +63,39 @@ func TestRestoreRejectsDefaultSecretMismatch(t *testing.T) {
 	if err:=a.restoreBackup(backup.ID);err==nil{t.Fatal("restore accepted a mismatched default profile secret")}
 	after,err:=os.ReadFile(a.profiles);if err!=nil{t.Fatal(err)}
 	if string(before)!=string(after){t.Fatal("profiles changed after rejected restore")}
+}
+
+type monitorRoundTripper func(*http.Request) (*http.Response,error)
+func (fn monitorRoundTripper) RoundTrip(req *http.Request)(*http.Response,error){return fn(req)}
+
+func TestDiagnosticsChecksRelayAndMTProxy(t *testing.T) {
+	a:=testApp(t)
+	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
+		body:="ok\n"
+		switch req.URL.Path {case "/readyz":body="ready\n";case "/stats":body="uptime\t123\n"}
+		return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(bytes.NewBufferString(body)),Request:req},nil
+	})}
+	response:=httptest.NewRecorder()
+	a.diagnostics(response,httptest.NewRequest(http.MethodGet,"/admin/api/diagnostics",nil))
+	if response.Code!=http.StatusOK{t.Fatalf("status=%d body=%s",response.Code,response.Body.String())}
+	var result diagnosticsResponse
+	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
+	if len(result.Checks)!=4{t.Fatalf("expected four checks, got %+v",result.Checks)}
+	for _,check:=range result.Checks{if check.Status!="ok"{t.Fatalf("check failed: %+v",check)}}
+}
+
+func TestMetricsEndpointCollectsRelayAndMTProxyData(t *testing.T) {
+	a:=testApp(t)
+	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
+		body:="tproxy_sessions_live 7\n"
+		if req.URL.Path=="/stats"{body="uptime\t321\n"}
+		return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(bytes.NewBufferString(body)),Request:req},nil
+	})}
+	response:=httptest.NewRecorder()
+	a.metrics(response,httptest.NewRequest(http.MethodGet,"/admin/api/metrics",nil))
+	if response.Code!=http.StatusOK{t.Fatalf("status=%d body=%s",response.Code,response.Body.String())}
+	var result map[string]any
+	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
+	if result["relay"].(map[string]any)["tproxy_sessions_live"]!=float64(7){t.Fatalf("relay metric missing: %s",response.Body.String())}
+	if result["mtproxy"].(map[string]any)["uptime"]!="321"{t.Fatalf("MTProxy metric missing: %s",response.Body.String())}
 }
