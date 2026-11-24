@@ -2632,6 +2632,25 @@ docker_repair_bind_mount_permissions() {
   done
 }
 
+# The repository is deployed with umask 077, so a fresh clone can leave
+# public static files unreadable to relay (UID 10001). Make only the public
+# read/traverse bits available; preserve ownership, write bits and file content.
+docker_prepare_public_site_permissions() {
+  local site="$DOCKER_PROJECT_DIR/docker/site"
+  local config="$DOCKER_PROJECT_DIR/docker/config/config.json"
+
+  [[ -s "$config" ]] || return 0
+  if ! jq -e --arg site "$site" '.public_dir == $site' "$config" >/dev/null 2>&1; then
+    return 0
+  fi
+  [[ ! -L "$site" && -d "$site" && -f "$site/index.html" ]] ||
+    die "Публичный каталог Docker-сайта отсутствует или не содержит index.html: $site"
+  find "$site" -type d -exec chmod a+rx {} + ||
+    die "Не удалось открыть каталоги публичного сайта для чтения."
+  find "$site" -type f -exec chmod a+r {} + ||
+    die "Не удалось открыть файлы публичного сайта для чтения."
+}
+
 docker_install_fresh_command() {
   local proxy="$1" domain="$2" email="$3" relay_port="$4" admin_port="$5" secret="$6" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
   if [[ -z "$domain" ]]; then read -e -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
@@ -2768,6 +2787,8 @@ PY
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Первоначальная подготовка данных Docker..."
   docker_compose run --rm --no-deps bootstrap || die "Не удалось подготовить данные первоначальной установки."
+  info "Проверяю права публичного сайта..."
+  docker_prepare_public_site_permissions
   info "Исправляю права доступа к конфигурациям Docker..."
   docker_repair_bind_mount_permissions
   info "Запускаю Telegram Web Proxy..."
@@ -2893,6 +2914,7 @@ docker_update_runtime_command() {
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Проверка Compose-конфигурации..."
   docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
+  docker_prepare_public_site_permissions
   info "Применение обновления..."
   docker_compose --profile "$proxy" --profile mtproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
   docker_compose ps
