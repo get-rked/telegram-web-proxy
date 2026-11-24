@@ -28,6 +28,7 @@ jobs:
       - name: Bash syntax
         run: |
           bash -n tgweb-install.sh
+          sh -n docker/mtproxy/entrypoint.sh
 
       - name: ShellCheck
         run: shellcheck --severity=warning --shell=bash tgweb-install.sh
@@ -80,6 +81,8 @@ jobs:
         run: docker build -f docker/Dockerfile.panel -t tproxy-panel:test .
       - name: Build relay image
         run: docker build -f docker/Dockerfile.relay -t tproxy-relay:test .
+      - name: Build official MTProxy image
+        run: docker build -f docker/Dockerfile.mtproxy -t tproxy-mtproxy:test .
 
   docker-compose:
     name: Compose configuration validation
@@ -90,8 +93,9 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/replace-with-at-least-16-random-characters/ci-only-not-a-production-password/' .env
-          docker compose --profile caddy config --quiet
-          docker compose --profile nginx config --quiet
+          cp docker/mtproxy/secret.example docker/mtproxy/secret
+          docker compose --profile caddy --profile mtproxy config --quiet
+          docker compose --profile nginx --profile mtproxy config --quiet
           mkdir -p /tmp/nginx-certs
           openssl req -x509 -nodes -newkey rsa:2048 -days 1 -subj "/CN=localhost" \
             -keyout /tmp/nginx-certs/privkey.pem -out /tmp/nginx-certs/fullchain.pem
