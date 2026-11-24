@@ -79,9 +79,9 @@ class MigrationTests(unittest.TestCase):
             (source / "data/website/index.html").write_text("native-site")
             original_config = config_path.read_bytes()
             migrator.REPO = repo
+            with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), patch.object(migrator.os, "geteuid", return_value=0), patch.object(sys, "argv", ["migrate-to-docker.py", "--source-dir", str(source)]):
+                self.assertEqual(migrator.main(), 0)
             with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), patch.object(migrator.os, "geteuid", return_value=0), patch.object(sys, "argv", ["migrate-to-docker.py", "--source-dir", str(source), "--apply"]):
-                 patch.object(migrator.os, "geteuid", return_value=0), \
-                 patch.object(sys, "argv", ["migrate-to-docker.py", "--source-dir", str(source), "--apply"]):
                 self.assertEqual(migrator.main(), 0)
             migrated = json.loads((repo / "docker/config/config.json").read_text())
             self.assertEqual(migrated["listen"], "127.0.0.1:8080")
