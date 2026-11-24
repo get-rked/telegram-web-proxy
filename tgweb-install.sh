@@ -773,18 +773,22 @@ preflight_system() {
   for pkg in "${required_packages[@]}"; do
     package_installed "$pkg" || missing_packages+=("$pkg")
   done
-  if command -v go >/dev/null 2>&1; then
-    version="$(go version 2>/dev/null || true)"
-    go_minor="$(go env GOVERSION 2>/dev/null | sed -E 's/^go1\.([0-9]+).*/\1/')"
+  local_go_bin=""
+  if [[ -x "/opt/go${GO_FALLBACK_VERSION}/bin/go" ]]; then
+    local_go_bin="/opt/go${GO_FALLBACK_VERSION}/bin/go"
+  elif command -v go >/dev/null 2>&1; then
+    local_go_bin="$(command -v go)"
+  fi
+  if [[ -n "$local_go_bin" ]]; then
+    version="$("$local_go_bin" version 2>/dev/null || true)"
+    go_minor="$("$local_go_bin" env GOVERSION 2>/dev/null | sed -nE 's/^go1\.([0-9]+)(\..*)?$/\1/p')"
     if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 24 )); then
       printf '  %-24s %s\n' "Go" "$(status_mark ok) $version"
     else
-      printf '  %-24s %s\n' "Go" "$(status_mark warn) версия ниже 1.20; потребуется Go $GO_FALLBACK_VERSION"
+      printf '  %-24s %s\n' "Go" "$(status_mark warn) обнаружена $version; требуется Go 1.24 или новее (установщик использует $GO_FALLBACK_VERSION)"
     fi
-  elif [[ -x "/opt/go${GO_FALLBACK_VERSION}/bin/go" ]]; then
-    printf '  %-24s %s\n' "Go" "$(status_mark ok) найден в /opt/go${GO_FALLBACK_VERSION}"
   else
-    printf '  %-24s %s\n' "Go" "$(status_mark warn) потребуется установить"
+    printf '  %-24s %s\n' "Go" "$(status_mark warn) потребуется установить Go $GO_FALLBACK_VERSION"
   fi
   if command -v caddy >/dev/null 2>&1; then
     version="$(caddy version 2>/dev/null | head -n1)"
@@ -1231,12 +1235,26 @@ install_mtproxy_backend() {
 }
 
 ensure_go() {
-  if command -v go >/dev/null 2>&1; then
-    local minor
-    minor="$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')"
+  local candidate minor version
+  # Prefer the installer-managed toolchain: PATH may still point to an old
+  # distro Go even though the required version is already present in /opt.
+  candidate="/opt/go${GO_FALLBACK_VERSION}/bin/go"
+  if [[ -x "$candidate" ]]; then
+    version="$("$candidate" version 2>/dev/null || true)"
+    minor="$("$candidate" env GOVERSION 2>/dev/null | sed -nE 's/^go1\.([0-9]+)(\..*)?$/\1/p')"
     if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 24 )); then
-      GO_BIN="$(command -v go)"
-      ok "Go: $(go version)"
+      GO_BIN="$candidate"
+      ok "Go: $version (управляемая версия)"
+      return 0
+    fi
+  fi
+  if command -v go >/dev/null 2>&1; then
+    candidate="$(command -v go)"
+    version="$("$candidate" version 2>/dev/null || true)"
+    minor="$("$candidate" env GOVERSION 2>/dev/null | sed -nE 's/^go1\.([0-9]+)(\..*)?$/\1/p')"
+    if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 24 )); then
+      GO_BIN="$candidate"
+      ok "Go: $version"
       return 0
     fi
   fi
@@ -4543,12 +4561,19 @@ if f"handle /{base}/*" not in text:
     text = text[:match.start()] + block + text[match.start():]
     path.write_text(text)
 PYTHON
+    # Normalize the file after editing so Caddy does not emit a formatting warning.
+    /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || {
+      rm -rf "$source_tmp"; die "Не удалось отформатировать Caddyfile."
+    }
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || {
       rm -rf "$source_tmp"; die "Проверка Caddyfile после добавления панели не пройдена."
     }
-    systemctl reload caddy.service || systemctl restart caddy.service || {
-      rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Caddy."
-    }
+    # This unit may not define ExecReload; use Caddy's native admin API reload.
+    if ! TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+      systemctl restart caddy.service || {
+        rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Caddy."
+      }
+    fi
   else
     python3 - "$panel_base" <<'PYTHON'
 import pathlib, sys
