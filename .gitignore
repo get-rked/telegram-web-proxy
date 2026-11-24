@@ -4,3 +4,5 @@
 /docker/config/token.key
 /docker/mtproxy/secret
 /docker/mtproxy/certs/
+
+/docker/profiles/profiles.json
