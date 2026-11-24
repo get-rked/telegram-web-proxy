@@ -305,7 +305,7 @@ prompt_value() {
   local __var="$1" label="$2" validator="$3"
   local input err
   while :; do
-    read -r -p "$label: " input || die "ввод прерван"
+    read -e -r -p "$label: " input || die "ввод прерван"
     if [[ -z "$input" ]]; then echo "  ⚠️  обязательно"; continue; fi
     if err="$("$validator" "$input")"; then
       printf -v "$__var" '%s' "$input"; return 0
@@ -319,7 +319,7 @@ prompt_port() {
   local var="$1" label="$2" default="$3"
   local input err
   while :; do
-    read -r -p "$label [$default]: " input || die "ввод прерван"
+    read -e -r -p "$label [$default]: " input || die "ввод прерван"
     input="${input:-$default}"
     if ! err="$(validate_port "$input")"; then
       echo "  ⚠️  $err"; continue
@@ -339,7 +339,7 @@ prompt_port() {
 confirm() {
   local q="$1" ans
   if [[ "$ASSUME_YES" -eq 1 ]]; then return 0; fi
-  read -r -p "$q [Y/n]: " ans || die "ввод прерван"
+  read -e -r -p "$q [Y/n]: " ans || die "ввод прерван"
   ans="${ans:-Y}"
   if [[ "$ans" =~ ^[YyДд] ]]; then return 0; else return 1; fi
 }
@@ -352,7 +352,7 @@ prompt_secret() {
   if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
     local default_choice=1
     [[ "$SECRET_PREFIX_MODE" == "dd" ]] && default_choice=2
-    read -r -p "Формат секрета: [1] обычный  [2] dd-префикс: " format_choice
+    read -e -r -p "Формат секрета: [1] обычный  [2] dd-префикс: " format_choice
     case "${format_choice:-$default_choice}" in
       1) SECRET_PREFIX_MODE="plain" ;;
       2) SECRET_PREFIX_MODE="dd" ;;
@@ -360,7 +360,7 @@ prompt_secret() {
     esac
   fi
   while :; do
-    read -r -p "Сгенерировать? [Y] / ввести свой [n]: " choice
+    read -e -r -p "Сгенерировать? [Y] / ввести свой [n]: " choice
     choice="${choice:-Y}"
     if [[ "$choice" =~ ^[YyДд] ]]; then
       SECRET_ARG="$(openssl rand -hex 16)"
@@ -369,8 +369,8 @@ prompt_secret() {
       return 0
     fi
     local s1 s2
-    read -r -s -p "Секрет: " s1; echo
-    read -r -s -p "Повтор: " s2; echo
+    read -e -r -s -p "Секрет: " s1; echo
+    read -e -r -s -p "Повтор: " s2; echo
     if [[ "$s1" != "$s2" ]]; then echo "  ⚠️  не совпало"; continue; fi
     if ! [[ "$s1" =~ ^([0-9a-f]{32}|dd[0-9a-f]{32})$ ]]; then
       echo "  ⚠️  32 hex (опционально dd-префикс)"; continue
@@ -402,25 +402,25 @@ interactive_fill() {
 
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then
     echo "Веб-сервер: [1] Caddy (по умолчанию)  [2] Nginx"
-    read -r -p "Выбор [1-2]: " input || die "ввод прерван"
+    read -e -r -p "Выбор [1-2]: " input || die "ввод прерван"
     case "${input:-1}" in 1) WEB_SERVER=caddy ;; 2) WEB_SERVER=nginx ;; *) die "Выбери 1 или 2" ;; esac
   fi
 
   while :; do
-    read -r -p "Домен (A-запись должна вести на IP адрес сервера): " input || die "ввод прерван"
+    read -e -r -p "Домен (A-запись должна вести на IP адрес сервера): " input || die "ввод прерван"
     [[ -n "$input" ]] || { echo "  ⚠️  Укажи доменное имя"; continue; }
     if err="$(validate_hostname "$input")"; then HOSTNAME_ARG="$input"; break; fi
     echo "  ⚠️  $err"
   done
 
   while :; do
-    read -r -p "Email для Let's Encrypt: " input || die "ввод прерван"
+    read -e -r -p "Email для Let's Encrypt: " input || die "ввод прерван"
     [[ -n "$input" ]] || { echo "  ⚠️  Укажи email"; continue; }
     if err="$(validate_email "$input")"; then EMAIL_ARG="$input"; break; fi
     echo "  ⚠️  $err"
   done
 
-  read -r -p "Base path [автоматически] (none — использовать корень домена): " input || die "ввод прерван"
+  read -e -r -p "Base path [автоматически] (none — использовать корень домена): " input || die "ввод прерван"
   if [[ -n "$input" ]]; then
     validate_base_path "$input" >/dev/null || die "Некорректный base path"
     BASE_PATH_ARG="$input"
@@ -441,13 +441,13 @@ interactive_fill() {
   WORKERS_ARG="${WORKERS_ARG:-1}"
   MAXCONN_ARG="${MAXCONN_ARG:-4096}"
   while :; do
-    read -r -p "Количество MTProxy workers [$WORKERS_ARG]: " input || die "ввод прерван"
+    read -e -r -p "Количество MTProxy workers [$WORKERS_ARG]: " input || die "ввод прерван"
     input="${input:-$WORKERS_ARG}"
     if [[ "$input" =~ ^[1-9][0-9]*$ ]] && (( input <= 256 )); then WORKERS_ARG="$input"; break; fi
     echo "  ⚠️  workers должен быть числом от 1 до 256"
   done
   while :; do
-    read -r -p "MTProxy max-connections [$MAXCONN_ARG]: " input || die "ввод прерван"
+    read -e -r -p "MTProxy max-connections [$MAXCONN_ARG]: " input || die "ввод прерван"
     input="${input:-$MAXCONN_ARG}"
     if [[ "$input" =~ ^[1-9][0-9]*$ ]]; then MAXCONN_ARG="$input"; break; fi
     echo "  ⚠️  max-connections должен быть положительным числом"
@@ -2063,7 +2063,7 @@ run_config() {
       ui_option "$index" "◆" "$profile_name · $carrier_mode"
     done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https")] | @tsv' "$profiles")
     ui_option 0 "←" "Назад"
-    read -r -p "Выбери профиль [0-$count]: " choice || die "ввод прерван"
+    read -e -r -p "Выбери профиль [0-$count]: " choice || die "ввод прерван"
     [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) || { info "Просмотр отменён"; return 0; }
   fi
   index=$((choice - 1))
@@ -2210,7 +2210,7 @@ load_existing_config() {
 prompt_update_value() {
   local var="$1" label="$2" current="$3" validator="$4" input err
   while :; do
-    read -r -p "$label [$current] (Enter — оставить): " input || die "ввод прерван"
+    read -e -r -p "$label [$current] (Enter — оставить): " input || die "ввод прерван"
     input="${input:-$current}"
     if err="$("$validator" "$input")"; then printf -v "$var" '%s' "$input"; return 0; fi
     echo "  ⚠️  $err — попробуй ещё раз"
@@ -2220,7 +2220,7 @@ prompt_update_value() {
 prompt_update_port() {
   local var="$1" label="$2" current="$3" input err
   while :; do
-    read -r -p "$label [$current] (Enter — оставить): " input || die "ввод прерван"
+    read -e -r -p "$label [$current] (Enter — оставить): " input || die "ввод прерван"
     input="${input:-$current}"
     if ! err="$(validate_port "$input")"; then echo "  ⚠️  $err"; continue; fi
     if [[ "$input" != "$current" ]] && port_in_use "$input"; then echo "  ⚠️  порт $input уже занят"; continue; fi
@@ -2230,16 +2230,16 @@ prompt_update_port() {
 
 prompt_update_secret() {
   local answer s1 s2
-  read -r -p "Секрет MTProxy [текущий сохранится] (Enter — оставить, n — заменить): " answer || die "ввод прерван"
+  read -e -r -p "Секрет MTProxy [текущий сохранится] (Enter — оставить, n — заменить): " answer || die "ввод прерван"
   [[ "$answer" =~ ^[Nn]$ ]] || return 0
   while :; do
-    read -r -s -p "Новый секрет (Enter — сгенерировать): " s1 || die "ввод прерван"; echo
+    read -e -r -s -p "Новый секрет (Enter — сгенерировать): " s1 || die "ввод прерван"; echo
     if [[ -z "$s1" ]]; then
       SECRET_ARG="$(openssl rand -hex 16)"
       [[ "$SECRET_PREFIX_MODE" == "dd" ]] && SECRET_ARG="dd$SECRET_ARG"
       info "Сгенерирован новый секрет"; return 0
     fi
-    read -r -s -p "Повторите секрет: " s2 || die "ввод прерван"; echo
+    read -e -r -s -p "Повторите секрет: " s2 || die "ввод прерван"; echo
     [[ "$s1" == "$s2" ]] || { echo "  ⚠️  секреты не совпадают"; continue; }
     validate_secret "$s1" >/dev/null || { echo "  ⚠️  Неверный формат секрета"; continue; }
     SECRET_ARG="$s1"; return 0
@@ -2266,13 +2266,13 @@ interactive_update_fill() {
 
   local input
   while :; do
-    read -r -p "MTProxy workers [$WORKERS_ARG] (Enter — оставить): " input || die "ввод прерван"
+    read -e -r -p "MTProxy workers [$WORKERS_ARG] (Enter — оставить): " input || die "ввод прерван"
     input="${input:-$WORKERS_ARG}"
     if [[ "$input" =~ ^[1-9][0-9]*$ ]] && (( input <= 256 )); then WORKERS_ARG="$input"; break; fi
     echo "  ⚠️  workers должен быть числом от 1 до 256"
   done
   while :; do
-    read -r -p "MTProxy max connections [$MAXCONN_ARG] (Enter — оставить): " input || die "ввод прерван"
+    read -e -r -p "MTProxy max connections [$MAXCONN_ARG] (Enter — оставить): " input || die "ввод прерван"
     input="${input:-$MAXCONN_ARG}"
     if [[ "$input" =~ ^[1-9][0-9]*$ ]]; then MAXCONN_ARG="$input"; break; fi
     echo "  ⚠️  max connections должен быть положительным числом"
@@ -2595,7 +2595,7 @@ docker_prompt_secret() {
       echo "Формат секрета Web Proxy:"
       echo "  1) Обычный — 32 hex-символа"
       echo "  2) С префиксом dd — для обфускации"
-      read -r -p "Выбор [1-2, по умолчанию 1]: " format_choice || die "Ввод прерван."
+      read -e -r -p "Выбор [1-2, по умолчанию 1]: " format_choice || die "Ввод прерван."
       case "${format_choice:-1}" in
         1) SECRET_PREFIX_MODE="plain" ;;
         2) SECRET_PREFIX_MODE="dd" ;;
@@ -2607,14 +2607,14 @@ docker_prompt_secret() {
       [[ "$SECRET_PREFIX_MODE" == dd && "$SECRET_ARG" != dd* ]] && die "Для выбранного формата секрет должен начинаться с dd."
       [[ "$SECRET_PREFIX_MODE" == plain && "$SECRET_ARG" == dd* ]] && die "Уберите префикс dd у секрета."
     else
-      read -r -p "Сгенерировать секрет автоматически? [Y/n]: " generate_choice || die "Ввод прерван."
+      read -e -r -p "Сгенерировать секрет автоматически? [Y/n]: " generate_choice || die "Ввод прерван."
       if [[ ! "$generate_choice" =~ ^[Nn]$ ]]; then
         SECRET_ARG="$(openssl rand -hex 16)"
         [[ "$SECRET_PREFIX_MODE" == "dd" ]] && SECRET_ARG="dd$SECRET_ARG"
       else
       while :; do
-        read -r -s -p "Секрет (32 hex): " first || die "Ввод прерван."; echo
-        read -r -s -p "Повторите секрет: " second || die "Ввод прерван."; echo
+        read -e -r -s -p "Секрет (32 hex): " first || die "Ввод прерван."; echo
+        read -e -r -s -p "Повторите секрет: " second || die "Ввод прерван."; echo
         [[ "$first" == "$second" ]] || { echo "Секреты не совпадают."; continue; }
         validate_secret "$first" >/dev/null || { echo "Неверный формат секрета."; continue; }
         if [[ "$SECRET_PREFIX_MODE" == "dd" && "$first" != dd* ]]; then echo "Для выбранного формата нужен префикс dd."; continue; fi
@@ -2630,10 +2630,10 @@ docker_prompt_secret() {
 
 docker_install_fresh_command() {
   local proxy="$1" domain="$2" email="$3" relay_port="$4" admin_port="$5" secret="$6" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
-  if [[ -z "$domain" ]]; then read -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
+  if [[ -z "$domain" ]]; then read -e -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
   domain="${domain,,}"
   validate_hostname "$domain" >/dev/null || die "Некорректное доменное имя: $domain"
-  if [[ -z "$email" ]]; then read -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
+  if [[ -z "$email" ]]; then read -e -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
   validate_email "$email" >/dev/null || die "Некорректный email: $email"
   getent ahostsv4 "$domain" >/dev/null 2>&1 || die "Домен $domain не разрешается в DNS. Сначала настрой A-запись."
 
@@ -2726,16 +2726,16 @@ docker_install_command() {
       echo "Выбери reverse proxy:"
       echo "  1) Caddy (рекомендуется, автоматический TLS)"
       echo "  2) Nginx (требуются готовые TLS-сертификаты)"
-      read -r -p "Выбор [1-2, по умолчанию 1]: " choice || die "Ввод прерван."
+      read -e -r -p "Выбор [1-2, по умолчанию 1]: " choice || die "Ввод прерван."
       case "${choice:-1}" in 1) proxy=caddy ;; 2) proxy=nginx ;; *) die "Установка отменена." ;; esac
     fi
   fi
   [[ "$proxy" == caddy || "$proxy" == nginx ]] || die "Допустимы только Caddy или Nginx."
 
-  if [[ -z "$domain" ]]; then read -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
+  if [[ -z "$domain" ]]; then read -e -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
   domain="${domain,,}"
   validate_hostname "$domain" >/dev/null || die "Некорректное доменное имя: $domain"
-  if [[ -z "$email" ]]; then read -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
+  if [[ -z "$email" ]]; then read -e -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
   validate_email "$email" >/dev/null || die "Некорректный email: $email"
 
   command -v ss >/dev/null 2>&1 || die "Не найдена команда ss (пакет iproute2)."
@@ -2781,7 +2781,7 @@ docker_update_runtime_command() {
     echo "Выбери reverse proxy для обновления:"
     echo "  1) Caddy"
     echo "  2) Nginx"
-    read -r -p "Выбор [1-2]: " choice || die "ввод прерван"
+    read -e -r -p "Выбор [1-2]: " choice || die "ввод прерван"
     case "$choice" in 1) proxy=caddy ;; 2) proxy=nginx ;; *) die "Обновление отменено." ;; esac
     docker_write_state "$proxy"
   fi
@@ -2877,7 +2877,7 @@ docker_purge_command() {
   done
   if (( had_args == 0 )) && [[ "$NONINTERACTIVE" != "1" ]]; then
     local volume_choice
-    read -r -p "Удалить также именованные volumes (панель, TLS, MTProxy)? [y/N]: " volume_choice || die "Ввод прерван."
+    read -e -r -p "Удалить также именованные volumes (панель, TLS, MTProxy)? [y/N]: " volume_choice || die "Ввод прерван."
     case "$volume_choice" in y|Y|yes|YES) remove_volumes=1 ;; *) remove_volumes=0 ;; esac
   fi
   ASSUME_YES="$yes"
@@ -2892,7 +2892,7 @@ docker_purge_command() {
   confirm "Продолжить очистку?" || { info "Очистка отменена."; return 0; }
   if (( remove_volumes )); then
     if [[ "$ASSUME_YES" -eq 0 ]]; then
-      read -r -p "Для удаления именованных томов введи DELETE VOLUMES: " phrase || die "ввод прерван"
+      read -e -r -p "Для удаления именованных томов введи DELETE VOLUMES: " phrase || die "ввод прерван"
       [[ "$phrase" == "DELETE VOLUMES" ]] || die "Удаление томов отменено."
     fi
     docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans --rmi local --volumes
@@ -2968,7 +2968,7 @@ docker_menu() {
     ui_option 8 "▣" "Резервная копия файлов проекта"
     ui_option 9 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-9]: " choice || die "ввод прерван"
+    read -e -r -p "Выбор [1-9]: " choice || die "ввод прерван"
     case "$choice" in
       1) docker_install_command ;;
       2) docker_update_command ;;
@@ -2981,7 +2981,7 @@ docker_menu() {
       9|"") return 0 ;;
       *) warn "Выбери пункт от 1 до 9." ;;
     esac
-    read -r -p "Enter — назад..." _ || true
+    read -e -r -p "Enter — назад..." _ || true
   done
 }
 
@@ -3382,7 +3382,7 @@ restore_command() {
       printf '%s\n' "${size%%[[:space:]]*}"
     done
     echo
-    read -r -p "Выбери номер архива (0 — отмена): " selection || die "Ввод прерван."
+    read -e -r -p "Выбери номер архива (0 — отмена): " selection || die "Ввод прерван."
     [[ "$selection" != "0" ]] || { info "Восстановление отменено."; RESTORE_CANCELLED=1; return 0; }
     [[ "$selection" =~ ^[0-9]+$ ]] || die "Неверный номер архива."
     selection=$((10#$selection))
@@ -3485,12 +3485,12 @@ show_deletion_menu() {
     ui_option 4 "✖" "Всё: прокси, decoy-сайт и веб-сервер"
     ui_option 5 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-5]: " choice
+    read -e -r -p "Выбор [1-5]: " choice
     case "$choice" in
-      1) KEEP_WEB_SERVER=1; run_uninstall; read -r -p "Enter — назад..." _ ;;
-      2) remove_decoy_site; read -r -p "Enter — назад..." _ ;;
-      3) remove_web_server_interactive; read -r -p "Enter — назад..." _ ;;
-      4) run_purge; read -r -p "Enter — назад..." _ ;;
+      1) KEEP_WEB_SERVER=1; run_uninstall; read -e -r -p "Enter — назад..." _ ;;
+      2) remove_decoy_site; read -e -r -p "Enter — назад..." _ ;;
+      3) remove_web_server_interactive; read -e -r -p "Enter — назад..." _ ;;
+      4) run_purge; read -e -r -p "Enter — назад..." _ ;;
       5) return 0 ;;
       *) warn "Выбери пункт от 1 до 5." ;;
     esac
@@ -3636,7 +3636,7 @@ profile_choose() {
   i=0
   while IFS= read -r name; do i=$((i+1)); ui_option "$i" "◆" "$name"; done < <(jq -r '.profiles[].name' "$PROFILES_FILE")
   ui_option 0 "←" "Назад"
-  read -r -p "Выбери профиль [0-$count]: " choice
+  read -e -r -p "Выбери профиль [0-$count]: " choice
   [[ "$choice" =~ ^[0-9]+$ ]] && (( choice > 0 && choice <= count )) || return 1
   PROFILE_NAME="$(jq -r --argjson i "$choice" '.profiles[$i-1].name' "$PROFILES_FILE")"
 }
@@ -3644,9 +3644,9 @@ profile_choose() {
 profile_secret_prompt() {
   local format choice first second
   echo "Формат секрета: [1] обычный (32 hex) [2] с префиксом dd"
-  read -r -p "Выбор [1-2]: " format
+  read -e -r -p "Выбор [1-2]: " format
   case "$format" in 1) format='plain' ;; 2) format='dd' ;; *) echo "Недопустимый выбор."; return 1 ;; esac
-  read -r -p "Сгенерировать секрет автоматически? [Y/n]: " choice
+  read -e -r -p "Сгенерировать секрет автоматически? [Y/n]: " choice
   if [[ ! "$choice" =~ ^[Nn]$ ]]; then
     PROFILE_SECRET="$(openssl rand -hex 16)"
     [[ "$format" == dd ]] && PROFILE_SECRET="dd$PROFILE_SECRET"
@@ -3654,8 +3654,8 @@ profile_secret_prompt() {
     return 0
   fi
   while :; do
-    read -r -s -p "Введите секрет: " first; echo
-    read -r -s -p "Повторите секрет: " second; echo
+    read -e -r -s -p "Введите секрет: " first; echo
+    read -e -r -s -p "Повторите секрет: " second; echo
     [[ "$first" == "$second" ]] || { echo "Секреты не совпадают."; continue; }
     valid_secret "$first" || { echo "Нужны 32 hex-символа, опционально dd."; continue; }
     if [[ "$format" == dd && "$first" != dd* ]]; then echo "Нужен префикс dd."; continue; fi
@@ -3703,7 +3703,7 @@ profile_import_menu() {
       printf '  %2d) %s\n' "$((i+1))" "${archives[$i]##*/}"
     fi
   done
-  read -r -p "Выбери архив (0 — отмена): " selection || return 0
+  read -e -r -p "Выбери архив (0 — отмена): " selection || return 0
   [[ "$selection" =~ ^[0-9]+$ ]] || { warn "Неверный номер."; return 0; }
   (( selection > 0 && selection <= ${#archives[@]} )) || return 0
   archive="${archives[selection-1]}"
@@ -3724,7 +3724,7 @@ profile_import_menu() {
         printf '  %2d) %s\n' "$((i+1))" "${profile_paths[$i]}"
       fi
     done
-    read -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
+    read -e -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
     [[ "$profile_choice" =~ ^[0-9]+$ ]] && ((profile_choice > 0 && profile_choice <= ${#profile_paths[@]})) || return 0
     profile_path="${profile_paths[profile_choice-1]}"
   else
@@ -3744,7 +3744,7 @@ profile_import_menu() {
   printf "\nПараметры профиля:\n  Имя: %s\n  Backend: %s\n  Carrier mode: %s\n  Секрет: скрыт\n" "$name" "$backend" "$mode"
   if [[ "$backend" != "$active_backend" ]]; then
     echo "В текущей версии все профили используют один общий backend: $active_backend"
-    read -r -p "Переназначить импортируемый профиль на активный backend? [y/N]: " choice
+    read -e -r -p "Переназначить импортируемый профиль на активный backend? [y/N]: " choice
     if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
     backend="$active_backend"
   fi
@@ -3757,17 +3757,17 @@ profile_import_menu() {
   ui_option 2 "↻" "Заменить системный профиль default"
   ui_option 0 "←" "Отмена"
   echo
-  read -r -p "Выбор [0-2]: " target_mode || { rm -f "$extracted"; return 0; }
+  read -e -r -p "Выбор [0-2]: " target_mode || { rm -f "$extracted"; return 0; }
   case "$target_mode" in
     1)
-      read -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
+      read -e -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
       target="${target:-$name}"
       if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
       ;;
     2)
       target="default"
       [[ -s "$PROFILE_DIR/default/profile.json" ]] || { rm -f "$extracted"; warn "Профиль default не найден; заменить его невозможно."; return 0; }
-      read -r -p "Заменить текущий профиль default импортируемым профилем? [y/N]: " choice
+      read -e -r -p "Заменить текущий профиль default импортируемым профилем? [y/N]: " choice
       if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
       ;;
     0|"") rm -f "$extracted"; info "Импорт отменён."; return 0 ;;
@@ -3777,7 +3777,7 @@ profile_import_menu() {
   destination="$PROFILE_DIR/$target/profile.json"
   if [[ -e "$PROFILE_DIR/$target" ]]; then
     if [[ "$target" != "default" || "$target_mode" != "2" ]]; then
-      read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
+      read -e -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
       if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
     fi
   elif (( count >= 32 )); then rm -f "$extracted"; warn "Достигнут лимит 32 профиля."; return 0; fi
@@ -3842,16 +3842,16 @@ profile_menu() {
     ui_option 5 "⇧" "Импортировать профиль из резервной копии"
     ui_option 6 "←" "Назад"
     echo
-    read -r -p "Выбор [1-6]: " choice
+    read -e -r -p "Выбор [1-6]: " choice
     case "$choice" in
       1)
         count="$(jq ".profiles | length" "$PROFILES_FILE")"; (( count < 32 )) || { warn "Достигнут лимит 32 профиля."; continue; }
-        read -r -p "Имя профиля: " name
+        read -e -r -p "Имя профиля: " name
         valid_name "$name" && [[ ! -e "$PROFILE_DIR/$name" ]] || { warn "Имя недопустимо или уже занято."; continue; }
         profile_secret_prompt || continue
         if jq -e --arg s "$PROFILE_SECRET" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then warn "Секрет уже используется."; continue; fi
         echo "Carrier mode: [1] HTTPS [2] HTTPS с каналами [3] WebSocket [4] WebSocket с каналами"
-        read -r -p "Выбор [1-4]: " choice
+        read -e -r -p "Выбор [1-4]: " choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) warn "Недопустимый режим."; continue ;; esac
         backend="$(jq -r ".profiles[0].backend" "$PROFILES_FILE")"
         install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$name"
@@ -3863,7 +3863,7 @@ profile_menu() {
       2)
         profile_choose || continue
         echo "Carrier mode: [1] HTTPS [2] HTTPS с каналами [3] WebSocket [4] WebSocket с каналами"
-        read -r -p "Выбор [1-4]: " choice
+        read -e -r -p "Выбор [1-4]: " choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) warn "Недопустимый режим."; continue ;; esac
         file="$PROFILE_DIR/$PROFILE_NAME/profile.json"; tmp="$(mktemp "$file.XXXXXX")"
         jq --arg m "$mode" '.carrier_mode = $m' "$file" > "$tmp"
@@ -3876,7 +3876,7 @@ profile_menu() {
         count="$(jq ".profiles | length" "$PROFILES_FILE")"; (( count > 1 )) || { warn "Нельзя удалить последний профиль."; continue; }
         profile_choose || continue
         [[ "$PROFILE_NAME" != default ]] || { warn "Профиль default защищён."; continue; }
-        read -r -p "Удалить профиль $PROFILE_NAME? [y/N]: " selected
+        read -e -r -p "Удалить профиль $PROFILE_NAME? [y/N]: " selected
         [[ "$selected" =~ ^[YyДд]$ ]] || continue
         rm -rf -- "${PROFILE_DIR:?}/${PROFILE_NAME:?}"
         profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
@@ -3887,7 +3887,7 @@ profile_menu() {
       6) return 0 ;;
       *) warn "Неверный выбор." ;;
     esac
-    read -r -p "Enter — продолжить..." _
+    read -e -r -p "Enter — продолжить..." _
   done
 }
 upstream_menu() {
@@ -3903,11 +3903,11 @@ upstream_menu() {
       ui_option 2 "↻" "Обновить список локальных приложений"
       ui_option 3 "←" "Назад"
       echo
-      read -r -p "Выбор [1-3]: " answer
+      read -e -r -p "Выбор [1-3]: " answer
       case "$answer" in
         1)
           read -r -e -p "Каталог сайта [абсолютный путь]: " answer
-          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\n'; read -r -p 'Enter — продолжить...' _; return 0; }
+          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\n'; read -e -r -p 'Enter — продолжить...' _; return 0; }
           tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
           jq --arg d "$answer" 'del(.public_upstream) | .public_dir = $d' "$CONFIG_FILE" > "$tmp"
           break
@@ -3939,7 +3939,7 @@ upstream_menu() {
       ui_option 1 "↻" "Повторить поиск"
       ui_option 2 "←" "Назад"
       echo
-      read -r -p "Выбор [1-2]: " answer
+      read -e -r -p "Выбор [1-2]: " answer
       case "$answer" in 1) continue ;; *) return 0 ;; esac
     fi
 
@@ -3951,7 +3951,7 @@ upstream_menu() {
     ui_option "$((${#ports[@]}+1))" "↻" "Обновить список"
     ui_option "$((${#ports[@]}+2))" "←" "Назад"
     echo
-    read -r -p "Выбери приложение [1-$((${#ports[@]}+2))]: " answer
+    read -e -r -p "Выбери приложение [1-$((${#ports[@]}+2))]: " answer
     if [[ $answer == "$((${#ports[@]}+1))" ]]; then continue; fi
     if [[ $answer == "$((${#ports[@]}+2))" || -z $answer ]]; then return 0; fi
     if [[ $answer =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#ports[@]} )); then
@@ -3976,7 +3976,7 @@ upstream_menu() {
   fi
   systemctl restart tproxy-server
   printf '\n[OK] Публичный сайт настроен.\n'
-  read -r -p 'Нажми Enter, чтобы вернуться в меню...' _
+  read -e -r -p 'Нажми Enter, чтобы вернуться в меню...' _
 }
 carrier_tools_menu() {
   need_root
@@ -3988,7 +3988,7 @@ carrier_tools_menu() {
     ui_option 2 "⇄" "Публичный сайт (public_upstream)"
     ui_option 3 "←" "Назад"
     echo
-    read -r -p "Выбор [1-3]: " choice
+    read -e -r -p "Выбор [1-3]: " choice
     case "$choice" in
       1) profile_menu ;;
       2) upstream_menu ;;
@@ -4054,13 +4054,13 @@ show_tools_menu() {
     ui_option 5 "⟳" "Перезапустить все службы прокси"
     ui_option 6 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-6]: " choice
+    read -e -r -p "Выбор [1-6]: " choice
     case "$choice" in
-      1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
-      2) require_root; backup_command; read -r -p "Enter — назад..." _ ;;
-      3) require_root; RESTORE_CANCELLED=0; restore_command; (( RESTORE_CANCELLED == 1 )) || read -r -p "Enter — назад..." _ ;;
+      1) require_root; diagnostics_command || true; read -e -r -p "Enter — назад..." _ ;;
+      2) require_root; backup_command; read -e -r -p "Enter — назад..." _ ;;
+      3) require_root; RESTORE_CANCELLED=0; restore_command; (( RESTORE_CANCELLED == 1 )) || read -e -r -p "Enter — назад..." _ ;;
       4) carrier_tools_menu ;;
-      5) restart_proxy_services || true; read -r -p "Enter — назад..." _ ;;
+      5) restart_proxy_services || true; read -e -r -p "Enter — назад..." _ ;;
       6) return 0 ;;
       *) warn "Выбери пункт от 1 до 6." ;;
     esac
@@ -4077,7 +4077,7 @@ show_menu() {
   ui_option 6 "⏻" "Выход"
   ui_option 7 "◈" "Docker — установка и обслуживание"
   echo
-  read -r -p "Выбор [1-7]: " choice
+  read -e -r -p "Выбор [1-7]: " choice
   case "$choice" in
     1) MODE=install ;;
     2) MODE=update ;;
@@ -4124,12 +4124,12 @@ show_deletion_menu() {
     ui_option 4 "✖" "Всё: прокси, decoy-сайт и веб-сервер"
     ui_option 5 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-5]: " choice
+    read -e -r -p "Выбор [1-5]: " choice
     case "$choice" in
-      1) KEEP_WEB_SERVER=1; run_uninstall; read -r -p "Enter — назад..." _ ;;
-      2) remove_decoy_site; read -r -p "Enter — назад..." _ ;;
-      3) remove_web_server_interactive; read -r -p "Enter — назад..." _ ;;
-      4) run_purge; read -r -p "Enter — назад..." _ ;;
+      1) KEEP_WEB_SERVER=1; run_uninstall; read -e -r -p "Enter — назад..." _ ;;
+      2) remove_decoy_site; read -e -r -p "Enter — назад..." _ ;;
+      3) remove_web_server_interactive; read -e -r -p "Enter — назад..." _ ;;
+      4) run_purge; read -e -r -p "Enter — назад..." _ ;;
       5) return 0 ;;
       *) warn "Выбери пункт от 1 до 5." ;;
     esac
@@ -4275,7 +4275,7 @@ profile_choose() {
   i=0
   while IFS= read -r name; do i=$((i+1)); ui_option "$i" "◆" "$name"; done < <(jq -r '.profiles[].name' "$PROFILES_FILE")
   ui_option 0 "←" "Назад"
-  read -r -p "Выбери профиль [0-$count]: " choice
+  read -e -r -p "Выбери профиль [0-$count]: " choice
   [[ "$choice" =~ ^[0-9]+$ ]] && (( choice > 0 && choice <= count )) || return 1
   PROFILE_NAME="$(jq -r --argjson i "$choice" '.profiles[$i-1].name' "$PROFILES_FILE")"
 }
@@ -4283,9 +4283,9 @@ profile_choose() {
 profile_secret_prompt() {
   local format choice first second
   echo "Формат секрета: [1] обычный (32 hex) [2] с префиксом dd"
-  read -r -p "Выбор [1-2]: " format
+  read -e -r -p "Выбор [1-2]: " format
   case "$format" in 1) format='plain' ;; 2) format='dd' ;; *) echo "Недопустимый выбор."; return 1 ;; esac
-  read -r -p "Сгенерировать секрет автоматически? [Y/n]: " choice
+  read -e -r -p "Сгенерировать секрет автоматически? [Y/n]: " choice
   if [[ ! "$choice" =~ ^[Nn]$ ]]; then
     PROFILE_SECRET="$(openssl rand -hex 16)"
     [[ "$format" == dd ]] && PROFILE_SECRET="dd$PROFILE_SECRET"
@@ -4293,8 +4293,8 @@ profile_secret_prompt() {
     return 0
   fi
   while :; do
-    read -r -s -p "Введите секрет: " first; echo
-    read -r -s -p "Повторите секрет: " second; echo
+    read -e -r -s -p "Введите секрет: " first; echo
+    read -e -r -s -p "Повторите секрет: " second; echo
     [[ "$first" == "$second" ]] || { echo "Секреты не совпадают."; continue; }
     valid_secret "$first" || { echo "Нужны 32 hex-символа, опционально dd."; continue; }
     if [[ "$format" == dd && "$first" != dd* ]]; then echo "Нужен префикс dd."; continue; fi
@@ -4342,7 +4342,7 @@ profile_import_menu() {
       printf '  %2d) %s\n' "$((i+1))" "${archives[$i]##*/}"
     fi
   done
-  read -r -p "Выбери архив (0 — отмена): " selection || return 0
+  read -e -r -p "Выбери архив (0 — отмена): " selection || return 0
   [[ "$selection" =~ ^[0-9]+$ ]] || { warn "Неверный номер."; return 0; }
   (( selection > 0 && selection <= ${#archives[@]} )) || return 0
   archive="${archives[selection-1]}"
@@ -4363,7 +4363,7 @@ profile_import_menu() {
         printf '  %2d) %s\n' "$((i+1))" "${profile_paths[$i]}"
       fi
     done
-    read -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
+    read -e -r -p "Выбери профиль для импорта (0 — отмена): " profile_choice || return 0
     [[ "$profile_choice" =~ ^[0-9]+$ ]] && ((profile_choice > 0 && profile_choice <= ${#profile_paths[@]})) || return 0
     profile_path="${profile_paths[profile_choice-1]}"
   else
@@ -4383,7 +4383,7 @@ profile_import_menu() {
   printf "\nПараметры профиля:\n  Имя: %s\n  Backend: %s\n  Carrier mode: %s\n  Секрет: скрыт\n" "$name" "$backend" "$mode"
   if [[ "$backend" != "$active_backend" ]]; then
     echo "В текущей версии все профили используют один общий backend: $active_backend"
-    read -r -p "Переназначить импортируемый профиль на активный backend? [y/N]: " choice
+    read -e -r -p "Переназначить импортируемый профиль на активный backend? [y/N]: " choice
     if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
     backend="$active_backend"
   fi
@@ -4396,17 +4396,17 @@ profile_import_menu() {
   ui_option 2 "↻" "Заменить системный профиль default"
   ui_option 0 "←" "Отмена"
   echo
-  read -r -p "Выбор [0-2]: " target_mode || { rm -f "$extracted"; return 0; }
+  read -e -r -p "Выбор [0-2]: " target_mode || { rm -f "$extracted"; return 0; }
   case "$target_mode" in
     1)
-      read -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
+      read -e -r -p "Имя нового профиля [$name]: " target || { rm -f "$extracted"; return 0; }
       target="${target:-$name}"
       if ! valid_name "$target"; then rm -f "$extracted"; warn "Недопустимое имя профиля."; return 0; fi
       ;;
     2)
       target="default"
       [[ -s "$PROFILE_DIR/default/profile.json" ]] || { rm -f "$extracted"; warn "Профиль default не найден; заменить его невозможно."; return 0; }
-      read -r -p "Заменить текущий профиль default импортируемым профилем? [y/N]: " choice
+      read -e -r -p "Заменить текущий профиль default импортируемым профилем? [y/N]: " choice
       if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
       ;;
     0|"") rm -f "$extracted"; info "Импорт отменён."; return 0 ;;
@@ -4416,7 +4416,7 @@ profile_import_menu() {
   destination="$PROFILE_DIR/$target/profile.json"
   if [[ -e "$PROFILE_DIR/$target" ]]; then
     if [[ "$target" != "default" || "$target_mode" != "2" ]]; then
-      read -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
+      read -e -r -p "Профиль $target существует. Заменить его? [y/N]: " choice
       if [[ ! "$choice" =~ ^[YyДд]$ ]]; then rm -f "$extracted"; info "Импорт отменён."; return 0; fi
     fi
   elif (( count >= 32 )); then rm -f "$extracted"; warn "Достигнут лимит 32 профиля."; return 0; fi
@@ -4481,16 +4481,16 @@ profile_menu() {
     ui_option 5 "⇧" "Импортировать профиль из резервной копии"
     ui_option 6 "←" "Назад"
     echo
-    read -r -p "Выбор [1-6]: " choice
+    read -e -r -p "Выбор [1-6]: " choice
     case "$choice" in
       1)
         count="$(jq ".profiles | length" "$PROFILES_FILE")"; (( count < 32 )) || { warn "Достигнут лимит 32 профиля."; continue; }
-        read -r -p "Имя профиля: " name
+        read -e -r -p "Имя профиля: " name
         valid_name "$name" && [[ ! -e "$PROFILE_DIR/$name" ]] || { warn "Имя недопустимо или уже занято."; continue; }
         profile_secret_prompt || continue
         if jq -e --arg s "$PROFILE_SECRET" '.profiles[] | select((.secret | ltrimstr("dd")) == ($s | ltrimstr("dd")))' "$PROFILES_FILE" >/dev/null; then warn "Секрет уже используется."; continue; fi
         echo "Carrier mode: [1] HTTPS [2] HTTPS с каналами [3] WebSocket [4] WebSocket с каналами"
-        read -r -p "Выбор [1-4]: " choice
+        read -e -r -p "Выбор [1-4]: " choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) warn "Недопустимый режим."; continue ;; esac
         backend="$(jq -r ".profiles[0].backend" "$PROFILES_FILE")"
         install -d -o root -g tproxy -m 0750 "$PROFILE_DIR/$name"
@@ -4502,7 +4502,7 @@ profile_menu() {
       2)
         profile_choose || continue
         echo "Carrier mode: [1] HTTPS [2] HTTPS с каналами [3] WebSocket [4] WebSocket с каналами"
-        read -r -p "Выбор [1-4]: " choice
+        read -e -r -p "Выбор [1-4]: " choice
         case "$choice" in 1) mode=https ;; 2) mode=https-lanes ;; 3) mode=websocket ;; 4) mode=websocket-lanes ;; *) warn "Недопустимый режим."; continue ;; esac
         file="$PROFILE_DIR/$PROFILE_NAME/profile.json"; tmp="$(mktemp "$file.XXXXXX")"
         jq --arg m "$mode" '.carrier_mode = $m' "$file" > "$tmp"
@@ -4515,7 +4515,7 @@ profile_menu() {
         count="$(jq ".profiles | length" "$PROFILES_FILE")"; (( count > 1 )) || { warn "Нельзя удалить последний профиль."; continue; }
         profile_choose || continue
         [[ "$PROFILE_NAME" != default ]] || { warn "Профиль default защищён."; continue; }
-        read -r -p "Удалить профиль $PROFILE_NAME? [y/N]: " selected
+        read -e -r -p "Удалить профиль $PROFILE_NAME? [y/N]: " selected
         [[ "$selected" =~ ^[YyДд]$ ]] || continue
         rm -rf -- "${PROFILE_DIR:?}/${PROFILE_NAME:?}"
         profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
@@ -4526,7 +4526,7 @@ profile_menu() {
       6) return 0 ;;
       *) warn "Неверный выбор." ;;
     esac
-    read -r -p "Enter — продолжить..." _
+    read -e -r -p "Enter — продолжить..." _
   done
 }
 upstream_menu() {
@@ -4542,11 +4542,11 @@ upstream_menu() {
       ui_option 2 "↻" "Обновить список локальных приложений"
       ui_option 3 "←" "Назад"
       echo
-      read -r -p "Выбор [1-3]: " answer
+      read -e -r -p "Выбор [1-3]: " answer
       case "$answer" in
         1)
           read -r -e -p "Каталог сайта [абсолютный путь]: " answer
-          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\n'; read -r -p 'Enter — продолжить...' _; return 0; }
+          [[ $answer == /* && -d $answer ]] || { printf '[ОШИБКА] Каталог не найден или путь не абсолютный.\n'; read -e -r -p 'Enter — продолжить...' _; return 0; }
           tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
           jq --arg d "$answer" 'del(.public_upstream) | .public_dir = $d' "$CONFIG_FILE" > "$tmp"
           break
@@ -4578,7 +4578,7 @@ upstream_menu() {
       ui_option 1 "↻" "Повторить поиск"
       ui_option 2 "←" "Назад"
       echo
-      read -r -p "Выбор [1-2]: " answer
+      read -e -r -p "Выбор [1-2]: " answer
       case "$answer" in 1) continue ;; *) return 0 ;; esac
     fi
 
@@ -4590,7 +4590,7 @@ upstream_menu() {
     ui_option "$((${#ports[@]}+1))" "↻" "Обновить список"
     ui_option "$((${#ports[@]}+2))" "←" "Назад"
     echo
-    read -r -p "Выбери приложение [1-$((${#ports[@]}+2))]: " answer
+    read -e -r -p "Выбери приложение [1-$((${#ports[@]}+2))]: " answer
     if [[ $answer == "$((${#ports[@]}+1))" ]]; then continue; fi
     if [[ $answer == "$((${#ports[@]}+2))" || -z $answer ]]; then return 0; fi
     if [[ $answer =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#ports[@]} )); then
@@ -4615,7 +4615,7 @@ upstream_menu() {
   fi
   systemctl restart tproxy-server
   printf '\n[OK] Публичный сайт настроен.\n'
-  read -r -p 'Нажми Enter, чтобы вернуться в меню...' _
+  read -e -r -p 'Нажми Enter, чтобы вернуться в меню...' _
 }
 carrier_tools_menu() {
   need_root
@@ -4627,7 +4627,7 @@ carrier_tools_menu() {
     ui_option 2 "⇄" "Публичный сайт (public_upstream)"
     ui_option 3 "←" "Назад"
     echo
-    read -r -p "Выбор [1-3]: " choice
+    read -e -r -p "Выбор [1-3]: " choice
     case "$choice" in
       1) profile_menu ;;
       2) upstream_menu ;;
@@ -4693,13 +4693,13 @@ show_tools_menu() {
     ui_option 5 "⟳" "Перезапустить все службы прокси"
     ui_option 6 "↩" "Назад"
     echo
-    read -r -p "Выбор [1-6]: " choice
+    read -e -r -p "Выбор [1-6]: " choice
     case "$choice" in
-      1) require_root; diagnostics_command || true; read -r -p "Enter — назад..." _ ;;
-      2) require_root; backup_command; read -r -p "Enter — назад..." _ ;;
-      3) require_root; restore_command; read -r -p "Enter — назад..." _ ;;
+      1) require_root; diagnostics_command || true; read -e -r -p "Enter — назад..." _ ;;
+      2) require_root; backup_command; read -e -r -p "Enter — назад..." _ ;;
+      3) require_root; restore_command; read -e -r -p "Enter — назад..." _ ;;
       4) carrier_tools_menu ;;
-      5) restart_proxy_services || true; read -r -p "Enter — назад..." _ ;;
+      5) restart_proxy_services || true; read -e -r -p "Enter — назад..." _ ;;
       6) return 0 ;;
       *) warn "Выбери пункт от 1 до 6." ;;
     esac
@@ -4718,7 +4718,7 @@ show_menu() {
   ui_option 8 "✖" "Очистить проект (образы; тома отдельно)"
   ui_option 9 "⏻" "Выход"
   echo
-  read -r -p "Выбор [1-9]: " choice
+  read -e -r -p "Выбор [1-9]: " choice
   case "$choice" in
     1) MODE=docker-install ;;
     2) MODE=docker-update ;;
@@ -4745,35 +4745,35 @@ main() {
       case "$MODE" in
         docker-install)
           docker_install_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-update)
           docker_update_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-status)
           docker_status_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-restart)
           docker_restart_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-logs)
           docker_logs_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-backup)
           docker_backup_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-uninstall)
           docker_uninstall_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
         docker-purge)
           docker_purge_command
-          read -r -p "Enter — вернуться в меню..." _ || true
+          read -e -r -p "Enter — вернуться в меню..." _ || true
           ;;
       esac
     done
