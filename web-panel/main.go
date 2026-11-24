@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -679,6 +681,117 @@ func (a *App) profileBackupDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func (a *App) backupArchiveDownload(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/"+a.base+"/api/backups/download/")
+	if !regexp.MustCompile("^tproxy-backup-[0-9]{8}-[0-9]{6}\\.tar\\.gz$").MatchString(name) || filepath.Base(name) != name {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(a.backupDir, name)
+	if _, err := os.Stat(path); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
+	http.ServeFile(w, r, path)
+}
+
+func (a *App) backupArchiveImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		errOut(w, http.StatusBadRequest, "Не удалось прочитать архив или превышен лимит 1 ГБ")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	file, header, err := r.FormFile("archive")
+	if err != nil || header.Size == 0 || header.Size > 1<<30 {
+		errOut(w, http.StatusBadRequest, "Выберите архив полной резервной копии размером до 1 ГБ")
+		return
+	}
+	defer file.Close()
+	if err := os.MkdirAll(a.backupDir, 0700); err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось подготовить каталог резервных копий")
+		return
+	}
+	tmp, err := os.CreateTemp(a.backupDir, ".backup-import-*.tmp")
+	if err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось сохранить архив")
+		return
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := io.Copy(tmp, io.LimitReader(file, (1<<30)+1)); err != nil {
+		tmp.Close()
+		errOut(w, http.StatusBadRequest, "Не удалось сохранить архив")
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		errOut(w, http.StatusInternalServerError, "Не удалось записать архив")
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось закрыть архив")
+		return
+	}
+	if err := validateFullBackupArchive(tmpPath); err != nil {
+		errOut(w, http.StatusBadRequest, "Файл не является корректным архивом полной резервной копии")
+		return
+	}
+	var target string
+	for i := 0; i < 100; i++ {
+		stamp := time.Now().Add(time.Duration(i) * time.Second).Format("20060102-150405")
+		target = filepath.Join(a.backupDir, "tproxy-backup-"+stamp+".tar.gz")
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			break
+		}
+		target = ""
+	}
+	if target == "" {
+		errOut(w, http.StatusConflict, "Не удалось подобрать имя для архива")
+		return
+	}
+	if err := os.Chmod(tmpPath, 0600); err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось защитить архив")
+		return
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось поместить архив в каталог резервных копий")
+		return
+	}
+	jsonOut(w, map[string]string{"status": "imported", "name": filepath.Base(target)})
+}
+
+func validateFullBackupArchive(path string) error {
+	file, err := os.Open(path)
+	if err != nil { return err }
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
+	if err != nil { return err }
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	entries := 0
+	for {
+		header, err := tr.Next()
+		if err == io.EOF { break }
+		if err != nil { return err }
+		entries++
+		if entries > 100000 { return fmt.Errorf("too many archive entries") }
+		if header.Name == "" || filepath.IsAbs(header.Name) || strings.Contains(header.Name, "..") {
+			return fmt.Errorf("invalid archive path")
+		}
+	}
+	if entries == 0 { return fmt.Errorf("empty archive") }
+	return nil
+}
+
 func redactConfig(value any) any {
 	switch item := value.(type) {
 	case map[string]any:
@@ -839,6 +952,8 @@ func (a *App) routes() http.Handler {
 		a.profileAction(w, r)
 	}))
 	mux.HandleFunc(prefix+"/api/profile-backups/", a.auth(a.profileBackupDownload))
+	mux.HandleFunc(prefix+"/api/backups/import", a.auth(a.backupArchiveImport))
+	mux.HandleFunc(prefix+"/api/backups/download/", a.auth(a.backupArchiveDownload))
 	mux.HandleFunc(prefix+"/api/diagnostics", a.auth(a.diagnostics))
 	mux.HandleFunc(prefix+"/api/backups", a.auth(a.backups))
 
