@@ -26,7 +26,7 @@ jobs:
         run: gofmt -w .
       - name: Download pinned modules
         working-directory: web-panel
-        run: go mod download
+        run: go mod tidy
       - name: Test
         working-directory: web-panel
         run: go test ./...
