@@ -296,7 +296,7 @@ def main():
             if web_code not in ("200", "301", "302"):
                 proxy_logs, _ = compose(["logs", "--no-color", "--tail=80", proxy, "relay"], False)
                 if proxy_logs:
-                    print("\\nЛоги reverse proxy и relay:\\n" + proxy_logs)
+                    print("\nЛоги reverse proxy и relay:\n" + proxy_logs)
                 raise MigrationAbort(
                     "Web Proxy не отвечает через HTTPS (HTTP {}). Проверка upstream не пройдена.".format(
                         web_code or "нет ответа"
