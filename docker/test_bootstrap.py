@@ -20,17 +20,20 @@ class BootstrapTests(unittest.TestCase):
         self.profiles_dir = root / "profiles"
         self.panel_auth_dir = root / "panel-auth"
         self.panel_credentials_dir = root / "panel-credentials"
+        self.panel_route_dir = root / "panel-route"
         self.config_dir.mkdir()
         self.mtproxy_dir.mkdir()
         self.profiles_dir.mkdir()
         self.panel_auth_dir.mkdir()
         self.panel_credentials_dir.mkdir()
+        self.panel_route_dir.mkdir()
         self.patches = [
             patch.object(bootstrap, "CONFIG_DIR", self.config_dir),
             patch.object(bootstrap, "MTPROXY_DIR", self.mtproxy_dir),
             patch.object(bootstrap, "PROFILES_DIR", self.profiles_dir),
             patch.object(bootstrap, "PANEL_AUTH_DIR", self.panel_auth_dir),
             patch.object(bootstrap, "PANEL_CREDENTIALS_DIR", self.panel_credentials_dir),
+            patch.object(bootstrap, "PANEL_ROUTE_DIR", self.panel_route_dir),
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
@@ -60,9 +63,9 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(len(bytes.fromhex(auth["password_hash"])), 32)
         credentials = (self.panel_credentials_dir / "panel-credentials.txt").read_text()
         self.assertIn(auth["base_path"], credentials)
-        self.assertEqual((self.config_dir / "panel-auth.json").stat().st_mode & 0o777, 0o600)
-        self.assertEqual((self.config_dir / "panel-credentials.txt").stat().st_mode & 0o777, 0o600)
-        route = (self.config_dir / "panel-route.caddy").read_text()
+        self.assertEqual((self.panel_auth_dir / "panel-auth.json").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.panel_credentials_dir / "panel-credentials.txt").stat().st_mode & 0o777, 0o600)
+        route = (self.panel_route_dir / "panel-route.caddy").read_text()
         self.assertIn("handle_path " + auth["base_path"] + "/*", route)
 
     def test_second_run_preserves_secrets_and_token_key(self):
