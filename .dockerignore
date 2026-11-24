@@ -4,3 +4,11 @@
 *.log
 backups
 data
+
+# Runtime secrets and operator-specific configuration
+docker/config/config.json
+docker/config/profiles.json
+docker/config/token.key
+docker/profiles/profiles.json*
+docker/mtproxy/secret
+docker/nginx/certs/
