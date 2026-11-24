@@ -1,10 +1,12 @@
-# Telegram Web Proxy — установщик и менеджер
+# Telegram Web Proxy — Docker Manager
 
-**Версия скрипта: 1.0.2**
+**Версия скрипта: 1.2.0**
 
-Bash-скрипт для установки и обслуживания Telegram Web Proxy на серверах Ubuntu/Debian с архитектурой **x86_64**. Разворачивает связку **tproxy-server + MTProxy**, настраивает один из веб-серверов — **Caddy или Nginx**, systemd-службы, локальные правила nftables, TLS, decoy-сайт и ссылку подключения с QR-кодом.
+Основной способ установки и обслуживания — единый Docker Manager для Ubuntu/Debian x86_64. При первом запуске установщик самостоятельно сохраняет прежнюю установку (если она есть), разворачивает репозиторий в **/opt/telegram-web-proxy/**, устанавливает Docker Engine и Compose, затем предлагает перенести действующую native-конфигурацию или выполнить чистую установку.
 
-> Для установки и обслуживания нужны права root. Перед запуском на рабочем сервере рекомендуется сохранить резервную копию. Скрипт изменяет системные службы, сетевые настройки и пакеты.
+В Docker-развёртывание входят **Telegram Web Proxy (tproxy-server), MTProxy, Caddy или Nginx, панель управления и Fail2ban**. Существующая native-установка не удаляется автоматически: её архив и подготовленные для миграции настройки сохраняются отдельно.
+
+> Для установки и обслуживания нужны права root. Установщик меняет пакеты, Docker, сетевые правила и службы. Перед началом проверь DNS домена и доступность TCP-портов 80/443.
 
 ## Возможности
 
@@ -64,32 +66,30 @@ Relay и admin endpoint привязаны к loopback-интерфейсу. Bac
 
 ### 1. Подготовьте DNS и firewall
 
-Создайте A-запись, например:
+Создай A-запись домена, например `proxy.example.com`, указывающую на публичный IP сервера. Разреши входящие TCP 80 и 443 в firewall VPS и сервера. Убедись, что эти порты не заняты посторонними службами.
 
-```text
-proxy.example.com → ПУБЛИЧНЫЙ_IP_СЕРВЕРА
-```
-
-Разрешите входящие TCP 80 и 443 в firewall сервера и в панели VPS/облачного провайдера. Убедитесь, что порты свободны.
-
-### 2. Скачайте скрипт
+### 2. Запусти одноразовый установщик
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/get-rked/telegram-web-proxy/main/tgweb-install.sh -o tgweb-install.sh
-chmod +x tgweb-install.sh
+curl -fsSL https://raw.githubusercontent.com/get-rked/telegram-web-proxy/feature/docker-web-panel/tgweb-install.sh -o /tmp/tgweb-install.sh
+sudo bash /tmp/tgweb-install.sh
 ```
 
-### 3. Запустите интерактивное меню
+Установщик сам:
+1. Архивирует существующий `/opt/telegram-web-proxy/` в `/var/backups/telegram-web-proxy/`.
+2. Если обнаруживает native-конфигурацию, извлекает её в отдельный staging-каталог для переноса.
+3. Разворачивает Git-репозиторий в `/opt/telegram-web-proxy/`.
+4. Устанавливает Docker Engine и Compose.
+5. Запускает единое интерактивное меню Docker Manager.
 
+В меню выбери **«Установить / перенести Web Proxy в Docker»**. При обнаружении прежней конфигурации будет предложен контролируемый перенос. Если прежней конфигурации нет, установщик запросит домен и email и выполнит чистую установку (по умолчанию Caddy).
+
+Для последующего управления используй:
 ```bash
-sudo ./tgweb-install.sh
+sudo /opt/telegram-web-proxy/tgweb-install.sh
 ```
 
-В главном меню доступны установка, обновление, удаление, просмотр конфигурации и инструменты. При установке выберите Caddy или Nginx и укажите домен, email Let's Encrypt, порты, секрет, workers и max-connections.
-
-Секрет можно сгенерировать автоматически или ввести самостоятельно. Допустимы 32 строчных hex-символа либо префикс `dd` перед этими 32 символами.
-
-После установки скрипт проверит готовность relay и выведет параметры подключения, ссылку и QR-код.
+Установщик и все файлы проекта после первого запуска находятся в одном каталоге. Для получения обновлений используй пункт **«Обновить код и Docker-образы»** в меню или команду `docker update`.
 
 ## Команды
 
@@ -134,44 +134,38 @@ sudo ./tgweb-install.sh install \
 
 ### Docker-установка и обслуживание
 
-В той же программе есть отдельный раздел **Docker — установка и обслуживание**. Он не меняет команды управления native-установкой: старые `install`, `update`, `uninstall` и `purge` продолжают управлять systemd/native-развёртыванием.
-
-Запуск меню:
+Docker Manager — основной режим работы установщика. Интерактивное меню открывается командой:
 ```bash
-sudo ./tgweb-install.sh
-```
-Выбери пункт **7 — Docker — установка и обслуживание**.
-
-Команды Docker-менеджера:
-```bash
-# Перенести существующую native-установку в Docker и выполнить переключение
-sudo ./tgweb-install.sh docker install
-
-# То же, но явно выбрать reverse proxy или каталог native-установки
-sudo ./tgweb-install.sh docker install --web-server caddy
-sudo ./tgweb-install.sh docker install --source-dir /opt/telegram-web-proxy
-
-# Пересобрать и обновить контейнеры по текущему содержимому репозитория
-sudo ./tgweb-install.sh docker update
-
-# Удалить контейнеры и сеть, сохранив конфигурацию и именованные тома
-sudo ./tgweb-install.sh docker uninstall
-
-# Удалить контейнеры и локальные образы; тома оставить
-sudo ./tgweb-install.sh docker purge
-
-# Удалить также именованные тома (данные панели, TLS и MTProxy будут потеряны)
-sudo ./tgweb-install.sh docker purge --volumes
-
-# Состояние, перезапуск, логи и резервная копия файлов проекта
-sudo ./tgweb-install.sh docker status
-sudo ./tgweb-install.sh docker restart
-sudo ./tgweb-install.sh docker logs panel
-sudo ./tgweb-install.sh docker backup
+sudo /opt/telegram-web-proxy/tgweb-install.sh
 ```
 
-**Важно:** `docker uninstall` не удаляет named volumes и файлы конфигурации. `docker purge` без `--volumes` тоже сохраняет тома. Для полного удаления данных томов нужен отдельный явный флаг `--volumes`. Нативная установка в `/opt/telegram-web-proxy` не удаляется ни одной Docker-командой. Резервная копия `docker backup` включает файлы проекта, включая приватные настройки и `.env`, но не включает содержимое Docker volumes.
+Основные команды:
+```bash
+# Автоматически определить: чистая установка или перенос сохранённой native-конфигурации
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker install
 
+# Чистая установка с параметрами
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker install --web-server caddy --hostname proxy.example.com --email admin@example.com
+
+# Обновить Git-код, затем образы и контейнеры
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker update
+
+# Удалить контейнеры и сеть, сохранив конфигурацию и volumes
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker uninstall
+
+# Удалить контейнеры и локальные образы; volumes оставить
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker purge
+
+# Дополнительно удалить volumes (необратимая потеря данных панели/TLS/MTProxy)
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker purge --volumes
+
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker status
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker restart
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker logs panel
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker backup
+```
+
+**Важно:** `docker uninstall` и `docker purge` без `--volumes` сохраняют тома и файлы конфигурации. Нативные systemd-службы и архив прежней установки не удаляются Docker-командами. `docker backup` включает файлы проекта, в том числе `.env` и приватные настройки, но не содержимое Docker volumes.
 ### Обновление
 
 ```bash
