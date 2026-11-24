@@ -103,7 +103,7 @@ def main():
             "backend": "127.0.0.1:2398",
             "carrier_mode": "https"
         }]}
-        atomic_write(profiles_path, (json.dumps(profiles_doc, indent=2) + "\\n").encode(), 0o640)
+        atomic_write(profiles_path, (json.dumps(profiles_doc, indent=2) + "\n").encode(), 0o640)
 
     default_profiles = [p for p in profiles_doc["profiles"] if p.get("name") == "default"]
     if not default_profiles:
@@ -116,7 +116,7 @@ def main():
         if current_secret.lower() != default_secret.lower():
             fail("MTProxy secret does not match the default profile secret; refusing to overwrite either")
     else:
-        atomic_write(secret_path, (default_secret.lower() + "\\n").encode("ascii"), 0o600)
+        atomic_write(secret_path, (default_secret.lower() + "\n").encode("ascii"), 0o600)
 
     if config_path.exists():
         config = load_json(config_path)
@@ -129,7 +129,7 @@ def main():
         if config.get("public_hostname") != DOMAIN:
             backup(config_path)
             config["public_hostname"] = DOMAIN
-            atomic_write(config_path, (json.dumps(config, indent=2) + "\\n").encode(), 0o640)
+            atomic_write(config_path, (json.dumps(config, indent=2) + "\n").encode(), 0o640)
     else:
         config = {
             "public_hostname": DOMAIN,
@@ -141,7 +141,7 @@ def main():
             "static_routes": "exact",
             "enable_pprof": False
         }
-        atomic_write(config_path, (json.dumps(config, indent=2) + "\\n").encode(), 0o640)
+        atomic_write(config_path, (json.dumps(config, indent=2) + "\n").encode(), 0o640)
 
     if token_path.exists():
         if token_path.stat().st_size != 32:
