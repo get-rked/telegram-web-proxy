@@ -150,6 +150,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      RELAY_PORT: ${RELAY_PORT:-8080}
     security_opt: [no-new-privileges:true]
   nginx:
     profiles: ["nginx"]
@@ -159,8 +160,11 @@ services:
     depends_on:
       relay: {condition: service_healthy}
       panel: {condition: service_started}
+    environment:
+      RELAY_PORT: ${RELAY_PORT:-8080}
+      NGINX_ENVSUBST_FILTER: ^RELAY_PORT$
     volumes:
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/default.conf:/etc/nginx/templates/default.conf.template:ro
       - ./docker/generated:/etc/nginx/generated:ro
       - ./docker/security/logs:/var/log/tproxy-panel:rw
       - ./docker/nginx/certs:/etc/nginx/certs:ro
