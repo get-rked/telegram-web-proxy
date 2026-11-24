@@ -182,7 +182,7 @@ func TestProxyClientSecretMatchesInstallerFormat(t *testing.T) {
 	if got != want {
 		t.Fatalf("unexpected client secret: %q", got)
 	}
-	if dd := proxyClientSecret("dd0123456789abcdef0123456789abcdef", "random-base"); dd != "cN0BI0Vnia vN7wEjRWeJq83vASNFZ4mrze8" { t.Fatalf("unexpected dd client secret: %q", dd) }
+	if dd := proxyClientSecret("dd0123456789abcdef0123456789abcdef", "random-base"); dd != "cN0BI0VniavN7wEjRWeJq83v" { t.Fatalf("unexpected dd client secret: %q", dd) }
 	if plain := proxyClientSecret("0123456789abcdef0123456789abcdef", ""); plain != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("unexpected plain secret: %q", plain)
 	}
