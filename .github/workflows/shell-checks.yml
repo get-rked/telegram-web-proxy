@@ -30,6 +30,7 @@ jobs:
           bash -n tgweb-install.sh
           sh -n docker/mtproxy/entrypoint.sh
           sh -n docker/relay-supervisor.sh
+          sh -n docker/mtproxy/firewall.sh
 
       - name: ShellCheck
         run: shellcheck --severity=warning --shell=bash tgweb-install.sh
@@ -85,6 +86,8 @@ jobs:
         run: docker build -f docker/Dockerfile.relay -t tproxy-relay:test .
       - name: Build official MTProxy image
         run: docker build -f docker/Dockerfile.mtproxy -t tproxy-mtproxy:test .
+      - name: Build MTProxy firewall image
+        run: docker build -f docker/Dockerfile.firewall -t tproxy-firewall:test .
 
   docker-compose:
     name: Compose configuration validation
