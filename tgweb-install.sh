@@ -4393,6 +4393,7 @@ install_admin_panel() {
   cd - >/dev/null
 
   if ! dpkg -s fail2ban >/dev/null 2>&1; then
+    apt-get update -qq || { rm -rf "$source_tmp"; die "Не удалось обновить список пакетов для Fail2ban."; }
     DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
       rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
     }
