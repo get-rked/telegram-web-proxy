@@ -34,6 +34,7 @@ type application struct {
 	password string
 	config   string
 	profiles string
+	mtproxySecret string
 	mu       sync.Mutex
 	monitorClient *http.Client
 	backupRoot string
@@ -93,6 +94,7 @@ func main() {
 		password: os.Getenv("PANEL_PASSWORD"),
 		config:   env("TPROXY_CONFIG", "/etc/tproxy-server/config.json"),
 		profiles: env("TPROXY_PROFILES", "/etc/tproxy-server/profiles.json"),
+		mtproxySecret: env("MTPROXY_SECRET_FILE", "/run/secrets/mtproxy_secret"),
 		monitorClient: &http.Client{Timeout: 3*time.Second},
 	}
 	if len(a.password) < 16 {
