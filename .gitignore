@@ -33,3 +33,10 @@ docker/site.failed-migration*/
 __pycache__/
 docker/__pycache__/
 docker/mtproxy/__pycache__/
+
+# Local site content and certificates are runtime data; keep the tracked starter index.
+/docker/site/*
+!/docker/site/index.html
+/docker/nginx/certs/
+/docker/Caddyfile.before-*
+/docker/config/*.before-*
