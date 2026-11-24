@@ -123,8 +123,8 @@ jobs:
           touch docker/security/logs/auth.log docker/security/logs/access.log
           openssl req -x509 -nodes -newkey rsa:2048 -days 1 -subj "/CN=localhost" \
             -keyout /tmp/nginx-certs/privkey.pem -out /tmp/nginx-certs/fullchain.pem
-          docker run --rm \
-            -v "$PWD/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" \
+          docker run --rm -e RELAY_PORT=18080 -e NGINX_ENVSUBST_FILTER=^RELAY_PORT$ \
+            -v "$PWD/docker/nginx/default.conf:/etc/nginx/templates/default.conf.template:ro" \
             -v "/tmp/nginx-certs:/etc/nginx/certs:ro" \
             -v "$PWD/docker/security/logs:/var/log/tproxy-panel" \
             -v "$PWD/docker/generated:/etc/nginx/generated:ro" \
