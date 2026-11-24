@@ -2737,8 +2737,11 @@ backup_command() {
     etc/nginx/conf.d/tproxy-websocket-map.conf \
     etc/letsencrypt \
     etc/systemd/system/tproxy-server.service \
+    etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/mtproxy.service \
-    etc/systemd/system/tproxy-firewall.service \    etc/systemd/system/refresh-mtproxy-config.service \
+    etc/systemd/system/tproxy-firewall.service \
+    etc/systemd/system/tproxy-panel.service \
+    etc/systemd/system/refresh-mtproxy-config.service \
     etc/systemd/system/refresh-mtproxy-config.timer \
     etc/systemd/system/caddy.service \
     etc/systemd/system/caddy.service.d/tproxy.conf \
@@ -4373,7 +4376,7 @@ needle = f"reverse_proxy 127.0.0.1:{relay} {{"
 if f"handle /{base}/*" not in text:
     if needle not in text:
         raise SystemExit("Caddyfile relay route not found")
-    block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765\n\t}}\n\n\t"
+    block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765 {{\n\t\t\theader_up X-Real-IP {{http.request.remote.host}}\n\t\t}}\n\t}}\n\n\t"
     text = text.replace(needle, block + needle, 1)
     path.write_text(text)
 PYTHON
@@ -4440,6 +4443,12 @@ fi; then
     }
   fi
   install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
+  if ! dpkg-query -W -f='${Status}' fail2ban 2>/dev/null | grep -q '^install ok installed$'; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
+      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
+    }
+  fi
+  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
   install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
   install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
   install -m 0644 "$repo_dir/web-panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
@@ -4498,26 +4507,3 @@ if f"location ^~ /{base}/" not in text:
 PYTHON
     nginx -t || { rm -rf "$source_tmp"; die "Проверка Nginx после добавления панели не пройдена."; }
     systemctl reload nginx.service || systemctl restart nginx.service || {
-      rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Nginx."
-    }
-  fi
-
-  systemctl daemon-reload
-  systemctl enable --now tproxy-panel.service || { rm -rf "$source_tmp"; die "Не удалось запустить tproxy-panel.service."; }
-  fail2ban-client -t || { rm -rf "$source_tmp"; die "Конфигурация Fail2ban не прошла проверку."; }
-  systemctl enable --now fail2ban.service
-  systemctl restart fail2ban.service || { rm -rf "$source_tmp"; die "Не удалось запустить Fail2ban."; }
-
-  chmod 0600 "$DATA_DIR/panel/panel.db" 2>/dev/null || true
-  [[ ! -f "$DATA_DIR/panel/panel-credentials.txt" ]] || chmod 0600 "$DATA_DIR/panel/panel-credentials.txt"
-  panel_url="https://$HOSTNAME_ARG/$panel_base/"
-  rm -rf "$source_tmp"
-  ok "Административная панель установлена и защищена Fail2ban."
-  info "URL панели: $panel_url"
-  info "Первичные логин и пароль (показаны один раз) сохранены в $DATA_DIR/panel/panel-credentials.txt"
-}
-
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  trap 'update_exit_handler "$?"' EXIT
-  main "$@"
-fi
