@@ -27,8 +27,6 @@ services:
       - ./docker/mtproxy-data:/opt/telegram-web-proxy/docker/mtproxy-data
     restart: "no"
   relay:
-    depends_on:
-      bootstrap: {condition: service_completed_successfully}
     build:
       context: .
       dockerfile: docker/Dockerfile.relay
