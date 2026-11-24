@@ -274,7 +274,7 @@ def main():
         raise MigrationError('MTPROXY_MAX_CONNECTIONS в mtproxy.env должен быть положительным целым числом.')
     env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_MAX_CONNECTIONS': env['MTPROXY_MAX_CONNECTIONS'], 'MTPROXY_NAT_INFO': nat_info}
     env_lines = update_env_text(env_path, env_updates).decode().splitlines()
-    env_text = "\\n".join(line for line in env_lines if not line.startswith(('PANEL_USER=', 'PANEL_PASSWORD='))).rstrip() + "\\n"
+    env_text = "\n".join(line for line in env_lines if not line.startswith(('PANEL_USER=', 'PANEL_PASSWORD='))).rstrip() + "\n"
     outputs = [
         (repo/'docker/config/config.json', (json.dumps(config, indent=2)+'\n').encode(), 0o600),
         (repo/'docker/config/token.key', token_data, 0o600),
