@@ -40,7 +40,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.0.2"
+readonly SCRIPT_VERSION="1.1.0"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -2425,7 +2425,7 @@ run_install() {
 # ============================================================================
 #  DOCKER MANAGER
 # ============================================================================
-DOCKER_PROJECT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+DOCKER_PROJECT_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)"
 DOCKER_PROJECT_NAME="telegram-web-proxy"
 DOCKER_STATE_FILE="$DOCKER_PROJECT_DIR/docker/private/.manager-state"
 
@@ -2581,7 +2581,7 @@ docker_restart_command() {
   (($# == 0)) || die "docker restart [SERVICE]"
   if [[ -n "$service" ]]; then
     [[ "$service" =~ ^(relay|panel|caddy|nginx|mtproxy|mtproxy-firewall|stats-bridge|fail2ban)$ ]] || die "Неизвестный сервис: $service"
-    docker_compose restart "$service"
+    docker_compose --profile caddy --profile nginx --profile mtproxy restart "$service"
   else
     docker_compose --profile caddy --profile nginx --profile mtproxy restart
   fi
@@ -2595,7 +2595,7 @@ docker_logs_command() {
   (($# == 0)) || die "docker logs [SERVICE]"
   if [[ -n "$service" ]]; then
     [[ "$service" =~ ^(bootstrap|relay|panel|caddy|nginx|mtproxy|mtproxy-firewall|stats-bridge|fail2ban)$ ]] || die "Неизвестный сервис: $service"
-    docker_compose logs --no-color --tail=100 "$service"
+    docker_compose --profile caddy --profile nginx --profile mtproxy logs --no-color --tail=100 "$service"
   else
     docker_compose --profile caddy --profile nginx --profile mtproxy logs --no-color --tail=100
   fi
@@ -4451,7 +4451,7 @@ main() {
     web-server) [[ "${1:-}" == remove ]] || die "Использование: web-server remove [--yes]"; shift; ASSUME_YES=0; parse_uninstall_args "$@"; remove_web_server_interactive ;;
     docker) docker_cli "$@" ;;
     -h|--help|help) usage; exit 0 ;;
-    *) die "Неизвестная команда: $MODE (install|update|uninstall|purge|config|diagnostics|backup|restore|profile|upstream|services|site|web-server)" ;;
+    *) die "Неизвестная команда: $MODE (install|update|uninstall|purge|docker|config|diagnostics|backup|restore|profile|upstream|services|site|web-server)" ;;
   esac
 }
 
