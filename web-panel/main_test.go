@@ -209,7 +209,8 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 	}
 	if got["carrier_mode"] != "https-lanes" || got["name"] != "alpha" { t.Fatalf("unexpected profile metadata: %#v", got) }
 	if got["workers"] != "6" || got["max_connections"] != "18000" { t.Fatalf("runtime settings missing from profile details: %#v", got) }
-	if got["secret"] != "cAEjRWeJq83vASNFZ4mrze8" { t.Fatalf("unexpected client-facing secret: %q", got["secret"]) }
+	if got["secret"] != "0123456789abcdef0123456789abcdef" { t.Fatalf("unexpected profile secret: %q", got["secret"]) }
+	if got["client_secret"] != "cAEjRWeJq83vASNFZ4mrze8" { t.Fatalf("unexpected client-facing secret: %q", got["client_secret"]) }
 	if !strings.Contains(got["link"], "https://t.me/webproxy?") { t.Fatalf("unexpected Telegram link: %q", got["link"]) }
 	if !strings.Contains(got["tg_link"], "tg://webproxy?") { t.Fatalf("unexpected direct Telegram link: %q", got["tg_link"]) }
 }
@@ -239,13 +240,13 @@ func TestProfileActionUpdatePassesCarrierAndRotationFlags(t *testing.T) {
 	if err := os.WriteFile(script, []byte(scriptBody), 0700); err != nil { t.Fatal(err) }
 	t.Setenv("CAPTURE_ARGS", capture)
 	a := &App{base: "panel", script: script}
-	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader(`{"Action":"update","CarrierMode":"websocket-lanes","RegenerateSecret":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader(`{"Action":"update","CarrierMode":"websocket-lanes","Secret":"dd0123456789abcdef0123456789abcdef"}`))
 	response := httptest.NewRecorder()
 	a.profileAction(response, req)
 	if response.Code != http.StatusOK { t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String()) }
 	raw, err := os.ReadFile(capture); if err != nil { t.Fatal(err) }
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	want := []string{"profile", "update", "alpha", "--carrier-mode", "websocket-lanes", "--generate"}
+	want := []string{"profile", "update", "alpha", "--carrier-mode", "websocket-lanes", "--secret", "dd0123456789abcdef0123456789abcdef"}
 	if strings.Join(args, "|") != strings.Join(want, "|") { t.Fatalf("unexpected installer arguments: %#v", args) }
 }
 
@@ -290,7 +291,7 @@ func TestProfileActionUpdateIgnoresRuntimeSettings(t *testing.T) {
 	}
 	t.Setenv("CAPTURE_ARGS", capture)
 	a := &App{base: "panel", script: script}
-	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader("{\"Action\":\"update\",\"CarrierMode\":\"https\",\"Workers\":\"12\",\"MaxConnections\":\"24000\"}"))
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/profiles/alpha", strings.NewReader("{\"Action\":\"update\",\"CarrierMode\":\"https\",\"Secret\":\"dd0123456789abcdef0123456789abcdef\",\"Workers\":\"12\",\"MaxConnections\":\"24000\"}"))
 	response := httptest.NewRecorder()
 	a.profileAction(response, req)
 	if response.Code != http.StatusOK {
@@ -301,7 +302,7 @@ func TestProfileActionUpdateIgnoresRuntimeSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	want := []string{"profile", "update", "alpha", "--carrier-mode", "https"}
+	want := []string{"profile", "update", "alpha", "--carrier-mode", "https", "--secret", "dd0123456789abcdef0123456789abcdef"}
 	if strings.Join(args, "|") != strings.Join(want, "|") {
 		t.Fatalf("panel unexpectedly passed CLI-only runtime settings: %#v", args)
 	}
