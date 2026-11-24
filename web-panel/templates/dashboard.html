@@ -23,6 +23,8 @@ body{margin:0;background:radial-gradient(circle at 80% 0%,#172d48 0,transparent 
 .name{font-weight:750;font-size:15px}.meta{font-size:12px;margin-top:6px}
 .actions,.toolbar,.formline{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 button,input,select{font:inherit;border:1px solid var(--line);border-radius:9px;padding:10px;background:#0b1523;color:var(--text)}
+select{appearance:none;-webkit-appearance:none;padding-right:38px;background-color:#0d1929;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238dbaff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+select:hover{border-color:#5278a5;background-color:#13243a}select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}select option{background:#111d2d;color:var(--text)}
 button{cursor:pointer;background:#1b3552;border-color:#3b587a}button.primary{background:linear-gradient(110deg,#4c8cff,#63cdbd);border:0;color:#071321;font-weight:800}
 button.danger{border-color:#78444b;background:#3a202a;color:#ffc5c8}button:disabled{opacity:.5;cursor:wait}
 input,select{min-width:180px}input[type=file]{max-width:100%}
@@ -47,20 +49,25 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <section class="card"><h2>Система</h2><p>● Панель авторизована</p><div class="meta">Внутренний сервис доступен только через локальный reverse proxy.</div></section>
 <section class="card"><h2>Действия</h2><div class="toolbar"><button onclick="loadAll()">↻ Обновить данные</button></div><div class="meta">Изменения профилей применяются штатным установщиком.</div></section>
 <section class="card wide"><h2>Профили</h2>
-<div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">＋ Создать профиль</button></div>
+<div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">＋ Создать профиль</button><button onclick="openDialog('importDialog')">Импорт профиля</button></div><div id="runtimeSettings" class="runtime-note">Workers и Max Connections: загрузка… (изменяются только через CLI)</div>
 <div id="profiles">Загрузка профилей…</div></section>
 <section class="card wide"><h2>Диагностика</h2><button onclick="loadDiagnostics()">Запустить диагностику</button><pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre></section>
 <section class="card wide"><h2>Резервные копии и перенос профилей</h2>
 <div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="loadBackups()">Обновить список архивов</button></div>
-<div class="formline"><select id="exportProfileSelect"><option value="">Выберите профиль для экспорта</option></select><button onclick="exportSelectedProfile()">Экспортировать профиль</button></div>
-<div class="meta">Экспорт создаёт архив выбранного профиля и сразу начинает его скачивание.</div>
-<div class="field"><label>Импорт профиля из архива</label><div class="formline"><input id="importArchive" type="file" accept=".tar.gz,.tgz"><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select><input id="importName" placeholder="Имя целевого профиля"><input id="importEntry" placeholder="Путь profile.json (если несколько)"><button class="primary" onclick="importProfile()">Импортировать</button></div></div>
-<div class="meta">Если в архиве несколько профилей, укажите путь к нужному profile.json.</div>
+<div class="meta">Экспорт профиля доступен в строке соответствующего профиля. Импорт — рядом с кнопкой «Создать профиль».</div>
 <div id="backups">Загрузка архивов…</div>
 </section>
 </div>
 <div class="foot">TPROXY MANAGER · Secure administration</div>
 </main>
+
+<dialog id="importDialog">
+<div class="dialog-head"><h2>Импорт профиля</h2><button onclick="closeDialog('importDialog')">✕</button></div>
+<div class="field"><label>Архив профиля</label><input id="importArchive" type="file" accept=".tar.gz,.tgz"></div>
+<div class="field"><label>Куда импортировать</label><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select></div>
+<div class="field"><label>Имя целевого профиля</label><input id="importName" placeholder="Имя целевого профиля"></div>
+<div class="field"><label>Путь profile.json (если в архиве несколько)</label><input id="importEntry" placeholder="profiles/ИМЯ/profile.json"></div>
+<div class="dialog-actions"><button onclick="closeDialog('importDialog')">Отмена</button><button class="primary" onclick="importProfile()">Импортировать</button></div></dialog>
 
 <dialog id="profileDialog">
 <div class="dialog-head"><h2 id="configTitle">Конфигурация профиля</h2><button onclick="closeDialog('profileDialog')">✕</button></div>
@@ -76,9 +83,6 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <div class="dialog-head"><h2 id="editTitle">Изменить профиль</h2><button onclick="closeDialog('editDialog')">✕</button></div>
 <input type="hidden" id="editName">
 <div class="field"><label for="editCarrier">Carrier mode</label><select id="editCarrier"><option value="https">https</option><option value="https-lanes">https-lanes</option><option value="websocket">websocket</option><option value="websocket-lanes">websocket-lanes</option></select></div>
-<div class="field"><label for="editWorkers">Workers (1–256)</label><input id="editWorkers" type="number" min="1" max="256" step="1" value="1"></div>
-<div class="field"><label for="editMaxConnections">Max Connections (1–1 000 000)</label><input id="editMaxConnections" type="number" min="1" max="1000000" step="1" value="4096"></div>
-<div class="runtime-note">Workers и Max Connections применяются к службе MTProxy целиком и будут одинаковыми у всех профилей.</div>
 <div class="field"><label><input type="checkbox" id="rotateSecret" style="min-width:auto"> Перегенерировать секрет профиля</label><div class="meta">После применения старый секрет перестанет работать на клиентах.</div></div>
 <div class="dialog-actions"><button onclick="closeDialog('editDialog')">Отмена</button><button class="primary" onclick="saveProfile()">Сохранить изменения</button></div>
 </dialog>
@@ -125,6 +129,7 @@ function resolveConfirmation(accepted){
 }
 document.querySelector('#confirmDialog').addEventListener('cancel',()=>{if(confirmResolver)resolveConfirmation(false)});
 function closeDialog(id){document.getElementById(id).close()}
+function openDialog(id){document.getElementById(id).showModal()}
 function copyText(text){navigator.clipboard.writeText(text).catch(()=>{const field=document.createElement('textarea');field.value=text;document.body.appendChild(field);field.select();document.execCommand('copy');field.remove()})}
 function copyValue(id){copyText(document.getElementById(id).textContent)}
 function copyLink(){copyText(document.getElementById('configLink').href)}
@@ -132,10 +137,10 @@ function copyDeepLink(){copyText(document.getElementById('configDeepLink').textC
 async function loadProfiles(){
  try{
   const profiles=await api(base+'/api/profiles');
-  document.querySelector('#profiles').innerHTML=profiles.length?'<div class="table-wrap"><table class="profile-table"><thead><tr><th>Профиль</th><th>Carrier mode</th><th>Workers</th><th>Max Connections</th><th>Секрет</th><th>Действия</th></tr></thead><tbody>'+profiles.map(p=>'<tr><td><div class="name">'+esc(p.name)+'</div></td><td>'+esc(p.carrier_mode)+'</td><td>'+esc(p.workers||'1')+'</td><td>'+esc(p.max_connections||'4096')+'</td><td><code>'+esc(p.secret)+'</code></td><td><div class="actions"><button class="primary" onclick="showProfileConfig(\''+esc(p.name)+'\')">Конфигурация</button><button onclick="editProfile(\''+esc(p.name)+'\',\''+esc(p.carrier_mode)+'\',\''+esc(p.workers||'1')+'\',\''+esc(p.max_connections||'4096')+'\')">Изменить</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></td></tr>').join('')+'</tbody></table></div><div class="runtime-note">Workers и Max Connections — общие параметры службы MTProxy, поэтому значения одинаковы для всех профилей.</div>':'Профили не найдены';
-  const select=document.querySelector('#exportProfileSelect');const selected=select.value;
-  select.innerHTML='<option value="">Выберите профиль для экспорта</option>'+profiles.map(p=>'<option value="'+esc(p.name)+'">'+esc(p.name)+'</option>').join('');
-  if(profiles.some(p=>p.name===selected))select.value=selected;
+  const runtime=document.querySelector('#runtimeSettings');
+  if(profiles.length){runtime.textContent='Общие настройки MTProxy · Workers: '+(profiles[0].workers||'1')+' · Max Connections: '+(profiles[0].max_connections||'4096')+' · Изменение доступно только через CLI.'}
+  else{runtime.textContent='Общие настройки MTProxy отображаются после загрузки профилей.'}
+  document.querySelector('#profiles').innerHTML=profiles.length?'<div class="table-wrap"><table class="profile-table"><thead><tr><th>Профиль</th><th>Carrier mode</th><th>Секрет</th><th>Действия</th></tr></thead><tbody>'+profiles.map(p=>'<tr><td><div class="name">'+esc(p.name)+'</div></td><td>'+esc(p.carrier_mode)+'</td><td><code>'+esc(p.secret)+'</code></td><td><div class="actions"><button class="primary" onclick="showProfileConfig(\''+esc(p.name)+'\')">Конфигурация</button><button onclick="editProfile(\''+esc(p.name)+'\',\''+esc(p.carrier_mode)+'\')">Изменить</button><button onclick="exportProfile(\''+esc(p.name)+'\')">Экспорт</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></td></tr>').join('')+'</tbody></table></div>':'Профили не найдены';
  }catch(error){notify(error)}
 }
 async function addProfile(){
@@ -155,27 +160,22 @@ async function showProfileConfig(name){
   document.querySelector('#profileDialog').showModal();
  }catch(error){notify(error)}
 }
-function editProfile(name,mode,workers='1',maxConnections='4096'){
+function editProfile(name,mode){
  document.querySelector('#editName').value=name;document.querySelector('#editTitle').textContent='Изменить · '+name;
- document.querySelector('#editCarrier').value=mode;document.querySelector('#editWorkers').value=workers;document.querySelector('#editMaxConnections').value=maxConnections;document.querySelector('#rotateSecret').checked=false;
+ document.querySelector('#editCarrier').value=mode;document.querySelector('#rotateSecret').checked=false;
  document.querySelector('#editDialog').showModal();
 }
 async function saveProfile(){
  const name=document.querySelector('#editName').value;
  const carrier_mode=document.querySelector('#editCarrier').value;
  const regenerate_secret=document.querySelector('#rotateSecret').checked;
- const workers=document.querySelector('#editWorkers').value.trim();
- const max_connections=document.querySelector('#editMaxConnections').value.trim();
- if(!/^[1-9][0-9]*$/.test(workers)||Number(workers)>256){notify(new Error('Workers должен быть от 1 до 256'));return}
- if(!/^[1-9][0-9]*$/.test(max_connections)||Number(max_connections)>1000000){notify(new Error('Max Connections должен быть от 1 до 1000000'));return}
  if(regenerate_secret&&!await askConfirm('Старый секрет перестанет работать на клиентах. Продолжить?','Перегенерация секрета','Перегенерировать'))return;
  try{
-  await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'update',CarrierMode:carrier_mode,RegenerateSecret:regenerate_secret,Workers:workers,MaxConnections:max_connections})});
+  await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'update',CarrierMode:carrier_mode,RegenerateSecret:regenerate_secret})});
   closeDialog('editDialog');await loadProfiles();notify('Настройки профиля обновлены','success');
  }catch(error){notify(error)}
 }
-async function exportSelectedProfile(){
- const name=document.querySelector('#exportProfileSelect').value;if(!name){notify(Error('Выберите профиль'));return}
+async function exportProfile(name){
  try{const result=await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'export'})});const link=document.createElement('a');link.href=result.download_url;link.download='';document.body.appendChild(link);link.click();link.remove();await loadBackups()}
  catch(error){notify(error)}
 }
@@ -185,7 +185,7 @@ async function importProfile(){
  if(target==='new'&&!name){notify(Error('Укажите имя целевого профиля'));return}
  if(target==='default'&&!await askConfirm('Будет заменён системный профиль default. Продолжить?','Импорт профиля','Заменить default'))return;
  const form=new FormData();form.append('archive',file);form.append('target',target);form.append('name',name);form.append('entry',entry);
- try{await api(base+'/api/profiles/import',{method:'POST',body:form});document.querySelector('#importArchive').value='';await loadProfiles();await loadBackups();notify('Профиль импортирован','success')}
+ try{await api(base+'/api/profiles/import',{method:'POST',body:form});document.querySelector('#importArchive').value='';closeDialog('importDialog');await loadProfiles();await loadBackups();notify('Профиль импортирован','success')}
  catch(error){notify(error)}
 }
 async function deleteProfile(name){
