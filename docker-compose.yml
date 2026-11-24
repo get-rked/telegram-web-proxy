@@ -171,6 +171,7 @@ services:
       - ./docker/security/fail2ban/jail.d:/etc/fail2ban/jail.d:ro
       - ./docker/security/fail2ban/filter.d/tproxy-panel.conf:/etc/fail2ban/filter.d/tproxy-panel.conf:ro
       - ./docker/security/fail2ban/filter.d/tproxy-caddy-probes.conf:/etc/fail2ban/filter.d/tproxy-caddy-probes.conf:ro
+      - ./docker/security/fail2ban/filter.d/tproxy-nginx-probes.conf:/etc/fail2ban/filter.d/tproxy-nginx-probes.conf:ro
       - ./docker/security/fail2ban/action.d/docker-user.conf:/etc/fail2ban/action.d/docker-user.conf:ro
       - ./docker/security/logs:/var/log/tproxy-panel:ro
       - fail2ban-data:/data
