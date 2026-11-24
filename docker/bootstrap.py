@@ -62,14 +62,35 @@ def load_json(path):
         fail(f"cannot read valid JSON from {path}: {exc}")
 
 
+def canonical_secret(value):
+    value = value.lower()
+    return value[2:] if value.startswith("dd") else value
+
+
 def valid_secret(value):
-    if not isinstance(value, str) or len(value) != 32:
+    if not isinstance(value, str):
+        return False
+    value = canonical_secret(value)
+    if len(value) != 32:
         return False
     try:
         bytes.fromhex(value)
         return True
     except ValueError:
         return False
+
+
+def read_secret_list(path):
+    try:
+        raw = path.read_text(encoding="ascii")
+    except OSError as exc:
+        fail(f"cannot read MTProxy secret file: {exc}")
+    values = [canonical_secret(item.strip()).lower() for item in raw.splitlines() if item.strip()]
+    if not values or any(not valid_secret(item) for item in values):
+        fail("MTProxy secret file must contain one 32-hex secret per line")
+    if len(values) != len(set(values)):
+        fail("MTProxy secret file contains duplicate secrets")
+    return values
 
 
 def main():
@@ -94,9 +115,7 @@ def main():
                 fail("every profile must contain a 16-byte hex secret")
     else:
         if secret_path.exists():
-            secret = secret_path.read_text(encoding="ascii").strip()
-            if not valid_secret(secret):
-                fail("existing MTProxy secret must be exactly 32 hex characters")
+            secret = read_secret_list(secret_path)[0]
         else:
             secret = secrets.token_hex(16)
         profiles_doc = {"profiles": [{
@@ -111,14 +130,13 @@ def main():
     if not default_profiles:
         fail("profiles.json must include a profile named 'default'")
     default_secret = default_profiles[0]["secret"]
+    expected_secrets = [canonical_secret(p["secret"]).lower() for p in profiles_doc["profiles"]]
     if secret_path.exists():
-        current_secret = secret_path.read_text(encoding="ascii").strip()
-        if not valid_secret(current_secret):
-            fail("existing MTProxy secret must be exactly 32 hex characters")
-        if current_secret.lower() != default_secret.lower():
-            fail("MTProxy secret does not match the default profile secret; refusing to overwrite either")
+        current_secrets = read_secret_list(secret_path)
+        if set(current_secrets) != set(expected_secrets):
+            fail("MTProxy secret list does not match profile secrets; refusing to overwrite either")
     else:
-        atomic_write(secret_path, (default_secret.lower() + "\n").encode("ascii"), 0o600)
+        atomic_write(secret_path, ("\n".join(expected_secrets) + "\n").encode("ascii"), 0o600)
 
     if config_path.exists():
         config = load_json(config_path)
