@@ -393,6 +393,8 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 	switch body.Action {
 	case "delete":
 		args = []string{"profile", "delete", name, "--yes"}
+	case "backup":
+		args = []string{"profile", "backup", name}
 	default:
 		errOut(w, http.StatusBadRequest, "Неизвестная операция")
 		return
@@ -402,6 +404,98 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOut(w, map[string]string{"status": "ok"})
+}
+
+
+func (a *App) profileImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		errOut(w, http.StatusBadRequest, "Не удалось прочитать архив или превышен лимит 10 МБ")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	file, header, err := r.FormFile("archive")
+	if err != nil || header.Size > 10<<20 {
+		errOut(w, http.StatusBadRequest, "Выберите архив профиля размером до 10 МБ")
+		return
+	}
+	defer file.Close()
+
+	target := r.FormValue("target")
+	name := r.FormValue("name")
+	entry := r.FormValue("entry")
+	args := []string{"profile", "import"}
+	if target == "default" {
+		args = append(args, "--replace-default")
+	} else if target == "new" && nameRE.MatchString(name) {
+		args = append(args, "--name", name)
+	} else {
+		errOut(w, http.StatusBadRequest, "Укажите корректный тип импорта и имя профиля")
+		return
+	}
+	if entry != "" && !regexp.MustCompile("^(profiles|opt/telegram-web-proxy/config/proxy/profiles)/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/profile\\.json$").MatchString(entry) {
+		errOut(w, http.StatusBadRequest, "Некорректный путь профиля внутри архива")
+		return
+	}
+
+	importDir := filepath.Join(a.backupDir, "imports")
+	if err := os.MkdirAll(importDir, 0700); err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось подготовить временную директорию")
+		return
+	}
+	temp, err := os.CreateTemp(importDir, "profile-import-*.tar.gz")
+	if err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось сохранить загруженный архив")
+		return
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	written, copyErr := io.Copy(temp, io.LimitReader(file, (10<<20)+1))
+	closeErr := temp.Close()
+	if copyErr != nil || closeErr != nil || written > 10<<20 {
+		errOut(w, http.StatusBadRequest, "Не удалось сохранить архив или превышен лимит 10 МБ")
+		return
+	}
+	if err := os.Chmod(tempPath, 0600); err != nil {
+		errOut(w, http.StatusInternalServerError, "Не удалось защитить временный архив")
+		return
+	}
+	args = append([]string{args[0], tempPath}, args[1:]...)
+	if entry != "" {
+		args = append(args, "--entry", entry)
+	}
+	args = append(args, "--yes")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	if _, err := a.command(ctx, args...); err != nil {
+		errOut(w, http.StatusConflict, "Импорт не выполнен: проверьте архив, имя и выбранный профиль")
+		return
+	}
+	jsonOut(w, map[string]string{"status": "imported"})
+}
+
+func (a *App) profileBackupDownload(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/"+a.base+"/api/profile-backups/")
+	pattern := regexp.MustCompile("^trpoxy-profile-backup-[A-Za-z0-9_-]+-[0-9]{8}-[0-9]{6}\\.tar\\.gz$")
+	if !pattern.MatchString(name) || filepath.Base(name) != name {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(a.backupDir, "profile-backups", name)
+	if _, err := os.Stat(path); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
+	http.ServeFile(w, r, path)
 }
 
 func redactConfig(value any) any {
@@ -461,14 +555,15 @@ func (a *App) diagnostics(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) backups(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		files, _ := filepath.Glob(filepath.Join(a.backupDir, "tproxy-backup-*.tar.gz"))
-		sort.Sort(sort.Reverse(sort.StringSlice(files)))
+		full, _ := filepath.Glob(filepath.Join(a.backupDir, "tproxy-backup-*.tar.gz"))
+		profiles, _ := filepath.Glob(filepath.Join(a.backupDir, "profile-backups", "*.tar.gz"))
 		items := []map[string]any{}
-		for _, file := range files {
-			if stat, err := os.Stat(file); err == nil {
-				items = append(items, map[string]any{
-					"name": filepath.Base(file), "size": stat.Size(), "modified": stat.ModTime(),
-				})
+		for _, group := range []struct{ files []string; kind string }{{full, "full"}, {profiles, "profile"}} {
+			sort.Sort(sort.Reverse(sort.StringSlice(group.files)))
+			for _, file := range group.files {
+				if stat, err := os.Stat(file); err == nil {
+					items = append(items, map[string]any{"name": filepath.Base(file), "size": stat.Size(), "modified": stat.ModTime(), "kind": group.kind})
+				}
 			}
 		}
 		jsonOut(w, items)
@@ -554,7 +649,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc(prefix+"/logout", a.auth(a.logout))
 	mux.HandleFunc(prefix+"/", a.home)
 	mux.HandleFunc(prefix+"/api/profiles", a.auth(a.profiles))
+	mux.HandleFunc(prefix+"/api/profiles/import", a.auth(a.profileImport))
 	mux.HandleFunc(prefix+"/api/profiles/", a.auth(a.profileAction))
+	mux.HandleFunc(prefix+"/api/profile-backups/", a.auth(a.profileBackupDownload))
 	mux.HandleFunc(prefix+"/api/config", a.auth(a.configuration))
 	mux.HandleFunc(prefix+"/api/diagnostics", a.auth(a.diagnostics))
 	mux.HandleFunc(prefix+"/api/backups", a.auth(a.backups))
