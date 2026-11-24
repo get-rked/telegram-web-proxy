@@ -53,8 +53,9 @@ start_proxy() {
         -M "${MTPROXY_WORKERS:-1}" &
     child=$!
     sleep 3
-    if ! kill -0 "$child" 2>/dev/null; then
-        wait "$child" || true
+    if ! kill -0 "$child" 2>/dev/null || ! curl --fail --silent --max-time 2 http://127.0.0.1:8888/stats >/dev/null; then
+        kill -TERM "$child" 2>/dev/null || true
+        wait "$child" 2>/dev/null || true
         child=
         return 1
     fi
