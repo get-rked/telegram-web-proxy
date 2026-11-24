@@ -24,88 +24,57 @@ tproxy_bootstrap_repository() {
     printf 'Запусти установщик от root: sudo bash %q\n' "$0" >&2
     exit 1
   }
-  local script_path stamp backup_root archive stage clone_tmp old_tree
+  local script_path stamp backup_root archive clone_tmp old_tree
   script_path="$(readlink -f -- "$0")"
   if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]]; then
     if [[ "$script_path" != "$TPROXY_DEPLOY_DIR/tgweb-install.sh" ]]; then
-      exec env TPROXY_BOOTSTRAP_DONE=1 TPROXY_NATIVE_SOURCE_DIR="${TPROXY_NATIVE_SOURCE_DIR:-}" bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
+      exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
     fi
     return 0
   fi
-  printf '\n=== Первоначальное развёртывание Telegram Web Proxy ===\n'
+  printf '\n=== Первоначальное развёртывание Telegram Web Proxy (Docker) ===\n'
   command -v apt-get >/dev/null 2>&1 || { echo "Поддерживаются Ubuntu/Debian с apt-get." >&2; exit 1; }
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git tar
   backup_root="/var/backups/telegram-web-proxy"
-  install -d -o root -g root -m 0700 "$backup_root" /var/lib/telegram-web-proxy
+  install -d -o root -g root -m 0700 "$backup_root"
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  stage="/var/lib/telegram-web-proxy/native-source-$stamp"
   clone_tmp="/opt/.telegram-web-proxy-deploy-$stamp"
-  old_tree="/opt/.telegram-web-proxy-old-$stamp"
+  old_tree="/opt/telegram-web-proxy.previous-$stamp"
   archive=""
   if [[ -e "$TPROXY_DEPLOY_DIR" || -L "$TPROXY_DEPLOY_DIR" ]]; then
     [[ ! -L "$TPROXY_DEPLOY_DIR" && -d "$TPROXY_DEPLOY_DIR" ]] || { echo "Отказ: $TPROXY_DEPLOY_DIR существует, но не является обычным каталогом." >&2; exit 1; }
-    archive="$backup_root/native-install-$stamp.tar.gz"
-    echo "[1/4] Создаю резервную копию прежней установки..."
+    archive="$backup_root/previous-project-$stamp.tar.gz"
+    echo "[1/3] Сохраняю существующий каталог целиком, без анализа или переноса его конфигурации..."
     tar -C /opt -czpf "$archive" telegram-web-proxy
     tar -tzf "$archive" >/dev/null || { echo "Проверка архива не пройдена; исходный каталог не изменён." >&2; exit 1; }
     chmod 0600 "$archive"
-    echo "[2/4] Извлекаю исходные настройки для переноса..."
-    install -d -o root -g root -m 0700 "$stage"
-    tar -C "$stage" --strip-components=1 -xzf "$archive"
-    if [[ ! -s "$stage/config/proxy/config.json" ]]; then
-      echo "Старая конфигурация Web Proxy не найдена; будет предложена чистая установка."
-      rm -rf -- "$stage"
-      stage=""
-    fi
-  else
-    stage=""
+    mv -- "$TPROXY_DEPLOY_DIR" "$old_tree"
   fi
-  echo "[3/4] Загружаю репозиторий в $TPROXY_DEPLOY_DIR..."
+  echo "[2/3] Загружаю Docker-репозиторий..."
   rm -rf -- "$clone_tmp"
-  git clone --single-branch --branch "$TPROXY_DEPLOY_BRANCH" "$TPROXY_DEPLOY_REPO" "$clone_tmp" || {
-    echo "Не удалось загрузить репозиторий; прежняя установка сохранена." >&2
+  if ! git clone --single-branch --branch "$TPROXY_DEPLOY_BRANCH" "$TPROXY_DEPLOY_REPO" "$clone_tmp"; then
+    [[ ! -e "$old_tree" ]] || mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
     rm -rf -- "$clone_tmp"
+    echo "Не удалось загрузить репозиторий; предыдущий каталог восстановлен." >&2
     exit 1
-  }
+  fi
   [[ -s "$clone_tmp/tgweb-install.sh" && -s "$clone_tmp/docker-compose.yml" ]] || {
-    echo "Загруженный репозиторий неполный; прежняя установка сохранена." >&2
+    [[ ! -e "$old_tree" ]] || mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
     rm -rf -- "$clone_tmp"
+    echo "Загруженный репозиторий неполный; предыдущий каталог восстановлен." >&2
     exit 1
   }
-  if [[ -n "$stage" ]]; then
-    printf '%s\n' "$stage" > /var/lib/telegram-web-proxy/native-source-path
-    chmod 0600 /var/lib/telegram-web-proxy/native-source-path
-  else
-    rm -f /var/lib/telegram-web-proxy/native-source-path
-  fi
-  if [[ -e "$TPROXY_DEPLOY_DIR" ]]; then mv -- "$TPROXY_DEPLOY_DIR" "$old_tree"; fi
   if ! mv -- "$clone_tmp" "$TPROXY_DEPLOY_DIR"; then
-    [[ -e "$old_tree" ]] && mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
-    echo "Не удалось развернуть репозиторий; выполнен возврат прежнего каталога." >&2
+    [[ ! -e "$old_tree" ]] || mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
+    echo "Не удалось развернуть Docker-репозиторий." >&2
     exit 1
   fi
-  # Keep the previous native tree layout at its original absolute paths.
-  # Existing systemd units and rollback binaries therefore remain usable.
-  if [[ -n "$stage" ]]; then
-    local native_item
-    for native_item in bin config data src systemd qr backups; do
-      if [[ -e "$stage/$native_item" && ! -e "$TPROXY_DEPLOY_DIR/$native_item" ]]; then
-        if ! cp -a "$stage/$native_item" "$TPROXY_DEPLOY_DIR/$native_item"; then
-          rm -rf -- "$TPROXY_DEPLOY_DIR"
-          [[ -e "$old_tree" ]] && mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
-          echo "Не удалось вернуть native-файлы в прежние пути; восстановлен старый каталог." >&2
-          exit 1
-        fi
-      fi
-    done
-  fi
-  rm -rf -- "$old_tree"
   chmod 0755 "$TPROXY_DEPLOY_DIR/tgweb-install.sh"
-  echo "[4/4] Репозиторий установлен."
-  [[ -n "$archive" ]] && echo "Резервная копия прежней установки: $archive"
-  [[ -n "$stage" ]] && echo "Настройки для переноса сохранены: $stage"
-  exec env TPROXY_BOOTSTRAP_DONE=1 TPROXY_NATIVE_SOURCE_DIR="$stage" bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
+  echo "[3/3] Docker-репозиторий установлен."
+  [[ -n "$archive" ]] && echo "Резервная копия прежнего каталога: $archive"
+  [[ -e "$old_tree" ]] && echo "Предыдущий каталог сохранён отдельно: $old_tree"
+  exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
 }
 tproxy_bootstrap_repository "$@"
 
@@ -252,7 +221,7 @@ Telegram Web Proxy — Docker Manager
   sudo /opt/telegram-web-proxy/tgweb-install.sh
 
 Основные команды:
-  docker install [--web-server caddy|nginx] [--hostname FQDN] [--email EMAIL]
+  docker install [--web-server caddy|nginx] [--hostname FQDN] [--email EMAIL] [--relay-port PORT] [--admin-port PORT] [--secret-prefix plain|dd] [--secret HEX]
   docker update                 Обновить код и Docker-образы
   docker status                 Состояние контейнеров
   docker restart [SERVICE]      Перезапуск Docker-сервисов
@@ -261,9 +230,7 @@ Telegram Web Proxy — Docker Manager
   docker uninstall              Удалить контейнеры, сохранить данные
   docker purge [--volumes]      Удалить контейнеры и образы; volumes отдельно
 
-Установка автоматически определяет, есть ли сохранённая native-конфигурация:
-  - если есть — выполняет контролируемый перенос;
-  - если нет — запрашивает домен/email и выполняет чистую установку.
+Установщик выполняет только новую Docker-установку и обслуживание Docker-проекта.
 
 Для Docker Manager используются Ubuntu/Debian, systemd, apt-get и права root.
 EOF
@@ -2803,7 +2770,7 @@ docker_uninstall_command() {
   ui_header "Удаление Docker-установки"
   echo "Будут остановлены и удалены контейнеры проекта и его сеть."
   echo "Будут сохранены: конфигурация, .env, реквизиты панели, сайт и ВСЕ именованные тома."
-  echo "Нативная установка $BASE_DIR не затрагивается."
+  echo "Сторонние и прежние установки вне Docker-проекта не затрагиваются."
   confirm "Остановить и удалить Docker-контейнеры?" || { info "Удаление отменено."; return 0; }
   docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans || die "Не удалось удалить Docker-контейнеры."
   ok "Docker-контейнеры удалены. Данные и тома сохранены."
@@ -2903,7 +2870,7 @@ docker_menu() {
   local choice
   while true; do
     ui_header "Docker — установка и обслуживание"
-    ui_option 1 "⇧" "Установить / перенести native → Docker"
+    ui_option 1 "⇧" "Новая Docker-установка"
     ui_option 2 "↻" "Обновить и пересобрать контейнеры"
     ui_option 3 "⌫" "Удалить контейнеры (данные сохранить)"
     ui_option 4 "✖" "Очистить проект (образы; тома отдельно)"
@@ -4653,7 +4620,7 @@ show_tools_menu() {
 show_menu() {
   local choice
   ui_header "Telegram Web Proxy — Docker Manager v${SCRIPT_VERSION}"
-  ui_option 1 "⇧" "Установить / перенести Web Proxy в Docker"
+  ui_option 1 "⇧" "Новая Docker-установка"
   ui_option 2 "↻" "Обновить код и Docker-образы"
   ui_option 3 "▤" "Состояние контейнеров"
   ui_option 4 "⟳" "Перезапустить Docker-сервисы"
@@ -4734,7 +4701,7 @@ main() {
     diagnostics) docker_status_command; docker_logs_command ;;
     backup) docker_backup_command ;;
     restore|profile|upstream|services|site|web-server)
-      die "Эта команда относится к прежнему native-менеджеру. Native-установка сохранена в резервной копии; основной режим теперь Docker Manager." ;;
+      die "Команда не поддерживается Docker Manager." ;;
     docker) docker_cli "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     *) die "Неизвестная команда: $MODE (docker|install|update|uninstall|purge|status|backup|help)" ;;
