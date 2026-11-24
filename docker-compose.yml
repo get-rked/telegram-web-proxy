@@ -24,7 +24,7 @@ services:
       dockerfile: docker/Dockerfile.relay
     restart: unless-stopped
     environment:
-      TPROXY_CONFIG: /etc/tproxy-server/config.json
+      TPROXY_CONFIG: /etc/tproxy-config/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
     command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json"]
     volumes:
@@ -133,6 +133,7 @@ services:
       panel: {condition: service_started}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/config:/etc/tproxy-config:ro
       - ./docker/security/logs:/var/log/tproxy-panel:rw
       - caddy-data:/data
       - caddy-config:/config
@@ -194,8 +195,7 @@ services:
     restart: unless-stopped
     environment:
       PANEL_ADDR: ":8088"
-      PANEL_USER: ${PANEL_USER:-admin}
-      PANEL_PASSWORD: ${PANEL_PASSWORD:?Set PANEL_PASSWORD in .env}
+      PANEL_AUTH_FILE: /etc/tproxy-config/panel-auth.json
       PANEL_DB: /var/lib/tproxy-panel/panel.db
       TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
@@ -208,7 +208,7 @@ services:
       panel-volume-init: {condition: service_completed_successfully}
     volumes:
       - panel-data:/var/lib/tproxy-panel
-      - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
+      - ./docker/config:/etc/tproxy-config:ro
       - ./docker/profiles:/var/lib/tproxy-profiles:rw
       - ./docker/mtproxy:/run/mtproxy:rw
       - ./docker/security/logs:/var/log/tproxy-panel:rw
