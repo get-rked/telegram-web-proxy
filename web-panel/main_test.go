@@ -175,3 +175,34 @@ func TestLoginRejectsSQLInjectionUsername(t *testing.T) {
 		t.Fatalf("valid login returned status %d, want %d", response.Code, http.StatusSeeOther)
 	}
 }
+
+func TestProxyClientSecretMatchesInstallerFormat(t *testing.T) {
+	got := proxyClientSecret("0123456789abcdef0123456789abcdef", "random-base")
+	want := "cDAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVm"
+	if got != want {
+		t.Fatalf("unexpected client secret: %q", got)
+	}
+	if plain := proxyClientSecret("0123456789abcdef0123456789abcdef", ""); plain != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("unexpected plain secret: %q", plain)
+	}
+}
+
+func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	profileDir := filepath.Join(configDir, "profiles", "alpha")
+	if err := os.MkdirAll(profileDir, 0700); err != nil { t.Fatal(err) }
+	config := `{"public_hostname":"proxy.example.test","base_path":"random-path"}`
+	profile := `{"name":"alpha","secret":"0123456789abcdef0123456789abcdef","backend":"127.0.0.1:2398","carrier_mode":"https-lanes"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(config), 0600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(profile), 0600); err != nil { t.Fatal(err) }
+	a := &App{configDir: configDir}
+	got, err := a.profileDetails("alpha")
+	if err != nil { t.Fatal(err) }
+	if got["server"] != "proxy.example.test/random-path" { t.Fatalf("unexpected server: %q", got["server"]) }
+	if strings.Contains(strings.Join([]string{got["server"], got["link"]}, " "), "127.0.0.1:2398") {
+		t.Fatal("internal backend leaked into client configuration")
+	}
+	if got["carrier_mode"] != "https-lanes" || got["name"] != "alpha" { t.Fatalf("unexpected profile metadata: %#v", got) }
+	if !strings.Contains(got["link"], "https://t.me/webproxy?") { t.Fatalf("unexpected Telegram link: %q", got["link"]) }
+}
