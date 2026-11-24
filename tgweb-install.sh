@@ -40,7 +40,8 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.0.2"
+readonly SCRIPT_VERSION="1.1.0"
+readonly PANEL_SOURCE_REF="feature/web-admin-panel"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -247,8 +248,7 @@ prompt_value() {
     read -r -p "$label: " input || die "ввод прерван"
     if [[ -z "$input" ]]; then echo "  ⚠️  обязательно"; continue; fi
     if err="$("$validator" "$input")"; then
-      printf -v "$__var" '%s' "$input"; return 0
-    else
+      printf -v "$__var" '%s' "$input"; return 0    else
       echo "  ⚠️  $err — попробуй ещё раз"
     fi
   done
@@ -497,8 +497,7 @@ package_installed() {
 caddyfile_routes_to_tproxy() {
   [[ -s /etc/caddy/Caddyfile ]] || return 1
   grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
-  grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile
-}
+  grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile}
 
 # Проверка полной совместимости Caddy с текущими параметрами.
 caddy_config_compatible() {
@@ -747,8 +746,7 @@ PYTHON
     output="$(TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" "$caddy_bin" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | python3 "$parser" caddy "$HOSTNAME_ARG")"; rc=$?
     set -e
     rm -f "$parser"
-    if (( rc != 0 )); then die "Не удалось безопасно определить сайт Caddy на 80/443 (чужой домен или неоднозначная конфигурация). Ничего не изменено."; fi
-    root="$output"
+    if (( rc != 0 )); then die "Не удалось безопасно определить сайт Caddy на 80/443 (чужой домен или неоднозначная конфигурация). Ничего не изменено."; fi    root="$output"
     [[ -d "$root" && "$root" != / ]] || die "Корневой каталог существующего сайта недопустим или не найден: $root"
     [[ -f "$root/index.html" ]] || die "В каталоге $root нет index.html. Установщик не будет угадывать структуру сайта."
   fi
@@ -997,8 +995,7 @@ check_telegram_connectivity() {
     if [[ "$NONINTERACTIVE" == "1" ]]; then
       die "Проверка Telegram DC не пройдена; non-interactive установка остановлена"
     fi
-    confirm "Продолжить несмотря на недоступность Telegram DC?" || die "установка отменена после проверки сети"
-  fi
+    confirm "Продолжить несмотря на недоступность Telegram DC?" || die "установка отменена после проверки сети"  fi
   if (( ! core_ok )); then
     warn "core.telegram.org недоступен по HTTPS. Проверка DC прошла отдельно; проверь сетевые ограничения и DNS."
   fi
@@ -1247,8 +1244,7 @@ ensure_go() {
     mv "$dir/go" "/opt/go${GO_FALLBACK_VERSION}"
   fi
   rm -f "$archive"; rm -rf "$dir"
-  GO_BIN="/opt/go${GO_FALLBACK_VERSION}/bin/go"
-  ok "Go: $("$GO_BIN" version)"
+  GO_BIN="/opt/go${GO_FALLBACK_VERSION}/bin/go"  ok "Go: $("$GO_BIN" version)"
 }
 
 build_tproxy() {
@@ -1498,7 +1494,6 @@ profile_storage_rebuild() {
       die "profiles.json повреждён, а индивидуальных файлов профилей нет. Восстановление без исходных секретов невозможно."
     fi
   fi
-
   while IFS= read -r -d '' dir; do
     name="${dir##*/}"
     [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] ||
@@ -1747,8 +1742,7 @@ EOF
 
 verify_site_permissions() {
   info "Проверяю права на $SITE_DIR…"
-  local unreadable=0
-  while IFS= read -r -d '' f; do
+  local unreadable=0  while IFS= read -r -d '' f; do
     if ! sudo -u tproxy test -r "$f"; then
       warn "tproxy не может прочитать: $f"
       unreadable=1
@@ -1997,8 +1991,7 @@ run_config() {
   if (( count > 1 )); then
     echo
     ui_header "Выбор профиля для просмотра"
-    while IFS=$'\t' read -r profile_name carrier_mode; do
-      index=$((index + 1))
+    while IFS=$'\t' read -r profile_name carrier_mode; do      index=$((index + 1))
       ui_option "$index" "◆" "$profile_name · $carrier_mode"
     done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https")] | @tsv' "$profiles")
     ui_option 0 "←" "Назад"
@@ -2247,8 +2240,7 @@ EOF
     cat <<'EOF'
   Сначала будет проверено, какие зависимости и компоненты уже установлены.
   Будут добавлены только отсутствующие пакеты; существующие Go, Caddy,
-  Nginx и подходящая сборка MTProxy будут повторно использованы.
-  Конфигурации сторонних сайтов сохраняются или резервируются перед изменением.
+  Nginx и подходящая сборка MTProxy будут повторно использованы.  Конфигурации сторонних сайтов сохраняются или резервируются перед изменением.
   Домен должен указывать на IP этого сервера.
 EOF
   fi
@@ -2412,6 +2404,7 @@ run_install() {
     restart_proxy_services
   fi
   wait_ready || die "relay не прошёл health-check"
+  install_admin_panel
   UPDATE_TRANSACTION_ACTIVE=0
   if [[ "$MODE" == "update" ]]; then
     ok "Обновление прошло health-check; rollback-копия сохранена: $UPDATE_ROLLBACK_ARCHIVE"
@@ -2425,6 +2418,10 @@ run_install() {
 
 run_uninstall() {
   require_root
+  systemctl disable --now tproxy-panel.service 2>/dev/null || true
+  rm -f /etc/systemd/system/tproxy-panel.service "$SYSTEMD_DIR/tproxy-panel.service"
+  rm -f /etc/fail2ban/filter.d/tproxy-panel.conf /etc/fail2ban/jail.d/tproxy-panel.local
+  systemctl restart fail2ban.service 2>/dev/null || true
   remove_legacy_compat_links
   local installed_web_server
   installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
@@ -2461,7 +2458,7 @@ run_uninstall() {
 
   nft delete table inet tproxy_backend 2>/dev/null || true
 
-  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
+  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR/panel" "$BIN_DIR/tproxy-panel" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
   info "Каталог сайта $SITE_DIR сохранён."
 
   userdel -r tproxy 2>/dev/null || true
@@ -2497,8 +2494,7 @@ remove_decoy_site() {
   rm -rf -- "$SITE_DIR"
   ok "Каталог сайта удалён: $SITE_DIR"
 }
-remove_web_server_interactive() {
-  require_root
+remove_web_server_interactive() {  require_root
   local installed_web_server
   installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
   if [[ "$installed_web_server" != caddy && "$installed_web_server" != nginx ]]; then
@@ -2743,11 +2739,11 @@ backup_command() {
   local -a items=()
   local p
   for p in \
-    opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website \
+    opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website opt/telegram-web-proxy/data/panel \
     opt/telegram-web-proxy/bin opt/telegram-web-proxy/src \
     etc/caddy/Caddyfile etc/caddy/Caddyfile.d \
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
-    etc/nginx/conf.d/tproxy-websocket-map.conf \
+    etc/nginx/conf.d/tproxy-websocket-map.conf \\
     etc/letsencrypt \
     etc/systemd/system/tproxy-server.service \
     etc/systemd/system/mtproxy.service \
@@ -2781,6 +2777,8 @@ list_backup_archives() {
 restore_command() {
   local selection="${1:-}" archive="" i size
   local -a archives=()
+  if [[ "${2:-}" == "--yes" && $# -eq 2 ]]; then ASSUME_YES=1
+  elif (( $# > 1 )); then die "restore принимает только номер архива и необязательный --yes"; fi
   mapfile -d '' -t archives < <(list_backup_archives)
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
 
@@ -2998,7 +2996,6 @@ profile_manifest_sync() {
   while IFS= read -r -d '' file; do
     [[ "$file" == "$PROFILE_DIR/default/profile.json" ]] || profile_files+=("$file")
   done < <(find "$PROFILE_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
-
   (( ${#profile_files[@]} > 0 )) || die "В каталогах не найдено ни одного профиля."
   (( ${#profile_files[@]} <= 32 )) || die "В хранилище не может быть более 32 профилей."
 
@@ -3247,8 +3244,7 @@ profile_menu() {
     while IFS= read -r profile_row; do
       name="$(cut -f1 <<< "$profile_row")"; mode="$(cut -f2 <<< "$profile_row")"; backend="$(cut -f3 <<< "$profile_row")"
       case "$mode" in https) mode_label="HTTPS" ;; https-lanes) mode_label="HTTPS · несколько каналов" ;; websocket) mode_label="WebSocket" ;; websocket-lanes) mode_label="WebSocket · несколько каналов" ;; *) mode_label="$mode" ;; esac
-      printf "  ◆ %-20s | %-28s | backend %s\n" "$name" "$mode_label" "$backend"
-    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
+      printf "  ◆ %-20s | %-28s | backend %s\n" "$name" "$mode_label" "$backend"    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
     echo
     ui_option 1 "+" "Добавить профиль"
     ui_option 2 "↻" "Изменить Carrier mode выбранного профиля"
@@ -3497,8 +3493,7 @@ show_menu() {
     2) MODE=update ;;
     3) MODE=delete ;;
     4) MODE=config ;;
-    5) MODE=tools ;;
-    6) exit 0 ;;
+    5) MODE=tools ;;    6) exit 0 ;;
     *) warn "Неверный выбор." ;;
   esac
 }
@@ -3747,8 +3742,7 @@ profile_import_menu() {
   local -a archives=() profile_paths=()
   mapfile -t archives < <(profile_archive_list)
   ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
-  ui_header "Импорт профиля из резервной копии"
-  for i in "${!archives[@]}"; do
+  ui_header "Импорт профиля из резервной копии"  for i in "${!archives[@]}"; do
     if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
       printf '  \033[1;34m%2d)\033[0m %s\n' "$((i+1))" "${archives[$i]##*/}"
     else
@@ -3997,8 +3991,7 @@ upstream_menu() {
 
     printf '  Найденные приложения:\n'
     for ((i=0; i<${#ports[@]}; i++)); do
-      ui_option "$((i+1))" "●" "http://127.0.0.1:${ports[$i]}  [HTTP ${codes[$i]}]"
-    done
+      ui_option "$((i+1))" "●" "http://127.0.0.1:${ports[$i]}  [HTTP ${codes[$i]}]"    done
     printf '\n'
     ui_option "$((${#ports[@]}+1))" "↻" "Обновить список"
     ui_option "$((${#ports[@]}+2))" "←" "Назад"
@@ -4247,8 +4240,7 @@ profile_cli() {
       file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
       tmp="$(mktemp "$file.XXXXXX")"; jq --arg m "$mode" '.carrier_mode=$m' "$file" > "$tmp"
       chown root:tproxy "$tmp"; chmod 0640 "$tmp"; mv -f "$tmp" "$file"; profile_manifest_sync
-      "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Проверка конфигурации не пройдена."
-      systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
+      "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Проверка конфигурации не пройдена."      systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
       ok "Carrier mode профиля $name изменён." ;;
     delete)
       [[ $# -eq 2 && "$2" == --yes ]] || die "profile delete ИМЯ --yes"
@@ -4348,6 +4340,115 @@ upstream_cli() {
   if ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then cp -a "$backup" "$CONFIG_FILE"; die "Проверка не пройдена; конфигурация восстановлена."; fi
   systemctl restart tproxy-server || { cp -a "$backup" "$CONFIG_FILE"; systemctl restart tproxy-server || true; die "Перезапуск не удался; конфигурация восстановлена."; }
   ok "Настройка публичного сайта обновлена."
+}
+
+
+install_admin_panel() {
+  require_root
+  local source_tmp repo_dir panel_base panel_url candidate
+  source_tmp="$(mktemp -d /tmp/tproxy-panel.XXXXXX)"
+  repo_dir="$source_tmp/repo"
+  if ! git clone --depth 1 --branch "$PANEL_SOURCE_REF" https://github.com/get-rked/telegram-web-proxy.git "$repo_dir" >/dev/null 2>&1; then
+    rm -rf "$source_tmp"
+    die "Не удалось получить исходный код административной панели."
+  fi
+  cd "$repo_dir/web-panel"
+  if [[ "$SKIP_TESTS" -ne 1 ]]; then
+    "$GO_BIN" test ./... || { cd - >/dev/null; rm -rf "$source_tmp"; die "Тесты административной панели не пройдены."; }
+  fi
+  install -d -m 0700 "$DATA_DIR/panel"
+  candidate="$BIN_DIR/tproxy-panel.new.$BASHPID"
+  rm -f "$candidate"
+  if ! CGO_ENABLED=1 "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$candidate" .; then
+    cd - >/dev/null
+    rm -rf "$source_tmp" "$candidate"
+    die "Не удалось собрать административную панель."
+  fi
+  chown root:root "$candidate"
+  chmod 0755 "$candidate"
+  mv -f "$candidate" "$BIN_DIR/tproxy-panel"
+  cd - >/dev/null
+
+  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
+  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
+  install -m 0644 "$repo_dir/web-panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
+  install -d -m 0755 /etc/fail2ban/jail.d
+  install -m 0644 "$repo_dir/web-panel/fail2ban-jail.conf" /etc/fail2ban/jail.d/tproxy-panel.local
+
+  panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" PANEL_SCRIPT="$BASE_DIR/tgweb-install.sh" "$BIN_DIR/tproxy-panel" -print-basepath)"
+  [[ "$panel_base" =~ ^[A-Za-z0-9_-]{32}$ ]] || { rm -rf "$source_tmp"; die "Панель вернула некорректный basepath."; }
+
+  if [[ "$WEB_SERVER" == "caddy" ]]; then
+    python3 - "$panel_base" "$RELAY_PORT" <<'PYTHON'
+import pathlib, sys
+path = pathlib.Path("/etc/caddy/Caddyfile")
+base, relay = sys.argv[1:3]
+text = path.read_text()
+needle = f"reverse_proxy 127.0.0.1:{relay} {{"
+if f"handle /{base}/*" not in text:
+    if needle not in text:
+        raise SystemExit("Caddyfile relay route not found")
+    block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765\n\t}}\n\n\t"
+    text = text.replace(needle, block + needle, 1)
+    path.write_text(text)
+PYTHON
+    TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || {
+      rm -rf "$source_tmp"; die "Проверка Caddyfile после добавления панели не пройдена."
+    }
+    systemctl reload caddy.service || systemctl restart caddy.service || {
+      rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Caddy."
+    }
+  else
+    python3 - "$panel_base" <<'PYTHON'
+import pathlib, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+base = sys.argv[1]
+text = path.read_text()
+if f"location ^~ /{base}/" not in text:
+    tls = text.find("listen 443 ssl;")
+    if tls < 0:
+        raise SystemExit("TLS server block not found")
+    marker = text.find(" location / {", tls)
+    if marker < 0:
+        raise SystemExit("TLS proxy location not found")
+    block = f""" location ^~ /{base}/ {{
+  proxy_pass http://127.0.0.1:18765;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_read_timeout 90s;
+ }}
+"""
+    text = text[:marker] + block + text[marker:]
+    path.write_text(text)
+PYTHON
+    nginx -t || { rm -rf "$source_tmp"; die "Проверка Nginx после добавления панели не пройдена."; }
+    systemctl reload nginx.service || systemctl restart nginx.service || {
+      rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Nginx."
+    }
+  fi
+
+  if ! dpkg-query -W -f='\${Status}' fail2ban 2>/dev/null | grep -q '^install ok installed$'; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
+      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
+    }
+  fi
+  systemctl daemon-reload
+  systemctl enable --now tproxy-panel.service || { rm -rf "$source_tmp"; die "Не удалось запустить tproxy-panel.service."; }
+  fail2ban-client -t || { rm -rf "$source_tmp"; die "Конфигурация Fail2ban не прошла проверку."; }
+  systemctl enable --now fail2ban.service
+  systemctl restart fail2ban.service || { rm -rf "$source_tmp"; die "Не удалось запустить Fail2ban."; }
+
+  chmod 0600 "$DATA_DIR/panel/panel.db" 2>/dev/null || true
+  [[ ! -f "$DATA_DIR/panel/panel-credentials.txt" ]] || chmod 0600 "$DATA_DIR/panel/panel-credentials.txt"
+  panel_url="https://$HOSTNAME_ARG/$panel_base/"
+  rm -rf "$source_tmp"
+  ok "Административная панель установлена и защищена Fail2ban."
+  info "URL панели: $panel_url"
+  info "Первичные логин и пароль (показаны один раз) сохранены в $DATA_DIR/panel/panel-credentials.txt"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
