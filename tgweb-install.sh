@@ -765,7 +765,7 @@ PYTHON
 
 preflight_system() {
   require_root
-  local pkg svc version go_minor port
+  local pkg svc version go_minor port local_go_bin
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a missing_packages=()
   echo
@@ -1753,6 +1753,10 @@ install_caddyfile() {
     sed -i -E "s#(reverse_proxy[[:space:]]+127\.0\.0\.1:)[0-9]+#\1${RELAY_PORT}#g" /etc/caddy/Caddyfile
     ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
   fi
+
+  # Keep generated and pre-existing Caddyfiles consistently formatted.
+  /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null ||
+    die "Не удалось отформатировать Caddyfile."
 
   # Render the upstream unit with this installation's actual site directory.
   # The upstream template defaults to /srv/tproxy-site, while this installer
