@@ -268,13 +268,13 @@ def main():
             nat_info = f'{ipaddress.IPv4Address(match.group(1))}:{ipaddress.IPv4Address(match.group(2))}'
         except ipaddress.AddressValueError:
             raise MigrationError('MTPROXY_NAT_ARGS содержит некорректные IPv4-адреса.')
-    generated_panel_password = len(env.get('PANEL_PASSWORD', '')) < 16 or env.get('PANEL_PASSWORD', '').startswith('replace-with-')
-    env.update(DOMAIN=domain, ACME_EMAIL=email, PANEL_USER=env.get('PANEL_USER','admin'), PANEL_PASSWORD=env.get('PANEL_PASSWORD') if len(env.get('PANEL_PASSWORD', '')) >= 16 and not env.get('PANEL_PASSWORD', '').startswith('replace-with-') else secrets.token_urlsafe(24), MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'), MTPROXY_MAX_CONNECTIONS=mt_env.get('MTPROXY_MAX_CONNECTIONS','4096'))
+    env.update(DOMAIN=domain, ACME_EMAIL=email, MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'), MTPROXY_MAX_CONNECTIONS=mt_env.get('MTPROXY_MAX_CONNECTIONS','4096'))
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_WORKERS']): env['MTPROXY_WORKERS']='1'
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_MAX_CONNECTIONS']):
         raise MigrationError('MTPROXY_MAX_CONNECTIONS в mtproxy.env должен быть положительным целым числом.')
-    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_MAX_CONNECTIONS': env['MTPROXY_MAX_CONNECTIONS'], 'MTPROXY_NAT_INFO': nat_info}
-    env_text = update_env_text(env_path, env_updates).decode()
+    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_MAX_CONNECTIONS': env['MTPROXY_MAX_CONNECTIONS'], 'MTPROXY_NAT_INFO': nat_info}
+    env_lines = update_env_text(env_path, env_updates).decode().splitlines()
+    env_text = "\\n".join(line for line in env_lines if not line.startswith(('PANEL_USER=', 'PANEL_PASSWORD='))).rstrip() + "\\n"
     outputs = [
         (repo/'docker/config/config.json', (json.dumps(config, indent=2)+'\n').encode(), 0o600),
         (repo/'docker/config/token.key', token_data, 0o600),
@@ -304,10 +304,7 @@ def main():
     print(f'Резервная копия: {archive}')
     print('Миграция подготовлена. Нативные службы всё ещё работают.')
     print('Перед запуском Docker останови native Caddy/Nginx и MTProxy/tproxy-server, чтобы не было конфликта портов и двух экземпляров backend.')
-    if generated_panel_password:
-        print('Создан новый пароль панели (сохрани его сейчас): PANEL_USER=' + env['PANEL_USER'] + ' PANEL_PASSWORD=' + env['PANEL_PASSWORD'])
-    else:
-        print('Существующие учётные данные панели сохранены в .env.')
+    print('Логин, пароль и Base Path панели будут сгенерированы bootstrap при первом запуске Docker.')
     print('Далее запускай только один профиль reverse proxy и профиль MTProxy согласно docker/README.md.')
     return 0
 
