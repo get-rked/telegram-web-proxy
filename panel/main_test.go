@@ -135,6 +135,25 @@ func TestCreateProfileGeneratesSecretAndWritesBackup(t *testing.T) {
 	if err != nil || len(backups) != 1 { t.Fatalf("backups=%v err=%v", backups, err) }
 }
 
+func TestProfileConfigReturnsDDSecretAndClientLink(t *testing.T) {
+	a := testApp(t)
+	response := httptest.NewRecorder()
+	a.profileConfig(response, authRequest(http.MethodGet, "/api/profiles/default/config", "", false), "default")
+	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
+	var result struct { Secret string `json:"secret"`; Link string `json:"link"`; Port int `json:"port"` }
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
+	if result.Secret != "dd00112233445566778899aabbccddeeff" { t.Fatalf("wrong client secret: %q", result.Secret) }
+	if result.Port != 443 || !strings.Contains(result.Link, "secret=dd") || !strings.Contains(result.Link, "server=proxy.example.com") { t.Fatalf("invalid proxy link: %+v", result) }
+}
+
+func TestProfileQRReturnsPNG(t *testing.T) {
+	a := testApp(t)
+	response := httptest.NewRecorder()
+	a.profileQR(response, authRequest(http.MethodGet, "/api/profiles/default/qr", "", false), "default")
+	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
+	if response.Header().Get("Content-Type") != "image/png" || !strings.HasPrefix(string(response.Body.Bytes()), "\\x89PNG") { t.Fatal("QR response is not a PNG image") }
+}
+
 func TestMutationRequiresSameOriginAndCustomHeader(t *testing.T) {
 	a := testApp(t)
 	request := authRequest(http.MethodPost, "/admin/api/profiles", `{"name":"mobile","backend":"127.0.0.1:2398","carrier_mode":"https"}`, false)

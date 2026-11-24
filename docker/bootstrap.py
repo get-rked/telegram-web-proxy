@@ -142,11 +142,15 @@ def main():
         for item in profiles:
             if not isinstance(item, dict) or not valid_secret(item.get("secret")):
                 fail("every profile must contain a 16-byte hex secret")
+            item["secret"] = "dd" + canonical_secret(item["secret"]).lower()
+        normalized = (json.dumps(profiles_doc, indent=2) + "\\n").encode("utf-8")
+        if profiles_path.read_bytes() != normalized:
+            atomic_write(profiles_path, normalized, 0o600)
     else:
         if secret_path.exists():
-            secret = read_profile_secret(secret_path)
+            secret = "dd" + canonical_secret(read_profile_secret(secret_path)).lower()
         else:
-            secret = secrets.token_hex(16)
+            secret = "dd" + secrets.token_hex(16)
         profiles_doc = {"profiles": [{
             "name": "default",
             "secret": secret,

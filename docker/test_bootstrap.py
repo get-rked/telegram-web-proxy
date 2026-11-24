@@ -53,8 +53,8 @@ class BootstrapTests(unittest.TestCase):
         bootstrap.main()
         profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
         secret = (self.mtproxy_dir / "secret").read_text().strip()
-        self.assertEqual(profile["secret"], secret)
-        self.assertEqual(len(bytes.fromhex(secret)), 16)
+        self.assertEqual(profile["secret"], "dd" + secret)
+        self.assertEqual(len(bytes.fromhex(profile["secret"][2:])), 16)
         self.assertEqual((self.config_dir / "token.key").stat().st_size, 32)
         self.assertEqual((self.config_dir / "token.key").stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.config_dir / "config.json").stat().st_mode & 0o777, 0o640)
@@ -123,6 +123,18 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn(auth_after["username"], credentials_after)
         self.assertEqual(auth_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(credentials_path.stat().st_mode & 0o777, 0o600)
+
+    def test_existing_unprefixed_profile_is_migrated_to_dd(self):
+        raw = "ab" * 16
+        (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [{
+            "name": "default", "secret": raw,
+            "backend": "127.0.0.1:2398", "carrier_mode": "https"
+        }]}))
+        (self.mtproxy_dir / "secret").write_text(raw + "\\n")
+        bootstrap.main()
+        profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
+        self.assertEqual(profile["secret"], "dd" + raw)
+        self.assertEqual((self.mtproxy_dir / "secret").read_text(), raw + "\\n")
 
     def test_mismatched_existing_secrets_fail_closed(self):
         (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [{
