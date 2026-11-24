@@ -120,7 +120,7 @@ async function showProfileConfig(name){
   document.querySelector('#configServer').textContent=data.server;
   document.querySelector('#configSecret').textContent=data.secret;
   const link=document.querySelector('#configLink');link.href=data.link;link.textContent=data.link;
-  const deepLink=document.querySelector('#configDeepLink');deepLink.textContent=data.tg_link;
+  const deepLink=document.querySelector('#configDeepLink');deepLink.href=data.tg_link;deepLink.textContent=data.tg_link;
   document.querySelector('#configQR').src=base+'/api/profiles/'+encodeURIComponent(name)+'/qr';
   document.querySelector('#profileDialog').showModal();
  }catch(error){notify(error)}
