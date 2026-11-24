@@ -449,6 +449,9 @@ func (a *application) writeProfiles(doc profileDocument) error {
 	if err := backupFile(a.profiles); err != nil {
 		return err
 	}
+	if err := pruneFileBackups(a.profiles, 20); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
