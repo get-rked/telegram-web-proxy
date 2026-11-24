@@ -19,7 +19,7 @@ import (
 
 var backupIDPattern=regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$`)
 type backupInfo struct { ID string `json:"id"`; CreatedAt time.Time `json:"created_at"`; Size int64 `json:"size_bytes"` }
-func (a *application) backupDir()string{return filepath.Join(filepath.Dir(env("PANEL_DB","/var/lib/tproxy-panel/panel.db")),"backups")}
+func (a *application) backupDir()string{if a.backupRoot!=""{return a.backupRoot};return filepath.Join(filepath.Dir(env("PANEL_DB","/var/lib/tproxy-panel/panel.db")),"backups")}
 func (a *application) createBackup()(backupInfo,error){
 	var info backupInfo
 	if err:=os.MkdirAll(a.backupDir(),0700);err!=nil{return info,err}
@@ -43,7 +43,7 @@ func (a *application) listBackups()([]backupInfo,error){
 	sort.Slice(items,func(i,j int)bool{return items[i].CreatedAt.After(items[j].CreatedAt)});return items,nil
 }
 func (a *application) pruneBackups(keep int)error{
-	items,err:=a.listBackups();if err!=nil{return err};for _,item:=range items[keep:]{if err:=os.Remove(filepath.Join(a.backupDir(),item.ID+".tar.gz"));err!=nil{return err}};return nil
+	items,err:=a.listBackups();if err!=nil{return err};if len(items)<=keep{return nil};for _,item:=range items[keep:]{if err:=os.Remove(filepath.Join(a.backupDir(),item.ID+".tar.gz"));err!=nil{return err}};return nil
 }
 func (a *application) restoreBackup(id string)error{
 	if !backupIDPattern.MatchString(id){return errors.New("invalid backup id")}
