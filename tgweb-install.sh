@@ -2649,8 +2649,99 @@ PY
     "$DOCKER_PROJECT_DIR/docker/profiles" "$DOCKER_PROJECT_DIR/docker/private" \
     "$DOCKER_PROJECT_DIR/docker/private-credentials" "$DOCKER_PROJECT_DIR/docker/generated" \
     "$DOCKER_PROJECT_DIR/docker/security/logs"
-  printf '%s\n' "$secret" > "$DOCKER_PROJECT_DIR/docker/mtproxy/secret"
-  chmod 0600 "$DOCKER_PROJECT_DIR/docker/mtproxy/secret"
+  # Keep the Web Proxy profile manifest and the derived MTProxy secret list in sync.
+  # A previous interrupted/removed installation may leave profiles.json behind.
+  python3 - "$DOCKER_PROJECT_DIR/docker/profiles/profiles.json" "$DOCKER_PROJECT_DIR/docker/mtproxy/secret" "$secret" <<'PY'
+import json
+import os
+import re
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+profiles_path, mtproxy_path = map(Path, sys.argv[1:3])
+selected_secret = sys.argv[3].strip().lower()
+secret_re = re.compile(r"^(?:dd)?[0-9a-f]{32}$")
+if not secret_re.fullmatch(selected_secret):
+    raise SystemExit("Ошибка: выбранный секрет имеет неверный формат")
+
+def canonical(value):
+    value = value.lower()
+    return value[2:] if value.startswith("dd") else value
+
+if profiles_path.exists():
+    try:
+        document = json.loads(profiles_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Ошибка: не удалось прочитать profiles.json: {exc}")
+    profiles = document.get("profiles") if isinstance(document, dict) else None
+    if not isinstance(profiles, list) or not 1 <= len(profiles) <= 32:
+        raise SystemExit("Ошибка: profiles.json должен содержать от 1 до 32 профилей")
+    names = set()
+    defaults = []
+    for item in profiles:
+        if not isinstance(item, dict):
+            raise SystemExit("Ошибка: запись профиля в profiles.json должна быть объектом")
+        name = item.get("name")
+        value = item.get("secret")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+            raise SystemExit("Ошибка: обнаружено недопустимое имя профиля")
+        if name in names:
+            raise SystemExit(f"Ошибка: повторяется имя профиля {name}")
+        names.add(name)
+        if not isinstance(value, str) or not secret_re.fullmatch(value):
+            raise SystemExit(f"Ошибка: неверный секрет профиля {name}")
+        if name == "default":
+            defaults.append(item)
+    if len(defaults) != 1:
+        raise SystemExit("Ошибка: profiles.json должен содержать ровно один профиль default")
+    defaults[0]["secret"] = selected_secret
+else:
+    document = {"profiles": [{
+        "name": "default",
+        "secret": selected_secret,
+        "backend": "127.0.0.1:2398",
+        "carrier_mode": "https"
+    }]}
+    profiles = document["profiles"]
+
+canonical_secrets = [canonical(item["secret"]) for item in profiles]
+if len(canonical_secrets) != len(set(canonical_secrets)):
+    raise SystemExit("Ошибка: секреты профилей должны быть уникальными")
+
+def atomic_write(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_bytes() == data:
+        os.chmod(path, 0o600)
+        return
+    if path.exists():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = path.with_name(path.name + ".backup-" + stamp)
+        suffix = 1
+        while backup.exists():
+            backup = path.with_name(path.name + f".backup-{stamp}-{suffix}")
+            suffix += 1
+        backup.write_bytes(path.read_bytes())
+        os.chmod(backup, 0o600)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+profiles_data = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+mtproxy_data = ("\n".join(canonical_secrets) + "\n").encode("ascii")
+atomic_write(profiles_path, profiles_data)
+atomic_write(mtproxy_path, mtproxy_data)
+print(f"Подготовлено профилей: {len(profiles)}; секрет default синхронизирован.")
+PY
   docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Загружаю внешние образы..."
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы."
