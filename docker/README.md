@@ -56,6 +56,46 @@ Nginx перенаправляет HTTP на HTTPS, обслуживает па�
 docker compose --profile nginx restart nginx
 ```
 
+## Защита панели и Fail2ban
+
+Fail2ban запускается вместе с Docker Compose в host network mode, чтобы блокировки
+действовали на входящий трафик Docker, а не только внутри отдельного контейнера.
+Он использует цепочку `DOCKER-USER` и отдельную цепочку `TPROXY-F2B`; правила
+не очищают и не заменяют существующие firewall-правила хоста.
+
+Включены три сценария:
+- `tproxy-panel`: пять неудачных Basic Auth попыток за 10 минут — блокировка на
+  час с увеличением срока при повторных нарушениях;
+- `tproxy-caddy-probes`: повторные запросы к типовым секретным и административным
+  путям вроде `/.env`, `/wp-admin`, `/phpmyadmin` и `/xmlrpc.php`;
+- `nginx-botsearch`: сигнатуры сканирования для Nginx access log.
+
+Панель пишет неуспешные попытки входа в `docker/security/logs/auth.log`.
+Reverse proxy пишет access log в тот же каталог. Панель передаёт Fail2ban только
+проверенный адрес из `X-Real-IP`: Caddy формирует его из фактического соединения,
+Nginx использует `$remote_addr`. Не публикуйте порт панели напрямую и не
+подключайте к её внутренней сети недоверенные контейнеры.
+
+Проверка и просмотр блокировок:
+
+```bash
+docker compose ps fail2ban
+docker compose logs --tail=100 fail2ban
+docker compose exec fail2ban fail2ban-client status
+docker compose exec fail2ban fail2ban-client status tproxy-panel
+```
+
+Разблокировать конкретный адрес:
+
+```bash
+docker compose exec fail2ban fail2ban-client set tproxy-panel unbanip 203.0.113.10
+```
+
+Для безопасного allowlist добавляйте доверенные адреса в `ignoreip` соответствующего
+jail-файла до запуска. Не добавляйте широкие публичные диапазоны: это отключит
+защиту для целых сетей. Блокировка применяется на уровне Docker-хоста к
+опубликованным Docker-портам 80/443 и другим портам, проходящим через DOCKER-USER.
+
 ## MTProxy backend
 
 Официальный MTProxy собирается из закреплённого upstream commit
