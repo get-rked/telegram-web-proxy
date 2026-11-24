@@ -218,8 +218,9 @@ func TestFail2banBanlistBlocksTrustedProxyClient(t *testing.T) {
 	a := testApp(t)
 	a.trustProxy = true
 	a.banDir = filepath.Join(t.TempDir(), "banlist")
-	if err := os.MkdirAll(a.banDir, 0700); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(a.banDir, "203.0.113.44"), []byte("banned"), 0600); err != nil { t.Fatal(err) }
+	jailDir := filepath.Join(a.banDir, "tproxy-panel")
+	if err := os.MkdirAll(jailDir, 0700); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(jailDir, "203.0.113.44"), []byte("banned"), 0600); err != nil { t.Fatal(err) }
 	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
 	request.RemoteAddr = "172.20.0.2:1234"
 	request.Header.Set("X-Real-IP", "203.0.113.44")
