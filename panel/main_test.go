@@ -146,3 +146,11 @@ func mustJSON(t *testing.T, value any) []byte {
 	if err != nil { t.Fatal(err) }
 	return data
 }
+
+func TestWriteProfilesUsesOwnerOnlyPermissions(t *testing.T) {
+	a:=testApp(t)
+	doc,err:=a.readProfiles();if err!=nil{t.Fatal(err)}
+	if err:=a.writeProfiles(doc);err!=nil{t.Fatal(err)}
+	info,err:=os.Stat(a.profiles);if err!=nil{t.Fatal(err)}
+	if got:=info.Mode().Perm();got!=0600{t.Fatalf("profiles mode=%04o, want 0600",got)}
+}
