@@ -1,0 +1,14 @@
+FROM debian:bookworm AS build
+ARG MTPROXY_COMMIT=69f2f083b57bbd94932cb9f4f32155f33e719ff1
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git build-essential libssl-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git init && git remote add origin https://github.com/TelegramMessenger/MTProxy.git && git fetch --depth 1 origin "$MTPROXY_COMMIT" && git checkout --detach FETCH_HEAD
+RUN make -j"$(nproc)" && install -D -m 0755 objs/bin/mtproto-proxy /out/mtproto-proxy
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libssl3 zlib1g passwd && rm -rf /var/lib/apt/lists/* && id nobody >/dev/null
+COPY --from=build /out/mtproto-proxy /usr/local/bin/mtproto-proxy
+COPY docker/mtproxy/entrypoint.sh /usr/local/bin/mtproxy-entrypoint
+RUN chmod 0755 /usr/local/bin/mtproxy-entrypoint && mkdir -p /var/lib/mtproxy && chown nobody:nogroup /var/lib/mtproxy
+EXPOSE 2398
+ENTRYPOINT ["/usr/local/bin/mtproxy-entrypoint"]
