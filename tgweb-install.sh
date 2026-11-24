@@ -2861,6 +2861,7 @@ docker_cli() {
   case "$action" in
     install) docker_install_command "$@" ;;
     update) docker_update_command "$@" ;;
+    update-runtime) docker_update_runtime_command "$@" ;;
     uninstall) docker_uninstall_command "$@" ;;
     purge) docker_purge_command "$@" ;;
     status|ps) (($# == 0)) || die "docker status"; docker_status_command ;;
