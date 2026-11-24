@@ -40,7 +40,7 @@ tproxy_bootstrap_repository() {
       echo "Не удалось обновить отслеживаемые файлы до $TPROXY_DEPLOY_BRANCH." >&2
       exit 1
     fi
-    git -C "$TPROXY_DEPLOY_DIR" branch -f "$TPROXY_DEPLOY_BRANCH" FETCH_HEAD
+    git -C "$TPROXY_DEPLOY_DIR" update-ref "refs/heads/$TPROXY_DEPLOY_BRANCH" FETCH_HEAD
     git -C "$TPROXY_DEPLOY_DIR" symbolic-ref HEAD "refs/heads/$TPROXY_DEPLOY_BRANCH"
     printf 'Актуальная версия ветки %s загружена: %s\n' "$TPROXY_DEPLOY_BRANCH" "$(git -C "$TPROXY_DEPLOY_DIR" rev-parse --short HEAD)"
     exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
