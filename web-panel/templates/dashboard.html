@@ -66,6 +66,12 @@ input{min-width:220px}
 <div id="profiles">Загрузка профилей…</div>
 </section>
 <section class="card wide">
+<h2>Импорт профиля</h2>
+<div class="formline"><input id="importArchive" type="file" accept=".tar.gz,.tgz"><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select><input id="importName" placeholder="Имя целевого профиля"><input id="importEntry" placeholder="Путь профиля в архиве (необязательно)"><button class="primary" onclick="importProfile()">Импортировать</button></div>
+<div class="meta">Поддерживаются архивы профилей и полные резервные копии. Если в архиве несколько профилей, укажите путь к нужному profile.json.</div>
+</section>
+
+<section class="card wide">
 <h2>Конфигурация</h2>
 <button onclick="loadConfig()">Показать конфигурацию (секреты скрыты)</button>
 <pre id="config" class="output">Нажмите «Показать конфигурацию».</pre>
@@ -93,7 +99,7 @@ let csrf='';
 const base=location.pathname.replace(/\/$/,'');
 async function api(path,opts={}){
  opts.credentials='same-origin';
- opts.headers=Object.assign({'Content-Type':'application/json','X-CSRF-Token':csrf},opts.headers||{});
+ const headers={'X-CSRF-Token':csrf};if(!(opts.body instanceof FormData))headers['Content-Type']='application/json';opts.headers=Object.assign(headers,opts.headers||{});
  const response=await fetch(path,opts);
  csrf=response.headers.get('X-CSRF-Token')||csrf;
  if(response.status===401){location.href='login';throw Error('Сессия завершена')}
@@ -106,7 +112,7 @@ function notify(error){alert(error.message||String(error))}
 async function loadProfiles(){
  try{
   const profiles=await api(base+'/api/profiles');
-  document.querySelector('#profiles').innerHTML=profiles.map(p=>'<div class="row"><div><div class="name">'+esc(p.name)+'</div><div class="meta">'+esc(p.carrier_mode)+' · '+esc(p.backend)+'</div></div>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div>').join('')||'Профили не найдены';
+  document.querySelector('#profiles').innerHTML=profiles.map(p=>'<div class="row"><div><div class="name">'+esc(p.name)+'</div><div class="meta">'+esc(p.carrier_mode)+' · '+esc(p.backend)+'</div></div><div class="actions"><button onclick="backupProfile(\''+esc(p.name)+'\')">Экспорт</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></div>').join('')||'Профили не найдены';
  }catch(error){notify(error)}
 }
 async function addProfile(){
@@ -116,6 +122,25 @@ async function addProfile(){
   await api(base+'/api/profiles',{method:'POST',body:JSON.stringify({Name:name})});
   document.querySelector('#newName').value='';
   await loadProfiles();
+ }catch(error){notify(error)}
+}
+async function backupProfile(name){
+ try{await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'backup'})});await loadBackups()}
+ catch(error){notify(error)}
+}
+async function importProfile(){
+ const file=document.querySelector('#importArchive').files[0];
+ if(!file){notify(Error('Выберите архив'));return}
+ const target=document.querySelector('#importTarget').value;
+ const name=document.querySelector('#importName').value.trim();
+ const entry=document.querySelector('#importEntry').value.trim();
+ if(target==='new'&&!name){notify(Error('Укажите имя целевого профиля'));return}
+ if(target==='default'&&!confirm('Будет заменён системный профиль default. Продолжить?'))return;
+ const form=new FormData();form.append('archive',file);form.append('target',target);form.append('name',name);form.append('entry',entry);
+ try{
+  await api(base+'/api/profiles/import',{method:'POST',body:form});
+  document.querySelector('#importArchive').value='';
+  await loadProfiles();await loadBackups();alert('Профиль импортирован');
  }catch(error){notify(error)}
 }
 async function deleteProfile(name){
@@ -133,7 +158,11 @@ async function loadDiagnostics(){
 async function loadBackups(){
  try{
   const backups=await api(base+'/api/backups');
-  document.querySelector('#backups').innerHTML=backups.map(b=>'<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">'+(b.size/1048576).toFixed(2)+' MB · '+new Date(b.modified).toLocaleString()+'</div></div><button onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button></div>').join('')||'Архивов пока нет';
+  document.querySelector('#backups').innerHTML=backups.map(b=>{
+   const action=b.kind==='profile'?'<a href="'+base+'/api/profile-backups/'+encodeURIComponent(b.name)+'">Скачать</a>':'<button onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button>';
+   const label=b.kind==='profile'?'Архив профиля':'Полная копия';
+   return '<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">'+label+' · '+(b.size/1048576).toFixed(2)+' MB · '+new Date(b.modified).toLocaleString()+'</div></div>'+action+'</div>';
+  }).join('')||'Архивов пока нет';
  }catch(error){notify(error)}
 }
 async function createBackup(){
