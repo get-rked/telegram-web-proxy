@@ -176,9 +176,14 @@ func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 func (a *application) isFail2banBanned(ip string) bool {
 	parsed := net.ParseIP(ip)
 	if parsed == nil || a.banDir == "" { return false }
-	info, err := os.Lstat(filepath.Join(a.banDir, parsed.String()))
-	if err != nil || !info.Mode().IsRegular() { return false }
-	return time.Since(info.ModTime()) < 7*24*time.Hour
+	jails, err := os.ReadDir(a.banDir)
+	if err != nil { return false }
+	for _, jail := range jails {
+		if !jail.IsDir() { continue }
+		info, statErr := os.Lstat(filepath.Join(a.banDir, jail.Name(), parsed.String()))
+		if statErr == nil && info.Mode().IsRegular() && time.Since(info.ModTime()) < 7*24*time.Hour { return true }
+	}
+	return false
 }
 
 func (a *application) authIsBlocked(ip string) bool {
