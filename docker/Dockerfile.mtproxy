@@ -6,7 +6,7 @@ RUN git init && git remote add origin https://github.com/TelegramMessenger/MTPro
 RUN make -j"$(nproc)" && install -D -m 0755 objs/bin/mtproto-proxy /out/mtproto-proxy
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libssl3 zlib1g && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl diffutils libssl3 zlib1g && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/mtproto-proxy /usr/local/bin/mtproto-proxy
 COPY docker/mtproxy/entrypoint.sh /usr/local/bin/mtproxy-entrypoint
 RUN chmod 0755 /usr/local/bin/mtproxy-entrypoint && mkdir -p /var/lib/mtproxy
