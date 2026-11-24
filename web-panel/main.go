@@ -394,6 +394,27 @@ func proxyClientSecret(secret, basePath string) string {
 	return base64.RawURLEncoding.EncodeToString(payload)
 }
 
+func (a *App) mtproxyRuntimeSettings() (string, string) {
+	workers, maxConnections := "1", "4096"
+	path := filepath.Join(filepath.Dir(a.configDir), "mtproxy", "mtproxy.env")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return workers, maxConnections
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok { continue }
+		value = strings.Trim(strings.TrimSpace(value), "\"'")
+		switch key {
+		case "MTPROXY_WORKERS":
+			if n, err := strconv.Atoi(value); err == nil && n >= 1 && n <= 256 { workers = value }
+		case "MTPROXY_MAX_CONNECTIONS":
+			if n, err := strconv.Atoi(value); err == nil && n >= 1 && n <= 1000000 { maxConnections = value }
+		}
+	}
+	return workers, maxConnections
+}
+
 func (a *App) profileDetails(name string) (map[string]string, error) {
 	profile, config, err := a.readProfile(name)
 	if err != nil {
@@ -407,9 +428,11 @@ func (a *App) profileDetails(name string) (map[string]string, error) {
 	query := "server=" + url.QueryEscape(server) + "&secret=" + url.QueryEscape(secret)
 	link := "https://t.me/webproxy?" + query
 	tgLink := "tg://webproxy?" + query
+	workers, maxConnections := a.mtproxyRuntimeSettings()
 	return map[string]string{
 		"name": profile.Name, "carrier_mode": profile.CarrierMode,
 		"secret": secret, "server": server, "link": link, "tg_link": tgLink,
+		"workers": workers, "max_connections": maxConnections,
 	}, nil
 }
 
@@ -510,6 +533,8 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 		Action string
 		CarrierMode string
 		RegenerateSecret bool
+		Workers string
+		MaxConnections string
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
 		errOut(w, http.StatusBadRequest, "Некорректный запрос")
@@ -532,6 +557,16 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		args = []string{"profile", "update", name, "--carrier-mode", body.CarrierMode}
+		if body.Workers != "" {
+			n, err := strconv.Atoi(body.Workers)
+			if err != nil || n < 1 || n > 256 { errOut(w, http.StatusBadRequest, "Workers должен быть от 1 до 256"); return }
+			args = append(args, "--workers", body.Workers)
+		}
+		if body.MaxConnections != "" {
+			n, err := strconv.Atoi(body.MaxConnections)
+			if err != nil || n < 1 || n > 1000000 { errOut(w, http.StatusBadRequest, "Max Connections должен быть от 1 до 1000000"); return }
+			args = append(args, "--max-connections", body.MaxConnections)
+		}
 		if body.RegenerateSecret {
 			args = append(args, "--generate")
 		}
