@@ -69,6 +69,18 @@ services:
     volumes:
       - mtproxy-data:/data
     restart: "no"
+  mtproxy-exporter:
+    profiles: ["mtproxy"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mtproxy-exporter
+    network_mode: service:relay
+    depends_on:
+      mtproxy: {condition: service_healthy}
+    restart: unless-stopped
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
   mtproxy:
     profiles: ["mtproxy"]
     build:
