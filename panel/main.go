@@ -523,7 +523,7 @@ func (a *application) createProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	a.audit("profile.create:" + input.Name)
 	// The generated client secret is returned only once, on creation.
-	jsonResponse(w, map[string]any{"profile": viewOf(doc.Profiles[len(doc.Profiles)-1]), "secret": secret})
+	jsonResponse(w, map[string]any{"profile": viewOf(doc.Profiles[len(doc.Profiles)-1]), "secret": webProxyClientSecret(doc.Profiles[len(doc.Profiles)-1])})
 }
 
 func (a *application) deleteProfile(w http.ResponseWriter, r *http.Request, name string) {

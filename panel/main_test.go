@@ -129,7 +129,7 @@ func TestCreateProfileGeneratesSecretAndWritesBackup(t *testing.T) {
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	var result struct { Secret string `json:"secret"` }
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
-	if len(result.Secret) != 34 || !strings.HasPrefix(result.Secret, "dd") { t.Fatalf("generated secret must be dd-prefixed, got %q", result.Secret) }
+	if len(result.Secret) != 32 || strings.HasPrefix(result.Secret, "dd") { t.Fatalf("generated client secret must be canonical 32-hex, got %q", result.Secret) }
 	if _, err := os.Stat(a.profiles + ".backup-" + ""); err == nil { t.Fatal("unexpected exact backup path") }
 	backups, err := filepath.Glob(a.profiles + ".backup-*")
 	if err != nil || len(backups) != 1 { t.Fatalf("backups=%v err=%v", backups, err) }
@@ -177,7 +177,7 @@ func TestCreateProfileUsesDDSecretAndInternalDefaults(t *testing.T) {
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	var result struct { Secret string `json:"secret"` }
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
-	if len(result.Secret) != 34 || !strings.HasPrefix(result.Secret, "dd") { t.Fatalf("invalid generated secret: %q", result.Secret) }
+	if len(result.Secret) != 32 || strings.HasPrefix(result.Secret, "dd") { t.Fatalf("invalid client-facing generated secret: %q", result.Secret) }
 	doc, err := a.readProfiles(); if err != nil { t.Fatal(err) }
 	created := doc.Profiles[findProfile(doc.Profiles, "mobile")]
 	if created.Backend != "127.0.0.1:2398" || created.CarrierMode != "https" || !strings.HasPrefix(created.Secret, "dd") { t.Fatalf("unexpected generated profile: %+v", created) }
