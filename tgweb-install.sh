@@ -2635,14 +2635,17 @@ docker_write_state() {
 
 docker_wait_ready() {
   local proxy="$1" deadline ids inspected line service state health exit_code required ready attempts=0
+  local configured_services project_containers
   local -A states=()
   # The backend and firewall have health checks with a 90-110s startup window.
-  # Keep a hard upper bound, but fail immediately for stopped/unhealthy services.
   deadline=$((SECONDS + 180))
+  configured_services="$(docker_compose --profile "$proxy" --profile webproxy config --services 2>&1)" ||
+    die "Не удалось прочитать итоговую Compose-конфигурацию: $configured_services"
+
   while (( SECONDS < deadline )); do
     ((attempts+=1))
     states=()
-    ids="$(docker_compose --profile "$proxy" --profile webproxy ps -aq 2>/dev/null || true)"
+    ids="$(docker_compose --profile "$proxy" --profile webproxy ps -aq --all 2>/dev/null || true)"
     if [[ -n "$ids" ]]; then
       local -a container_ids=()
       mapfile -t container_ids <<< "$ids"
@@ -2660,17 +2663,32 @@ docker_wait_ready() {
       health="${health%%|*}"
       if [[ -z "$line" ]]; then
         ready=0
-        # Compose up has already returned. If a required service was never
-        # created, don't leave the installer sleeping for the full timeout.
         if (( attempts >= 3 )); then
-          docker_compose --profile "$proxy" --profile webproxy ps -a || true
-          die "Docker Compose не создал обязательный сервис $required. Проверь активные профили и docker-compose.yml."
+          echo >&2
+          echo "========== COMPOSE DIAGNOSTICS ==========" >&2
+          echo "Project: $DOCKER_PROJECT_NAME" >&2
+          echo "Project directory: $DOCKER_PROJECT_DIR" >&2
+          echo "Required service missing: $required" >&2
+          echo "--- Effective Compose services ---" >&2
+          printf '%s\\n' "$configured_services" >&2
+          echo "--- Compose containers (all states) ---" >&2
+          docker_compose --profile "$proxy" --profile webproxy ps -a 2>&1 >&2 || true
+          echo "--- Docker containers with project label ---" >&2
+          docker ps -a --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" \
+            --format 'table {{.Names}}\\t{{.Label "com.docker.compose.service"}}\\t{{.Status}}\\t{{.Image}}' >&2 || true
+          echo "--- Compose service definitions ---" >&2
+          docker_compose --profile "$proxy" --profile webproxy config --services 2>&1 >&2 || true
+          echo "==========================================" >&2
+          die "Docker Compose не создал контейнер обязательного сервиса $required. Диагностика выше."
         fi
         break
       fi
       if [[ "$state" == "exited" || "$state" == "dead" || "$state" == "removing" || "$health" == "unhealthy" ]]; then
-        docker_compose --profile "$proxy" --profile webproxy ps -a || true
-        die "Сервис $required завершился или нездоров (state/health: $line). Проверь: sudo $BASE_DIR/tgweb-install.sh docker logs $required"
+        echo "--- Состояние контейнеров Compose ---" >&2
+        docker_compose --profile "$proxy" --profile webproxy ps -a 2>&1 >&2 || true
+        echo "--- Последние логи $required ---" >&2
+        docker_compose --profile "$proxy" --profile webproxy logs --no-color --tail=80 "$required" 2>&1 >&2 || true
+        die "Сервис $required завершился или нездоров (state/health/exit: $line)."
       fi
       if [[ "$state" != "running" || ( "$health" != "healthy" && "$health" != "none" ) ]]; then
         ready=0
@@ -2688,7 +2706,7 @@ docker_wait_ready() {
     health="${line#*|}"
     health="${health%%|*}"
     [[ "$state" == "running" && ( "$health" == "healthy" || "$health" == "none" ) ]] ||
-      die "Сервис $required не готов после 180 секунд (state/health: ${line:-не найден}). Проверь: sudo $BASE_DIR/tgweb-install.sh docker logs $required"
+      die "Сервис $required не готов после 180 секунд (state/health: ${line:-не найден}). Проверь Docker diagnostics выше."
   done
 }
 docker_prompt_secret() {
