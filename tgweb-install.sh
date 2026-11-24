@@ -2565,7 +2565,7 @@ docker_wait_ready() {
     ids="$(docker ps -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
     if [[ -n "$ids" ]]; then
       local -a container_ids=()
-      read -r -a container_ids <<< "$ids"
+      mapfile -t container_ids <<< "$ids"
       inspected="$(docker inspect "${container_ids[@]}" --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
       while IFS='|' read -r service state health; do
         [[ -n "$service" ]] && states["$service"]="$state|$health"
