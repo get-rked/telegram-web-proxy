@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 
@@ -189,7 +190,7 @@ func (a *application) profileItemAPI(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		a.updateProfile(w, r, name)
 	case http.MethodDelete:
-		a.deleteProfile(w, name)
+		a.deleteProfile(w, r, name)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -308,7 +309,7 @@ func (a *application) updateProfile(w http.ResponseWriter, r *http.Request, name
 	jsonResponse(w, map[string]any{"profile": viewOf(doc.Profiles[index])})
 }
 
-func (a *application) deleteProfile(w http.ResponseWriter, name string) {
+func (a *application) deleteProfile(w http.ResponseWriter, r *http.Request, name string) {
 	if name == "default" {
 		http.Error(w, "default profile cannot be deleted", http.StatusConflict)
 		return
@@ -322,7 +323,7 @@ func (a *application) deleteProfile(w http.ResponseWriter, name string) {
 	}
 	index := findProfile(doc.Profiles, name)
 	if index < 0 {
-		http.NotFound(w, nil)
+		http.NotFound(w, r)
 		return
 	}
 	doc.Profiles = append(doc.Profiles[:index], doc.Profiles[index+1:]...)
@@ -352,8 +353,9 @@ func validateProfileRequest(input profileRequest) error {
 		return errors.New("name must be 1-64 characters and use letters, digits, spaces, dot, underscore or hyphen")
 	}
 	host, port, err := net.SplitHostPort(input.Backend)
-	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || port == "" {
-		return errors.New("backend must be a numeric loopback address with port")
+	portNumber, portErr := strconv.Atoi(port)
+	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || portErr != nil || portNumber < 1 || portNumber > 65535 {
+		return errors.New("backend must be a numeric loopback address with a valid port")
 	}
 	switch input.CarrierMode {
 	case "https", "https-lanes", "websocket", "websocket-lanes":
