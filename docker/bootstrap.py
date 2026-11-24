@@ -10,12 +10,12 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-CONFIG_DIR = Path(os.environ.get("TPROXY_CONFIG_DIR", "/config"))
-MTPROXY_DIR = Path(os.environ.get("MTPROXY_DIR", "/mtproxy"))
-PROFILES_DIR = Path(os.environ.get("PROFILES_DIR", "/profiles"))
-PANEL_AUTH_DIR = Path(os.environ.get("PANEL_AUTH_DIR", "/panel-auth"))
-PANEL_CREDENTIALS_DIR = Path(os.environ.get("PANEL_CREDENTIALS_DIR", "/panel-credentials"))
-PANEL_ROUTE_DIR = Path(os.environ.get("PANEL_ROUTE_DIR", "/panel-route"))
+CONFIG_DIR = Path(os.environ.get("TPROXY_CONFIG_DIR", "/opt/telegram-web-proxy/docker/config"))
+MTPROXY_DIR = Path(os.environ.get("MTPROXY_DIR", "/opt/telegram-web-proxy/docker/mtproxy"))
+PROFILES_DIR = Path(os.environ.get("PROFILES_DIR", "/opt/telegram-web-proxy/docker/profiles"))
+PANEL_AUTH_DIR = Path(os.environ.get("PANEL_AUTH_DIR", "/opt/telegram-web-proxy/docker/private"))
+PANEL_CREDENTIALS_DIR = Path(os.environ.get("PANEL_CREDENTIALS_DIR", "/opt/telegram-web-proxy/docker/private-credentials"))
+PANEL_ROUTE_DIR = Path(os.environ.get("PANEL_ROUTE_DIR", "/opt/telegram-web-proxy/docker/generated"))
 DOMAIN = os.environ.get("DOMAIN", "").strip().lower()
 RELAY_PORT = int(os.environ.get("RELAY_PORT", "8080"))
 ADMIN_PORT = int(os.environ.get("ADMIN_PORT", "8081"))
@@ -122,6 +122,8 @@ def main():
     PANEL_AUTH_DIR.mkdir(parents=True, exist_ok=True)
     PANEL_CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
     PANEL_ROUTE_DIR.mkdir(parents=True, exist_ok=True)
+    (CONFIG_DIR.parent / "panel-data").mkdir(parents=True, exist_ok=True)
+    (CONFIG_DIR.parent / "mtproxy-data").mkdir(parents=True, exist_ok=True)
     config_path = CONFIG_DIR / "config.json"
     profiles_path = PROFILES_DIR / "profiles.json"
     token_path = CONFIG_DIR / "token.key"
@@ -198,8 +200,8 @@ def main():
             "base_path": "",
             "listen": f"127.0.0.1:{RELAY_PORT}",
             "admin_listen": f"127.0.0.1:{ADMIN_PORT}",
-            "public_dir": "/srv/tproxy-site",
-            "token_key_file": "/etc/tproxy-server/token.key",
+            "public_dir": "/opt/telegram-web-proxy/docker/site",
+            "token_key_file": "/opt/telegram-web-proxy/docker/config/token.key",
             "static_routes": "exact",
             "enable_pprof": False
         }
@@ -281,7 +283,7 @@ def main():
     os.chown(secret_path, UID, GID)
     # Bind-mounted host directories must be traversable by non-root relay/panel.
     # Repair restrictive permissions on every bootstrap, including upgrades.
-    for directory in (CONFIG_DIR, MTPROXY_DIR, PROFILES_DIR, PANEL_AUTH_DIR):
+    for directory in (CONFIG_DIR, MTPROXY_DIR, PROFILES_DIR, PANEL_AUTH_DIR, CONFIG_DIR.parent / "panel-data", CONFIG_DIR.parent / "mtproxy-data"):
         os.chown(directory, UID, GID)
         os.chmod(directory, 0o750)
     os.chmod(config_path, 0o640)
