@@ -2635,7 +2635,7 @@ docker_write_state() {
 
 docker_wait_ready() {
   local proxy="$1" deadline ids inspected line service state health exit_code required ready attempts=0
-  local configured_services project_containers
+  local configured_services
   local -A states=()
   # The backend and firewall have health checks with a 90-110s startup window.
   deadline=$((SECONDS + 180))
