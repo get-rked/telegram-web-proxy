@@ -151,7 +151,7 @@ def main():
          "--web-server", proxy, "--apply"], show=True)
 
     print("\n[4/6] Проверка Compose и сборка")
-    cmd(["docker", "compose"] + profiles + ["config"])
+    cmd(["docker", "compose"] + profiles + ["config", "--quiet"])
     cmd(["docker", "compose"] + profiles + ["build"], timeout=3600, show=True)
 
     if args.prepare_only:
