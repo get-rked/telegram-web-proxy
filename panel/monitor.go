@@ -1,165 +1,113 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
+	"bufio"
 	"encoding/json"
+	"context"
+	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
-	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
-	"testing"
+	"syscall"
+	"time"
 )
 
-func TestParsePrometheusMetrics(t *testing.T) {
-	got:=parsePrometheus("# HELP x\ntproxy_sessions_live 3\ntproxy_bytes_up_total 1024\n")
-	if got["tproxy_sessions_live"]!=3 || got["tproxy_bytes_up_total"]!=1024 { t.Fatalf("unexpected parsed metrics: %#v",got) }
+type systemMetrics struct {
+	CPUPercent float64 `json:"cpu_percent"`
+	MemTotal uint64 `json:"memory_total_bytes"`
+	MemAvailable uint64 `json:"memory_available_bytes"`
+	MemUsedPct float64 `json:"memory_used_percent"`
+	DiskTotal uint64 `json:"disk_total_bytes"`
+	DiskUsed uint64 `json:"disk_used_bytes"`
+	DiskUsedPct float64 `json:"disk_used_percent"`
+	PanelGoroutines int `json:"panel_goroutines"`
 }
+type diagnosticCheck struct { Name string `json:"name"`; Status string `json:"status"`; Detail string `json:"detail"`; Latency int64 `json:"latency_ms,omitempty"` }
+type diagnosticsResponse struct { CheckedAt time.Time `json:"checked_at"`; Checks []diagnosticCheck `json:"checks"` }
 
-func TestParseMTProxyTabStats(t *testing.T) {
-	got:=parseTabStats("uptime\t120\nactive_network_events\t4\n")
-	if got["uptime"]!="120" || got["active_network_events"]!="4" { t.Fatalf("unexpected MTProxy stats: %#v",got) }
+func (a *application) relayRequest(ctx context.Context,path string)(int,string,time.Duration,error){
+	req,err:=http.NewRequestWithContext(ctx,http.MethodGet,"http://relay:9090/relay"+path,nil);if err!=nil{return 0,"",0,err}
+	start:=time.Now();resp,err:=a.monitorClient.Do(req);latency:=time.Since(start);if err!=nil{return 0,"",latency,err};defer resp.Body.Close()
+	body,err:=io.ReadAll(io.LimitReader(resp.Body,2<<20));return resp.StatusCode,string(body),latency,err
 }
-
-func TestReadSystemMetrics(t *testing.T) {
-	got:=readSystemMetrics()
-	if got.MemTotal==0 { t.Fatal("memory total was not detected") }
-	if got.MemAvailable>got.MemTotal { t.Fatalf("available memory exceeds total: %+v",got) }
-	if got.DiskTotal>0 && (got.DiskUsedPct<0 || got.DiskUsedPct>100) { t.Fatalf("invalid disk usage: %+v",got) }
+func (a *application) backendStats(ctx context.Context)(string,error){
+	req,err:=http.NewRequestWithContext(ctx,http.MethodGet,"http://relay:9090/stats",nil);if err!=nil{return "",err}
+	resp,err:=a.monitorClient.Do(req);if err!=nil{return "",err};defer resp.Body.Close()
+	if resp.StatusCode!=http.StatusOK{return "",fmt.Errorf("backend stats HTTP %d",resp.StatusCode)}
+	body,err:=io.ReadAll(io.LimitReader(resp.Body,1<<20));return string(body),err
 }
-
-func TestBackupCreateListRestore(t *testing.T) {
-	a:=testApp(t)
-	a.backupRoot=filepath.Join(t.TempDir(),"backups")
-	item,err:=a.createBackup()
-	if err!=nil { t.Fatal(err) }
-	if item.Size<=0 { t.Fatalf("invalid backup size: %+v",item) }
-	if err:=os.WriteFile(a.profiles,[]byte(`{"profiles":[{"name":"default","secret":"ffeeddccbbaa99887766554433221100","backend":"127.0.0.1:2398","carrier_mode":"https"}]}`),0600);err!=nil{t.Fatal(err)}
-	if err:=os.WriteFile(a.config,[]byte("{\"public_hostname\":\"changed.example\"}"),0600);err!=nil{t.Fatal(err)}
-	if err:=a.restoreBackup(item.ID);err!=nil{t.Fatal(err)}
-	config,err:=os.ReadFile(a.config);if err!=nil{t.Fatal(err)};if !bytes.Contains(config,[]byte("proxy.example.com")){t.Fatalf("config was not restored: %s",config)}
-	doc,err:=a.readProfiles();if err!=nil{t.Fatal(err)}
-	if doc.Profiles[0].Secret!="dd00112233445566778899aabbccddeeff"{t.Fatal("restore did not restore profile secret")}
-	items,err:=a.listBackups();if err!=nil{t.Fatal(err)}
-	if len(items)!=1 || items[0].ID!=item.ID {t.Fatalf("unexpected backup list: %+v",items)}
-}
-
-func TestRestoreRejectsInvalidBackupID(t *testing.T) {
-	a:=testApp(t)
-	if err:=a.restoreBackup("../config");err==nil {t.Fatal("invalid backup id was accepted")}
-}
-
-func TestPruneBackupsWhenBelowRetentionLimit(t *testing.T) {
-	a:=testApp(t)
-	a.backupRoot=filepath.Join(t.TempDir(),"backups")
-	if err:=a.pruneBackups(20);err!=nil {t.Fatal(err)}
-}
-
-func TestRestoreSynchronizesDefaultSecret(t *testing.T) {
-	a:=testApp(t)
-	a.backupRoot=filepath.Join(t.TempDir(),"backups")
-	backup,err:=a.createBackup();if err!=nil{t.Fatal(err)}
-	secretPath:=filepath.Join(t.TempDir(),"mtproxy.secret")
-	if err:=os.WriteFile(secretPath,[]byte("ffeeddccbbaa99887766554433221100"),0600);err!=nil{t.Fatal(err)}
-	a.mtproxySecret=secretPath
-	before,err:=os.ReadFile(a.profiles);if err!=nil{t.Fatal(err)}
-	if err:=a.restoreBackup(backup.ID);err!=nil{t.Fatalf("restore should synchronize the MTProxy secret list: %v",err)}
-	after,err:=os.ReadFile(a.profiles);if err!=nil{t.Fatal(err)}
-	if string(before)==string(after){t.Fatal("profiles were not restored")}
-	synced,err:=os.ReadFile(secretPath);if err!=nil{t.Fatal(err)}
-	if strings.TrimSpace(string(synced))!="00112233445566778899aabbccddeeff"{t.Fatalf("MTProxy secret list was not synchronized: %q",synced)}
-}
-
-type monitorRoundTripper func(*http.Request) (*http.Response,error)
-func (fn monitorRoundTripper) RoundTrip(req *http.Request)(*http.Response,error){return fn(req)}
-
-func TestDiagnosticsChecksPublicWebProxyAndBackend(t *testing.T) {
-	a:=testApp(t)
-	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
-		body:="ok\n"
-		switch req.URL.Path {case "/relay/readyz":body="ready\n";case "/stats":body="uptime\t123\n"}
-		return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(bytes.NewBufferString(body)),Request:req},nil
-	})}
-	response:=httptest.NewRecorder()
-	a.diagnostics(response,httptest.NewRequest(http.MethodGet,"/admin/api/diagnostics",nil))
-	if response.Code!=http.StatusOK{t.Fatalf("status=%d body=%s",response.Code,response.Body.String())}
-	var result diagnosticsResponse
-	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
-	if len(result.Checks)!=5{t.Fatalf("expected five checks, got %+v",result.Checks)}
-	for _,check:=range result.Checks{if check.Status!="ok"{t.Fatalf("check failed: %+v",check)}}
-}
-
-func TestMetricsEndpointCollectsRelayAndBackendData(t *testing.T) {
-	a:=testApp(t)
-	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
-		body:="tproxy_sessions_live 7\n"
-		if req.URL.Path=="/stats"{body="uptime\t321\n"}
-		return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(bytes.NewBufferString(body)),Request:req},nil
-	})}
-	response:=httptest.NewRecorder()
-	a.metrics(response,httptest.NewRequest(http.MethodGet,"/admin/api/metrics",nil))
-	if response.Code!=http.StatusOK{t.Fatalf("status=%d body=%s",response.Code,response.Body.String())}
-	var result map[string]any
-	if err:=json.Unmarshal(response.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
-	if result["relay"].(map[string]any)["tproxy_sessions_live"]!=float64(7){t.Fatalf("relay metric missing: %s",response.Body.String())}
-	if result["backend"].(map[string]any)["uptime"]!="321"{t.Fatalf("backend metric missing: %s",response.Body.String())}
-}
-
-func TestRestoreRejectsSHA256Mismatch(t *testing.T) {
-	a := testApp(t)
-	a.backupRoot = filepath.Join(t.TempDir(), "backups")
-	item, err := a.createBackup()
-	if err != nil { t.Fatal(err) }
-	path := filepath.Join(a.backupDir(), item.ID+".tar.gz")
-	input, err := os.Open(path)
-	if err != nil { t.Fatal(err) }
-	gz, err := gzip.NewReader(input)
-	if err != nil { t.Fatal(err) }
-	tr := tar.NewReader(gz)
-	var profileData, configData, manifestData []byte
-	for {
-		h, nextErr := tr.Next()
-		if nextErr == io.EOF { break }
-		if nextErr != nil { t.Fatal(nextErr) }
-		data, readErr := io.ReadAll(tr)
-		if readErr != nil { t.Fatal(readErr) }
-		switch h.Name { case "profiles.json": profileData=data; case "config.json": configData=data; case "manifest.json": manifestData=data }
+func (a *application) diagnostics(w http.ResponseWriter,r *http.Request){
+	if r.Method!=http.MethodGet{http.Error(w,"method not allowed",405);return}
+	ctx,cancel:=context.WithTimeout(r.Context(),5*time.Second);defer cancel()
+	result:=diagnosticsResponse{CheckedAt:time.Now().UTC()}
+	// Verify the public HTTPS edge (DNS, TCP, TLS certificate and HTTP response).
+	// This is a transport-edge check, not a substitute for a real Telegram client handshake.
+	var public struct { PublicHostname string `json:"public_hostname"` }
+	configData, configErr := os.ReadFile(a.config)
+	transportCheck := diagnosticCheck{Name:"webproxy_https",Status:"error"}
+	if configErr == nil && json.Unmarshal(configData,&public)==nil && strings.TrimSpace(public.PublicHostname)!="" {
+		req, reqErr := http.NewRequestWithContext(ctx,http.MethodGet,"https://"+public.PublicHostname+"/",nil)
+		if reqErr == nil {
+			started:=time.Now()
+			resp, requestErr:=a.monitorClient.Do(req)
+			transportCheck.Latency=time.Since(started).Milliseconds()
+			if requestErr == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode < 500 { transportCheck.Status="ok"; transportCheck.Detail=fmt.Sprintf("HTTPS/TLS доступен, HTTP %d",resp.StatusCode) } else { transportCheck.Detail=fmt.Sprintf("публичный HTTPS вернул HTTP %d",resp.StatusCode) }
+			} else { transportCheck.Detail="публичный HTTPS/TLS недоступен" }
+		} else { transportCheck.Detail="не удалось сформировать HTTPS-проверку" }
+	} else { transportCheck.Detail="не задан public_hostname" }
+	result.Checks=append(result.Checks,transportCheck)
+	for _,ep:=range []struct{name,path,expected string}{{"relay_health","/healthz","ok"},{"relay_ready","/readyz","ready"}}{
+		status,body,latency,err:=a.relayRequest(ctx,ep.path);check:=diagnosticCheck{Name:ep.name,Status:"error",Latency:latency.Milliseconds()}
+		if err!=nil{check.Detail="relay недоступен"}else if status==200&&strings.TrimSpace(body)==ep.expected{check.Status="ok";check.Detail="доступен"}else{check.Detail=fmt.Sprintf("HTTP %d",status)}
+		result.Checks=append(result.Checks,check)
 	}
-	_ = gz.Close()
-	_ = input.Close()
-	profileData = bytes.Replace(profileData, []byte("default"), []byte("changed"), 1)
-	out, err := os.Create(path)
-	if err != nil { t.Fatal(err) }
-	zw := gzip.NewWriter(out)
-	tw := tar.NewWriter(zw)
-	for _, entry := range []struct{name string; data []byte}{{"profiles.json",profileData},{"config.json",configData},{"manifest.json",manifestData}} {
-		if err := tw.WriteHeader(&tar.Header{Name:entry.name,Mode:0600,Size:int64(len(entry.data)),Typeflag:tar.TypeReg});err!=nil{t.Fatal(err)}
-		if _,err:=tw.Write(entry.data);err!=nil{t.Fatal(err)}
+	stats,err:=a.backendStats(ctx);mt:=diagnosticCheck{Name:"backend_stats",Status:"error"}
+	if err!=nil{mt.Detail="статистика внутреннего backend недоступна"}else if strings.TrimSpace(stats)==""{mt.Detail="пустой ответ"}else{mt.Status="ok";mt.Detail="статистика получена"}
+	result.Checks=append(result.Checks,mt)
+	a.mu.Lock()
+	_, profileErr := a.readProfiles()
+	a.mu.Unlock()
+	if profileErr != nil {
+		result.Checks = append(result.Checks, diagnosticCheck{Name: "profiles_file", Status: "error", Detail: "файл профилей отсутствует, повреждён или содержит недопустимые параметры"})
+	} else {
+		result.Checks = append(result.Checks, diagnosticCheck{Name: "profiles_file", Status: "ok", Detail: "структура профилей и секреты проверены"})
 	}
-	if err:=tw.Close();err!=nil{t.Fatal(err)}
-	if err:=zw.Close();err!=nil{t.Fatal(err)}
-	if err:=out.Close();err!=nil{t.Fatal(err)}
-	if err:=a.restoreBackup(item.ID);err==nil{t.Fatal("restore accepted a SHA-256 mismatch")}
+	jsonResponse(w,result)
 }
-
-func TestRestoreRollsBackConfigAndProfilesWhenSecretSyncFails(t *testing.T) {
-	a := testApp(t)
-	a.backupRoot = filepath.Join(t.TempDir(), "backups")
-	item, err := a.createBackup()
-	if err != nil { t.Fatal(err) }
-	changedProfiles := []byte("{\"profiles\":[{\"name\":\"default\",\"secret\":\"ffeeddccbbaa99887766554433221100\",\"backend\":\"127.0.0.1:2398\",\"carrier_mode\":\"https\"}]}")
-	changedConfig := []byte("{\"public_hostname\":\"changed.example\"}")
-	if err := os.WriteFile(a.profiles, changedProfiles, 0600); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(a.config, changedConfig, 0600); err != nil { t.Fatal(err) }
-	a.mtproxySecret = filepath.Join(t.TempDir(), "missing-dir", "secret")
-	if err := a.restoreBackup(item.ID); err == nil { t.Fatal("restore unexpectedly succeeded with an unavailable secret directory") }
-	gotProfiles, err := os.ReadFile(a.profiles)
-	if err != nil { t.Fatal(err) }
-	gotConfig, err := os.ReadFile(a.config)
-	if err != nil { t.Fatal(err) }
-	if !bytes.Equal(gotProfiles, changedProfiles) { t.Fatalf("profiles were not rolled back: %s", gotProfiles) }
-	if !bytes.Equal(gotConfig, changedConfig) { t.Fatalf("config was not rolled back: %s", gotConfig) }
+func (a *application) metrics(w http.ResponseWriter,r *http.Request){
+	if r.Method!=http.MethodGet{http.Error(w,"method not allowed",405);return}
+	ctx,cancel:=context.WithTimeout(r.Context(),5*time.Second);defer cancel()
+	out:=map[string]any{"system":readSystemMetrics(),"sampled_at":time.Now().UTC()}
+	_,relay,_,err:=a.relayRequest(ctx,"/metrics");if err==nil{out["relay"]=parsePrometheus(relay)}else{out["relay_error"]="relay metrics unavailable"}
+	mt,err:=a.backendStats(ctx);if err==nil{out["backend"]=parseTabStats(mt)}else{out["backend_error"]="backend metrics unavailable"}
+	jsonResponse(w,out)
+}
+func readSystemMetrics()systemMetrics{
+	m:=systemMetrics{PanelGoroutines:runtime.NumGoroutine(),CPUPercent:readCPUPercent()}
+	if f,err:=os.Open("/proc/meminfo");err==nil{
+		sc:=bufio.NewScanner(f);vals:=map[string]uint64{}
+		for sc.Scan(){fields:=strings.Fields(sc.Text());if len(fields)>1{if v,e:=strconv.ParseUint(fields[1],10,64);e==nil{vals[strings.TrimSuffix(fields[0],":")]=v*1024}}};_ = f.Close()
+		m.MemTotal=vals["MemTotal"];m.MemAvailable=vals["MemAvailable"];if m.MemTotal>0&&m.MemAvailable<=m.MemTotal{m.MemUsedPct=float64(m.MemTotal-m.MemAvailable)/float64(m.MemTotal)*100}
+	}
+	var fs syscall.Statfs_t;if err:=syscall.Statfs("/",&fs);err==nil{m.DiskTotal=fs.Blocks*uint64(fs.Bsize);m.DiskUsed=(fs.Blocks-fs.Bfree)*uint64(fs.Bsize);if m.DiskTotal>0{m.DiskUsedPct=float64(m.DiskUsed)/float64(m.DiskTotal)*100}}
+	return m
+}
+func readCPUPercent()float64{
+	read:=func()(uint64,uint64){f,err:=os.Open("/proc/stat");if err!=nil{return 0,0};defer f.Close();sc:=bufio.NewScanner(f);if !sc.Scan(){return 0,0};fields:=strings.Fields(sc.Text());if len(fields)<5{return 0,0};var total,idle uint64;for i,v:=range fields[1:]{n,e:=strconv.ParseUint(v,10,64);if e!=nil{continue};total+=n;if i==3||i==4{idle+=n}};return total,idle}
+	firstTotal,firstIdle:=read();time.Sleep(120*time.Millisecond);secondTotal,secondIdle:=read();if secondTotal<=firstTotal{return 0};delta:=secondTotal-firstTotal;idle:=secondIdle-firstIdle;if delta==0{return 0};return float64(delta-idle)/float64(delta)*100
+}
+func parsePrometheus(body string)map[string]float64{
+	out:=map[string]float64{};sc:=bufio.NewScanner(strings.NewReader(body))
+	for sc.Scan(){line:=strings.TrimSpace(sc.Text());if line==""||strings.HasPrefix(line,"#"){continue};f:=strings.Fields(line);if len(f)<2||strings.Contains(f[0],"{"){continue};if v,e:=strconv.ParseFloat(f[1],64);e==nil{out[f[0]]=v}}
+	return out
+}
+func parseTabStats(body string)map[string]string{
+	out:=map[string]string{};sc:=bufio.NewScanner(strings.NewReader(body))
+	for sc.Scan(){p:=strings.SplitN(sc.Text(),"\t",2);if len(p)==2&&p[0]!=""{out[p[0]]=strings.TrimSpace(p[1])}}
+	return out
 }
