@@ -2433,6 +2433,10 @@ run_install() {
 
 run_uninstall() {
   require_root
+  local panel_base=""
+  if [[ -x "$BIN_DIR/tproxy-panel" && -s "$DATA_DIR/panel/panel.db" ]]; then
+    panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" "$BIN_DIR/tproxy-panel" -print-basepath 2>/dev/null || true)"
+  fi
   systemctl disable --now tproxy-panel.service 2>/dev/null || true
   rm -f /etc/systemd/system/tproxy-panel.service "$SYSTEMD_DIR/tproxy-panel.service"
   rm -f /etc/fail2ban/filter.d/tproxy-panel.conf /etc/fail2ban/jail.d/tproxy-panel.local
@@ -2440,6 +2444,32 @@ run_uninstall() {
   remove_legacy_compat_links
   local installed_web_server
   installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
+  if [[ -n "$panel_base" ]]; then
+    case "$installed_web_server" in
+      caddy)
+        python3 - "$panel_base" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/caddy/Caddyfile")
+if path.exists():
+    text = path.read_text()
+    base = re.escape(sys.argv[1])
+    pattern = r"(?ms)^[ \\t]*handle /" + base + r"/\\* \\{\\n[ \\t]*reverse_proxy 127\\.0\\.0\\.1:18765 \\{\\n[ \\t]*header_up X-Real-IP \\{http\\.request\\.remote\\.host\\}\\n[ \\t]*\\}\\n[ \\t]*\\}\\n?"
+    path.write_text(re.sub(pattern, "", text, count=1))
+PYTHON
+        systemctl reload caddy.service 2>/dev/null || true ;;
+      nginx)
+        python3 - "$panel_base" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+if path.exists():
+    text = path.read_text()
+    base = re.escape(sys.argv[1])
+    pattern = r"(?ms)^[ \\t]*location \\^~ /" + base + r"/ \\{\\n.*?^[ \\t]*\\}\\n?"
+    path.write_text(re.sub(pattern, "", text, count=1))
+PYTHON
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx.service 2>/dev/null || true ;;
+    esac
+  fi
   # Совместимость со старыми установками без marker-файла.
   if [[ "$installed_web_server" != "caddy" && "$installed_web_server" != "nginx" ]]; then
     if systemctl is-active --quiet caddy.service || systemctl is-enabled --quiet caddy.service 2>/dev/null || \
