@@ -460,6 +460,10 @@ parse_install_args() {
   if [[ -n "$MAXCONN_ARG" ]]; then
     [[ "$MAXCONN_ARG" =~ ^[1-9][0-9]*$ ]] || die "--max-connections положительное"
   fi
+  if [[ "${MODE:-}" == "update" ]]; then
+    [[ -z "$SECRET_ARG" && "$CARRIER_MODE_SET" -eq 0 && "$SECRET_PREFIX_MODE_SET" -eq 0 ]] ||
+      die "Команда update изменяет только общие параметры. Секреты и Carrier mode настраиваются через profile CLI."
+  fi
 }
 
 parse_uninstall_args() {
@@ -2002,7 +2006,7 @@ EOF
 
 
 run_config() {
-  local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
+  local cfg="$PROXY_CONFIG_DIR/config.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" host="" base="" relay="" admin="" public_dir="" email="" web_server=""
   local backend="" secret="" workers="" maxconn="" proxy_secret="" server="" link="" output=""
   local public_upstream="" profile_name="" carrier_mode="" carrier_label="" count=0 index=0 choice=1
@@ -2248,9 +2252,9 @@ show_operation_overview() {
   if [[ "$MODE" == "update" ]]; then
     ui_header "Перед обновлением"
     cat <<'EOF'
-  Будут обновлены исходники и компоненты, пересобран tproxy-server,
-  обновлены конфигурации и перезапущены службы.
-  Текущие настройки будут предложены по умолчанию, каталог сайта сохранится.
+  Будут обновлены исходники и бинарники, применены только общие параметры
+  прокси и перезапущены службы. Хранилище профилей, секреты и Carrier mode
+  останутся без изменений.
   Перед изменениями будет создана rollback-копия бинарника и конфигураций.
   При неудачном health-check предыдущие файлы будут восстановлены автоматически.
 EOF
