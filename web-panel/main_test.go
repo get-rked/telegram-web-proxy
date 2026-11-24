@@ -178,10 +178,11 @@ func TestLoginRejectsSQLInjectionUsername(t *testing.T) {
 
 func TestProxyClientSecretMatchesInstallerFormat(t *testing.T) {
 	got := proxyClientSecret("0123456789abcdef0123456789abcdef", "random-base")
-	want := "cDAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVm"
+	want := "cAEjRWeJq83vASNFZ4mrze8"
 	if got != want {
 		t.Fatalf("unexpected client secret: %q", got)
 	}
+	if dd := proxyClientSecret("dd0123456789abcdef0123456789abcdef", "random-base"); dd != "cN0BI0Vnia vN7wEjRWeJq83vASNFZ4mrze8" { t.Fatalf("unexpected dd client secret: %q", dd) }
 	if plain := proxyClientSecret("0123456789abcdef0123456789abcdef", ""); plain != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("unexpected plain secret: %q", plain)
 	}
