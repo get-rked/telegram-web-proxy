@@ -197,7 +197,7 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 	profile := `{"name":"alpha","secret":"0123456789abcdef0123456789abcdef","backend":"127.0.0.1:2398","carrier_mode":"https-lanes"}`
 	mtproxyDir := filepath.Join(dir, "config", "mtproxy")
 	if err := os.MkdirAll(mtproxyDir, 0700); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(mtproxyDir, "mtproxy.env"), []byte("MTPROXY_WORKERS=6\\nMTPROXY_MAX_CONNECTIONS=18000\\n"), 0600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(mtproxyDir, "mtproxy.env"), []byte("MTPROXY_WORKERS=6\nMTPROXY_MAX_CONNECTIONS=18000\n"), 0600); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(config), 0600); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(profile), 0600); err != nil { t.Fatal(err) }
 	a := &App{configDir: configDir}
