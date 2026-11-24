@@ -4252,7 +4252,7 @@ main() {
 # CLI-интерфейс операций, ранее доступных только из меню.
 profile_cli() {
   need_root; need_files
-  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0
+  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0 rotate=0 backup_tmp=""
   shift || true
   case "$action" in
     list)
@@ -4296,6 +4296,44 @@ profile_cli() {
       "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Проверка конфигурации не пройдена."
       systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
       ok "Carrier mode профиля $name изменён." ;;
+    update)
+      (($# >= 1)) || die "profile update ИМЯ --carrier-mode MODE [--generate]"
+      name="$1"; shift
+      while (($#)); do case "$1" in
+        --carrier-mode) (($# >= 2)) || die "--carrier-mode требует значение"; mode="$2"; shift 2 ;;
+        --generate) rotate=1; shift ;;
+        *) die "Неизвестный параметр profile update: $1" ;; esac; done
+      valid_name "$name" && valid_mode "$mode" || die "Недопустимое имя или Carrier mode."
+      file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
+      secret="$(jq -r '.secret' "$file")"
+      if (( rotate )); then
+        prefix=""; [[ "$secret" == dd* ]] && prefix="dd"
+        while :; do
+          secret="${prefix}$(openssl rand -hex 16)"
+          canonical="${secret#dd}"
+          if ! jq -e --arg s "$canonical" '.profiles[] | select((.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null; then break; fi
+        done
+      fi
+      backup_tmp="$(mktemp)"
+      cp -a "$file" "$backup_tmp" || { rm -f "$backup_tmp"; die "Не удалось сохранить исходный профиль."; }
+      tmp="$(mktemp "$file.XXXXXX")"
+      if ! jq --arg s "$secret" --arg m "$mode" '.secret=$s | .carrier_mode=$m' "$file" > "$tmp"; then
+        rm -f "$tmp" "$backup_tmp"; die "Не удалось обновить профиль."
+      fi
+      chown root:tproxy "$tmp"; chmod 0640 "$tmp"; mv -f "$tmp" "$file"
+      if ! profile_manifest_sync || ! write_mtproxy_secrets || ! patch_mtproxy_unit ||
+         ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check ||
+         ! systemctl restart mtproxy tproxy-server; then
+        cp -a "$backup_tmp" "$file"
+        profile_manifest_sync || true
+        write_mtproxy_secrets || true
+        patch_mtproxy_unit || true
+        systemctl restart mtproxy tproxy-server 2>/dev/null || true
+        rm -f "$backup_tmp"
+        die "Изменение профиля не прошло проверку; исходная конфигурация восстановлена."
+      fi
+      rm -f "$backup_tmp"
+      ok "Профиль $name обновлён." ;;
     delete)
       [[ $# -eq 2 && "$2" == --yes ]] || die "profile delete ИМЯ --yes"
       name="$1"; valid_name "$name" || die "Недопустимое имя."
