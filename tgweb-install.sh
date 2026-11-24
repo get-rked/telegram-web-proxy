@@ -33,7 +33,7 @@ tproxy_bootstrap_repository() {
       echo "Не удалось получить обновления из $TPROXY_DEPLOY_BRANCH; локальная версия не изменена." >&2
       exit 1
     fi
-    if ! git -C "$TPROXY_DEPLOY_DIR" reset --hard FETCH_HEAD; then
+    if ! git -C "$TPROXY_DEPLOY_DIR" checkout -B "$TPROXY_DEPLOY_BRANCH" FETCH_HEAD; then
       echo "Не удалось переключить проект на актуальную версию; установка остановлена." >&2
       exit 1
     fi
