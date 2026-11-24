@@ -29,6 +29,7 @@ jobs:
         run: |
           bash -n tgweb-install.sh
           sh -n docker/mtproxy/entrypoint.sh
+          sh -n docker/relay-supervisor.sh
 
       - name: ShellCheck
         run: shellcheck --severity=warning --shell=bash tgweb-install.sh
