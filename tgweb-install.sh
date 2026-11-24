@@ -2791,7 +2791,7 @@ docker_update_command() {
     rm -rf -- "$site_backup"
   fi
   ok "Код установщика обновлён; пользовательский сайт сохранён."
-  exec env TPROXY_BOOTSTRAP_DONE=1 bash "$DOCKER_PROJECT_DIR/tgweb-install.sh" docker update-runtime
+  TPROXY_BOOTSTRAP_DONE=1 bash "$DOCKER_PROJECT_DIR/tgweb-install.sh" docker update-runtime
 }
 docker_uninstall_command() {
   docker_require_project
