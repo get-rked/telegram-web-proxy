@@ -4392,7 +4392,7 @@ install_admin_panel() {
       rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
     }
   fi
-  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
+  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d /etc/caddy /etc/nginx /etc/letsencrypt
   install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
   install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
   install -m 0644 "$repo_dir/web-panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
@@ -4456,6 +4456,7 @@ PYTHON
 
   systemctl daemon-reload
   systemctl enable --now tproxy-panel.service || { rm -rf "$source_tmp"; die "Не удалось запустить tproxy-panel.service."; }
+  systemctl restart tproxy-panel.service || { rm -rf "$source_tmp"; die "Не удалось перезапустить административную панель."; }
   fail2ban-client -t || { rm -rf "$source_tmp"; die "Конфигурация Fail2ban не прошла проверку."; }
   systemctl enable --now fail2ban.service
   systemctl restart fail2ban.service || { rm -rf "$source_tmp"; die "Не удалось запустить Fail2ban."; }
