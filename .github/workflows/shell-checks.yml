@@ -122,7 +122,7 @@ jobs:
           test -s docker/site/index.html
           python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py migrate-to-docker.py migrate-docker-auto.py
           python3 migrate-docker-auto.py --help >/dev/null
-          python3 -m unittest docker/test_bootstrap.py docker/test_migrate.py
+          python3 -m unittest docker/test_bootstrap.py docker/test_migrate.py docker/test_migrate_auto.py
           node --check panel/web/app.js
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           docker compose build bootstrap relay
