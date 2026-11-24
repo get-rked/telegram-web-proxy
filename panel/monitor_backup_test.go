@@ -180,7 +180,7 @@ func TestBackupItemAPIDownloadAndRestoreRoutes(t *testing.T) {
 	restore := httptest.NewRecorder()
 	a.backupItemAPI(restore, authRequest(http.MethodPost, "/api/backups/"+item.ID+"/restore", "{}", true))
 	if restore.Code != http.StatusOK { t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body.String()) }
-	if !strings.Contains(restore.Body.String(), '"status":"restored"') { t.Fatalf("unexpected restore response: %s", restore.Body.String()) }
+	if !strings.Contains(restore.Body.String(), "\"status\":\"restored\"") { t.Fatalf("unexpected restore response: %s", restore.Body.String()) }
 }
 
 func TestDiagnosticsRejectsMalformedProfilesFile(t *testing.T) {
