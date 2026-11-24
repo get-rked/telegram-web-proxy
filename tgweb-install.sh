@@ -35,7 +35,7 @@ tproxy_bootstrap_repository() {
   printf '\n=== Первоначальное развёртывание Telegram Web Proxy (Docker) ===\n'
   command -v apt-get >/dev/null 2>&1 || { echo "Поддерживаются Ubuntu/Debian с apt-get." >&2; exit 1; }
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git tar
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git tar openssl iproute2
   backup_root="/var/backups/telegram-web-proxy"
   install -d -o root -g root -m 0700 "$backup_root"
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
