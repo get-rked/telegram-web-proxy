@@ -28,7 +28,7 @@ tproxy_bootstrap_repository() {
   script_path="$(readlink -f -- "$0")"
   if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]] \
     && [[ "$(git -C "$TPROXY_DEPLOY_DIR" remote get-url origin 2>/dev/null || true)" == "$TPROXY_DEPLOY_REPO" ]]; then
-    printf '\\n=== Проверка обновлений установщика ===\\n'
+    printf '\n=== Проверка обновлений установщика ===\n'
     if ! git -C "$TPROXY_DEPLOY_DIR" fetch --quiet --prune origin "$TPROXY_DEPLOY_BRANCH"; then
       echo "Не удалось получить обновления из $TPROXY_DEPLOY_BRANCH; локальная версия не изменена." >&2
       exit 1
@@ -37,7 +37,7 @@ tproxy_bootstrap_repository() {
       echo "Не удалось переключить проект на актуальную версию; установка остановлена." >&2
       exit 1
     fi
-    printf 'Актуальная версия ветки %s загружена: %s\\n' "$TPROXY_DEPLOY_BRANCH" "$(git -C "$TPROXY_DEPLOY_DIR" rev-parse --short HEAD)"
+    printf 'Актуальная версия ветки %s загружена: %s\n' "$TPROXY_DEPLOY_BRANCH" "$(git -C "$TPROXY_DEPLOY_DIR" rev-parse --short HEAD)"
     exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
   fi
   printf '\n=== Первоначальное развёртывание Telegram Web Proxy (Docker) ===\n'
