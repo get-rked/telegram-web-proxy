@@ -176,6 +176,36 @@ func (a *application) pruneBackups(keep int) error {
 	return nil
 }
 
+func pruneFileBackups(path string, keep int) error {
+	if keep < 0 {
+		return errors.New("backup retention must not be negative")
+	}
+	matches, err := filepath.Glob(path + ".backup-*")
+	if err != nil {
+		return err
+	}
+	sort.Strings(matches)
+	if len(matches) <= keep {
+		return nil
+	}
+	for _, candidate := range matches[:len(matches)-keep] {
+		info, err := os.Lstat(candidate)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := os.Remove(candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *application) restoreBackup(id string) error {
 	if !backupIDPattern.MatchString(id) {
 		return errors.New("invalid backup id")
