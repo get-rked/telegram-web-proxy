@@ -156,7 +156,7 @@ services:
     volumes:
       - panel-data:/data
       - ./docker/security/logs:/security-logs
-    command: ["sh", "-c", "mkdir -p /security-logs && touch /security-logs/auth.log /security-logs/access.log && chown -R 10001:10001 /data /security-logs && chmod 0770 /security-logs && chmod 0600 /security-logs/auth.log && chmod 0660 /security-logs/access.log"]
+    command: ["sh", "-c", "mkdir -p /security-logs/banlist && touch /security-logs/auth.log /security-logs/access.log && chown -R 10001:10001 /data /security-logs && chmod 0770 /security-logs && chmod 0750 /security-logs/banlist && chmod 0600 /security-logs/auth.log && chmod 0660 /security-logs/access.log"]
     restart: "no"
   fail2ban:
     image: crazymax/fail2ban:1.1.0
@@ -174,7 +174,7 @@ services:
       - ./docker/security/fail2ban/filter.d/tproxy-caddy-probes.conf:/etc/fail2ban/filter.d/tproxy-caddy-probes.conf:ro
       - ./docker/security/fail2ban/filter.d/tproxy-nginx-probes.conf:/etc/fail2ban/filter.d/tproxy-nginx-probes.conf:ro
       - ./docker/security/fail2ban/action.d/docker-user.conf:/etc/fail2ban/action.d/docker-user.conf:ro
-      - ./docker/security/logs:/var/log/tproxy-panel:ro
+      - ./docker/security/logs:/var/log/tproxy-panel:rw
       - fail2ban-data:/data
     depends_on:
       panel: {condition: service_started}
@@ -194,6 +194,7 @@ services:
       MTPROXY_SECRET_FILE: /run/mtproxy/secret
       PANEL_AUTH_LOG: /var/log/tproxy-panel/auth.log
       PANEL_TRUST_PROXY: "true"
+      PANEL_BANLIST_DIR: /var/log/tproxy-panel/banlist
     depends_on:
       bootstrap: {condition: service_completed_successfully}
       panel-volume-init: {condition: service_completed_successfully}
