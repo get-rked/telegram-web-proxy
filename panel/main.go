@@ -38,6 +38,8 @@ type application struct {
 	mu       sync.Mutex
 	monitorClient *http.Client
 	backupRoot string
+	authLog *log.Logger
+	trustProxy bool
 }
 
 type profile struct {
@@ -88,6 +90,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	authLogPath := env("PANEL_AUTH_LOG", "/var/log/tproxy-panel/auth.log")
+	if err := os.MkdirAll(filepath.Dir(authLogPath), 0750); err != nil { log.Fatal(err) }
+	authFile, err := os.OpenFile(authLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil { log.Fatal(err) }
+	defer authFile.Close()
+
 	a := &application{
 		db:       db,
 		user:     env("PANEL_USER", "admin"),
@@ -96,6 +104,8 @@ func main() {
 		profiles: env("TPROXY_PROFILES", "/etc/tproxy-server/profiles.json"),
 		mtproxySecret: env("MTPROXY_SECRET_FILE", "/run/secrets/mtproxy_secret"),
 		monitorClient: &http.Client{Timeout: 3*time.Second},
+		authLog: log.New(authFile, "", log.LstdFlags),
+		trustProxy: env("PANEL_TRUST_PROXY", "false") == "true",
 	}
 	if len(a.password) < 16 {
 		log.Fatal("PANEL_PASSWORD must contain at least 16 characters")
@@ -140,12 +150,23 @@ func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
 		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(a.user)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(a.password)) != 1 {
+			if a.authLog != nil { a.authLog.Printf("auth_failed ip=%s", a.clientIP(r)) }
 			w.Header().Set("WWW-Authenticate", `Basic realm="Telegram Web Proxy"`)
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
 		next(w, r)
 	}
+}
+
+func (a *application) clientIP(r *http.Request) string {
+	if a.trustProxy {
+		if candidate := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); candidate != nil { return candidate.String() }
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil { if ip := net.ParseIP(host); ip != nil { return ip.String() } }
+	if ip := net.ParseIP(r.RemoteAddr); ip != nil { return ip.String() }
+	return "unknown"
 }
 
 func (a *application) health(w http.ResponseWriter, r *http.Request) {
