@@ -41,7 +41,7 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 </head>
 <body>
 <main class="shell">
-<header class="top"><div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div><a class="logout" href="#" onclick="logout()">Выйти ↗</a></header>
+<header class="top"><div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div><a class="logout" href="#" onclick="logout();return false">Выйти ↗</a></header>
 <section class="hero"><div class="eyebrow">CONTROL CENTER</div><h1>Управление прокси</h1><div class="sub">Профили, диагностика и резервирование — в отдельных разделах</div></section>
 <div class="grid">
 <section class="card"><h2>Система</h2><p>● Панель авторизована</p><div class="meta">Внутренний сервис доступен только через локальный reverse proxy.</div></section>
@@ -123,6 +123,7 @@ function resolveConfirmation(accepted){
  const dialog=document.querySelector('#confirmDialog');if(dialog.open)dialog.close();
  const resolve=confirmResolver;confirmResolver=null;if(resolve)resolve(accepted);
 }
+document.querySelector('#confirmDialog').addEventListener('cancel',()=>{if(confirmResolver)resolveConfirmation(false)});
 function closeDialog(id){document.getElementById(id).close()}
 function copyText(text){navigator.clipboard.writeText(text).catch(()=>{const field=document.createElement('textarea');field.value=text;document.body.appendChild(field);field.select();document.execCommand('copy');field.remove()})}
 function copyValue(id){copyText(document.getElementById(id).textContent)}
