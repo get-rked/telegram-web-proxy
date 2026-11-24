@@ -42,6 +42,7 @@ services:
       - /tmp:rw,noexec,nosuid,size=16m
       - /run:rw,noexec,nosuid,size=8m
   mtproxy-firewall:
+    profiles: ["mtproxy"]
     image: alpine:3.22
     network_mode: service:relay
     depends_on:
