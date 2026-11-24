@@ -4375,8 +4375,9 @@ show_menu() {
   ui_option 4 "▤" "Текущая конфигурация"
   ui_option 5 "⚒" "Инструменты"
   ui_option 6 "⏻" "Выход"
+  ui_option 7 "◈" "Docker — установка и обслуживание"
   echo
-  read -r -p "Выбор [1-6]: " choice
+  read -r -p "Выбор [1-7]: " choice
   case "$choice" in
     1) MODE=install ;;
     2) MODE=update ;;
@@ -4384,6 +4385,7 @@ show_menu() {
     4) MODE=config ;;
     5) MODE=tools ;;
     6) exit 0 ;;
+    7) MODE=docker ;;
     *) warn "Неверный выбор." ;;
   esac
 }
