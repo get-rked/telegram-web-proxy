@@ -24,6 +24,9 @@ jobs:
       - name: Verify formatting
         working-directory: web-panel
         run: gofmt -w .
+      - name: Download pinned modules
+        working-directory: web-panel
+        run: go mod download
       - name: Test
         working-directory: web-panel
         run: go test ./...
