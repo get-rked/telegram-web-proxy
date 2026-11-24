@@ -2584,8 +2584,8 @@ docker_prompt_secret() {
       echo "  2) С префиксом dd — для обфускации"
       read -r -p "Выбор [1-2, по умолчанию 1]: " format_choice || die "Ввод прерван."
       case "${format_choice:-1}" in
-        1) SECRET_PREFIX_MODE=plain ;;
-        2) SECRET_PREFIX_MODE=dd ;;
+        1) SECRET_PREFIX_MODE="plain" ;;
+        2) SECRET_PREFIX_MODE="dd" ;;
         *) die "Выбери 1 или 2." ;;
       esac
     fi
