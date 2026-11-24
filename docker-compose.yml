@@ -8,11 +8,13 @@ services:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       TPROXY_CONFIG_DIR: /config
       MTPROXY_DIR: /mtproxy
+      PROFILES_DIR: /profiles
       TPROXY_UID: "10001"
       TPROXY_GID: "10001"
     volumes:
       - ./docker/config:/config
       - ./docker/mtproxy:/mtproxy
+      - ./docker/profiles:/profiles
     restart: "no"
   relay:
     depends_on:
@@ -21,12 +23,13 @@ services:
       context: .
       dockerfile: docker/Dockerfile.relay
     restart: unless-stopped
-    command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json"]
+    command: ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json"]
     volumes:
       - ./docker/config:/etc/tproxy-server:ro
       - ./docker/site:/srv/tproxy-site:ro
+      - ./docker/profiles:/var/lib/tproxy-profiles:ro
     healthcheck:
-      test: ["CMD", "/usr/local/bin/tproxy-server", "-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json", "-check"]
+      test: ["CMD", "/usr/local/bin/tproxy-server", "-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json", "-check"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -160,13 +163,13 @@ services:
       PANEL_PASSWORD: ${PANEL_PASSWORD:?Set PANEL_PASSWORD in .env}
       PANEL_DB: /var/lib/tproxy-panel/panel.db
       TPROXY_CONFIG: /etc/tproxy-server/config.json
-      TPROXY_PROFILES: /etc/tproxy-server/profiles.json
+      TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
     depends_on:
       bootstrap: {condition: service_completed_successfully}
     volumes:
       - panel-data:/var/lib/tproxy-panel
       - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
-      - ./docker/config/profiles.json:/etc/tproxy-server/profiles.json:rw
+      - ./docker/profiles:/var/lib/tproxy-profiles:rw
     networks: [proxy-internal]
     security_opt: [no-new-privileges:true]
     read_only: true
