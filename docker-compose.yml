@@ -41,6 +41,35 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
       - /run:rw,noexec,nosuid,size=8m
+  mtproxy-firewall:
+    image: alpine:3.22
+    network_mode: service:relay
+    depends_on:
+      relay: {condition: service_healthy}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        apk add --no-cache nftables >/dev/null
+        nft delete table inet mtproxy_guard 2>/dev/null || true
+        nft -f - <<'NFT'
+        table inet mtproxy_guard {
+          chain input {
+            type filter hook input priority -100; policy accept;
+            iifname != "lo" tcp dport { 2398, 8888 } drop
+          }
+        }
+        NFT
+        exec sleep infinity
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    healthcheck:
+      test: ["CMD-SHELL", "nft list table inet mtproxy_guard >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
   mtproxy:
     profiles: ["mtproxy"]
     build:
@@ -50,6 +79,7 @@ services:
     network_mode: service:relay
     depends_on:
       relay: {condition: service_healthy}
+      mtproxy-firewall: {condition: service_healthy}
     environment:
       MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
       MTPROXY_DATA_DIR: /var/lib/mtproxy
