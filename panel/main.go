@@ -590,7 +590,8 @@ func (a *application) readProfiles() (profileDocument, error) {
 	}
 	seenNames := make(map[string]bool)
 	seenSecrets := make(map[string]bool)
-	for _, p := range doc.Profiles {
+	for i := range doc.Profiles {
+		p := &doc.Profiles[i]
 		if err := validateProfileName(p.Name); err != nil { return doc, err }
 		if p.Backend == "" { p.Backend = "127.0.0.1:2398" }
 		if p.CarrierMode == "" { p.CarrierMode = "https" }

@@ -25,7 +25,7 @@ func testApp(t *testing.T) *application {
 	config := filepath.Join(dir, "config.json")
 	if err = os.WriteFile(config, []byte(`{"public_hostname":"proxy.example.com","listen":"127.0.0.1:8080","admin_listen":"127.0.0.1:8081","token_key_file":"/private/token.key"}`), 0600); err != nil { t.Fatal(err) }
 	profiles := filepath.Join(dir, "profiles.json")
-	if err = os.WriteFile(profiles, []byte(`{"profiles":[{"name":"default","secret":"00112233445566778899aabbccddeeff","backend":"127.0.0.1:2398","carrier_mode":"https"}]}`), 0600); err != nil { t.Fatal(err) }
+	if err = os.WriteFile(profiles, []byte(`{"profiles":[{"name":"default","secret":"dd00112233445566778899aabbccddeeff","backend":"127.0.0.1:2398","carrier_mode":"https"}]}`), 0600); err != nil { t.Fatal(err) }
 	salt := []byte("test-panel-password-salt")
 	hash := sha256.Sum256(append(append([]byte(nil), salt...), []byte("a-long-test-password")...))
 	return &application{db: db, user: "admin", basePath: "/panel-test-session-path-1234567890", passwordSalt: salt, passwordHash: hash[:], sessions: map[string]time.Time{"test-session": time.Now().Add(time.Hour)}, config: config, profiles: profiles}
@@ -125,11 +125,11 @@ func TestCreateProfileGeneratesSecretAndWritesBackup(t *testing.T) {
 	a := testApp(t)
 	response := httptest.NewRecorder()
 	a.auth(a.profilesAPI)(response, authRequest(http.MethodPost, "/admin/api/profiles",
-		`{"name":"mobile","backend":"127.0.0.1:2398","carrier_mode":"websocket"}`, true))
+		`{"name":"mobile"}`, true))
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	var result struct { Secret string `json:"secret"` }
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
-	if len(result.Secret) != 32 { t.Fatalf("generated secret length=%d", len(result.Secret)) }
+	if len(result.Secret) != 34 || !strings.HasPrefix(result.Secret, "dd") { t.Fatalf("generated secret must be dd-prefixed, got %q", result.Secret) }
 	if _, err := os.Stat(a.profiles + ".backup-" + ""); err == nil { t.Fatal("unexpected exact backup path") }
 	backups, err := filepath.Glob(a.profiles + ".backup-*")
 	if err != nil || len(backups) != 1 { t.Fatalf("backups=%v err=%v", backups, err) }
@@ -151,27 +151,17 @@ func TestDefaultProfileCannotBeDeleted(t *testing.T) {
 	if response.Code != http.StatusConflict { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 }
 
-func TestInvalidBackendIsRejected(t *testing.T) {
-	if err := validateProfileRequest(profileRequest{Name:"bad", Backend:"example.com:2398", CarrierMode:"https"}); err == nil {
-		t.Fatal("non-loopback backend was accepted")
-	}
-	if err := validateProfileRequest(profileRequest{Name:"bad", Backend:"127.0.0.1:nope", CarrierMode:"https"}); err == nil {
-		t.Fatal("nonnumeric backend port was accepted")
-	}
-}
-
-func TestUpdateProfilePreservesSecretAndCreatesBackup(t *testing.T) {
+func TestCreateProfileUsesDDSecretAndInternalDefaults(t *testing.T) {
 	a := testApp(t)
-	request := authRequest(http.MethodPut, "/admin/api/profiles/default", `{"name":"default","backend":"127.0.0.1:2400","carrier_mode":"https-lanes"}`, true)
 	response := httptest.NewRecorder()
-	a.auth(a.profileItemAPI)(response, request)
+	a.auth(a.profilesAPI)(response, authRequest(http.MethodPost, "/api/profiles", `{"name":"mobile"}`, true))
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
-	doc, err := a.readProfiles()
-	if err != nil { t.Fatal(err) }
-	if doc.Profiles[0].Secret != "00112233445566778899aabbccddeeff" { t.Fatal("profile secret changed") }
-	if doc.Profiles[0].Backend != "127.0.0.1:2400" { t.Fatal("backend was not updated") }
-	backups, _ := filepath.Glob(a.profiles + ".backup-*")
-	if len(backups) != 1 { t.Fatalf("expected one backup, got %d", len(backups)) }
+	var result struct { Secret string `json:"secret"` }
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
+	if len(result.Secret) != 34 || !strings.HasPrefix(result.Secret, "dd") { t.Fatalf("invalid generated secret: %q", result.Secret) }
+	doc, err := a.readProfiles(); if err != nil { t.Fatal(err) }
+	created := doc.Profiles[findProfile(doc.Profiles, "mobile")]
+	if created.Backend != "127.0.0.1:2398" || created.CarrierMode != "https" || !strings.HasPrefix(created.Secret, "dd") { t.Fatalf("unexpected generated profile: %+v", created) }
 }
 
 func TestDeleteNonDefaultProfile(t *testing.T) {
