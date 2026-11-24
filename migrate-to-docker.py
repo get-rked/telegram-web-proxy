@@ -134,7 +134,10 @@ def main():
     ap.add_argument('--web-server', choices=('caddy','nginx'))
     ap.add_argument('--apply', action='store_true', help='Выполнить перенос. Без этого флага работает только проверка.')
     args = ap.parse_args()
-    if os.geteuid() != 0:\n        raise MigrationError('Запусти скрипт от root: sudo python3 migrate-to-docker.py')\n    source, repo = args.source_dir.resolve(), REPO\n    config_src = source / 'config/proxy/config.json'
+    if os.geteuid() != 0:
+        raise MigrationError('Запусти скрипт от root: sudo python3 migrate-to-docker.py')
+    source, repo = args.source_dir.resolve(), REPO
+    config_src = source / 'config/proxy/config.json'
     if not config_src.is_file(): raise MigrationError(f'Не найден файл действующей конфигурации: {config_src}')
     config = read_json(config_src)
     if not isinstance(config, dict): raise MigrationError('config.json должен содержать JSON-объект.')
@@ -191,7 +194,10 @@ def main():
         (env_path, env_text.encode(), 0o600),
     ]
     certs = nginx_certificates(repo, domain) if selected == 'nginx' else []
-    site_previous = repo/'docker/site.before-migration'\n    if site_previous.exists():\n        raise MigrationError(f'Остался предыдущий каталог миграции: {site_previous}; проверь его вручную.')\n    backup_root = Path('/var/backups/telegram-web-proxy-docker-migration')
+    site_previous = repo/'docker/site.before-migration'
+    if site_previous.exists():
+        raise MigrationError(f'Остался предыдущий каталог миграции: {site_previous}; проверь его вручную.')
+    backup_root = Path('/var/backups/telegram-web-proxy-docker-migration')
     backup_candidates = [source/'config/proxy', source/'config/mtproxy', site_path, env_path, repo/'docker/config', repo/'docker/profiles', repo/'docker/mtproxy/secret', repo/'docker/site', repo/'docker/nginx/certs'] + [src for src, _, _ in certs]
     print(f'Источник: {source}')
     print(f'Домен: {domain}; reverse proxy: {selected}; профилей: {len(profiles)}')
