@@ -105,7 +105,7 @@ def main():
             "backend": "127.0.0.1:2398",
             "carrier_mode": "https"
         }]}
-        atomic_write(profiles_path, (json.dumps(profiles_doc, indent=2) + "\n").encode(), 0o640)
+        atomic_write(profiles_path, (json.dumps(profiles_doc, indent=2) + "\n").encode(), 0o600)
 
     default_profiles = [p for p in profiles_doc["profiles"] if p.get("name") == "default"]
     if not default_profiles:
@@ -163,6 +163,7 @@ def main():
     os.chown(secret_path, UID, GID)
     os.chown(PROFILES_DIR, UID, GID)
     os.chmod(PROFILES_DIR, 0o750)
+    os.chmod(profiles_path, 0o600)
     os.chmod(token_path, 0o600)
     os.chmod(secret_path, 0o600)
     print("bootstrap: configuration validated; existing secrets preserved; initialization complete")
