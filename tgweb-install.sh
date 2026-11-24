@@ -2745,8 +2745,11 @@ docker_install_command() {
     prompt_port relay_port "Relay-порт" "${relay_port:-8080}"
     echo
     echo "Внутренний admin-порт для health check и метрик (по умолчанию 8081)."
-    prompt_port admin_port "Admin-порт" "${admin_port:-8081}"
-    [[ "$relay_port" != "$admin_port" ]] || die "Relay- и admin-порты должны различаться."
+    while :; do
+      prompt_port admin_port "Admin-порт" "${admin_port:-8081}"
+      [[ "$relay_port" != "$admin_port" ]] && break
+      echo "  ⚠️  Admin-порт должен отличаться от relay-порта $relay_port."
+    done
     SECRET_PREFIX_MODE="$prefix"
     SECRET_ARG="$secret"
     docker_prompt_secret
