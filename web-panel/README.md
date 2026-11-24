@@ -48,3 +48,10 @@ go build -trimpath -ldflags="-s -w" -o tproxy-panel .
 - Регрессионный тест проверяет попытку входа с логином `' OR 1=1 --`: она не должна создавать сессию, при этом обычная авторизация должна продолжать работать.
 
 При добавлении новых SQL-операций необходимо использовать `Query`, `QueryRow` и `Exec` с плейсхолдерами и отдельными аргументами. Не использовать `fmt.Sprintf`, конкатенацию строк или шаблоны для подстановки пользовательских данных в SQL.
+
+
+### MTProxy runtime settings in the panel
+
+The profile table displays Workers and Max Connections from `mtproxy.env`. These are settings of the shared MTProxy service, not independent per-profile limits; the same values are therefore shown for each profile. The profile editor validates Workers (1–256) and Max Connections (1–1,000,000), updates the service environment file atomically, and restarts MTProxy. If applying the change fails, the previous profile and runtime settings are restored.
+
+Confirmation and status messages are rendered inside the dashboard using the panel's own dialog and toast styles; browser-native `alert()` and `confirm()` prompts are not used.
