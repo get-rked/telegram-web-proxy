@@ -94,14 +94,14 @@ services:
       mtproxy-firewall: {condition: service_healthy}
       mtproxy-volume-init: {condition: service_completed_successfully}
     environment:
-      MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
+      MTPROXY_SECRET_FILE: /run/mtproxy/secret
       MTPROXY_DATA_DIR: /var/lib/mtproxy
       MTPROXY_WORKERS: ${MTPROXY_WORKERS:-1}
       MTPROXY_MAX_CONNECTIONS: ${MTPROXY_MAX_CONNECTIONS:-4096}
       MTPROXY_REFRESH_INTERVAL: ${MTPROXY_REFRESH_INTERVAL:-86400}
       MTPROXY_NAT_INFO: ${MTPROXY_NAT_INFO:-}
     volumes:
-      - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:ro
+      - ./docker/mtproxy:/run/mtproxy:ro
       - mtproxy-data:/var/lib/mtproxy
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8888/stats >/dev/null"]
@@ -189,7 +189,7 @@ services:
       PANEL_DB: /var/lib/tproxy-panel/panel.db
       TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
-      MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
+      MTPROXY_SECRET_FILE: /run/mtproxy/secret
       PANEL_AUTH_LOG: /var/log/tproxy-panel/auth.log
       PANEL_TRUST_PROXY: "true"
     depends_on:
@@ -199,7 +199,7 @@ services:
       - panel-data:/var/lib/tproxy-panel
       - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
       - ./docker/profiles:/var/lib/tproxy-profiles:rw
-      - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:rw
+      - ./docker/mtproxy:/run/mtproxy:rw
       - ./docker/security/logs:/var/log/tproxy-panel:rw
     networks: [proxy-internal]
     security_opt: [no-new-privileges:true]
