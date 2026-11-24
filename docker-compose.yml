@@ -68,7 +68,6 @@ services:
     profiles: ["mtproxy"]
     image: busybox:1.37.0
     user: "0:0"
-    command: ["sh", "-c", "chown -R 10001:10001 /data"]
     volumes:
       - mtproxy-data:/data
     restart: "no"
