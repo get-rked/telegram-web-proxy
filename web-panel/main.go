@@ -430,7 +430,7 @@ func (a *App) profileImport(w http.ResponseWriter, r *http.Request) {
 	target := r.FormValue("target")
 	name := r.FormValue("name")
 	entry := r.FormValue("entry")
-	args := []string{"profile", "import"}
+	args := []string{}
 	if target == "default" {
 		args = append(args, "--replace-default")
 	} else if target == "new" && nameRE.MatchString(name) {
@@ -466,7 +466,7 @@ func (a *App) profileImport(w http.ResponseWriter, r *http.Request) {
 		errOut(w, http.StatusInternalServerError, "Не удалось защитить временный архив")
 		return
 	}
-	args = append([]string{args[0], tempPath}, args[1:]...)
+	args = append([]string{"profile", "import", tempPath}, args...)
 	if entry != "" {
 		args = append(args, "--entry", entry)
 	}
