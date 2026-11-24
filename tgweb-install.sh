@@ -4271,7 +4271,7 @@ main() {
 # CLI-интерфейс операций, ранее доступных только из меню.
 profile_cli() {
   need_root; need_files
-  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0 rotate=0 backup_tmp="" workers="" max_connections="" env_backup="" env_tmp=""
+  local action="${1:-}" name="" mode="https" secret="" current_secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0 rotate=0 backup_tmp="" workers="" max_connections="" env_backup="" env_tmp=""
   shift || true
   case "$action" in
     list)
@@ -4329,8 +4329,8 @@ profile_cli() {
       [[ -z "$workers" || ( "$workers" =~ ^[1-9][0-9]*$ && ${#workers} -le 3 && "$workers" -le 256 ) ]] || die "Workers должен быть от 1 до 256."
       [[ -z "$max_connections" || ( "$max_connections" =~ ^[1-9][0-9]*$ && ${#max_connections} -le 7 && "$max_connections" -le 1000000 ) ]] || die "Max Connections должен быть от 1 до 1000000."
       file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
-      secret="$(jq -r '.secret' "$file")"
-      valid_secret "$secret" || die "Секрет профиля некорректен."
+      current_secret="$(jq -r '.secret' "$file")"
+      valid_secret "$current_secret" || die "Секрет профиля некорректен."
       if (( rotate )); then
         while :; do
           secret="dd$(openssl rand -hex 16)"
@@ -4342,6 +4342,8 @@ profile_cli() {
         canonical="${secret#dd}"
         jq -e --arg n "$name" --arg s "$canonical" '.profiles[] | select(.name != $n and (.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null &&
           die "Этот секрет уже используется другим профилем."
+      else
+        secret="$current_secret"
       fi
       backup_tmp="$(mktemp)"
       cp -a "$file" "$backup_tmp" || { rm -f "$backup_tmp"; die "Не удалось сохранить исходный профиль."; }
