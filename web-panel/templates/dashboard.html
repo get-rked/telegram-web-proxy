@@ -29,6 +29,7 @@ button{cursor:pointer;background:#1b3552;border-color:#3b587a}button.primary{bac
 button.danger{border-color:#78444b;background:#3a202a;color:#ffc5c8}button:disabled{opacity:.5;cursor:wait}
 input,select{min-width:180px}input[type=file]{max-width:100%}
 .output{white-space:pre-wrap;max-height:420px;overflow:auto;background:#09111d;border:1px solid var(--line);padding:15px;border-radius:12px;color:#b9c9dc;font:12px ui-monospace,monospace}
+ .qr-field{display:flex;flex-direction:column;align-items:center;text-align:center}
 .qr{width:220px;max-width:100%;background:white;padding:10px;border-radius:12px}
 .logout{color:#b8c8dc;text-decoration:none;border:1px solid var(--line);padding:10px 14px;border-radius:10px}
 .foot{color:#6f829a;text-align:center;padding:24px 0;font-size:12px}
@@ -52,8 +53,8 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">＋ Создать профиль</button><button onclick="openDialog('importDialog')">Импорт профиля</button></div><div id="runtimeSettings" class="runtime-note">Workers и Max Connections: загрузка… (изменяются только через CLI)</div>
 <div id="profiles">Загрузка профилей…</div></section>
 <section class="card wide"><h2>Диагностика</h2><button onclick="loadDiagnostics()">Запустить диагностику</button><pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre></section>
-<section class="card wide"><h2>Резервные копии и перенос профилей</h2>
-<div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="loadBackups()">Обновить список архивов</button></div>
+<section class="card wide"><h2>Резервные копии</h2>
+<div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="openDialog('backupImportDialog')">Импорт архива</button><button onclick="loadBackups()">Обновить список архивов</button></div>
 <div class="meta">Экспорт профиля доступен в строке соответствующего профиля. Импорт — рядом с кнопкой «Создать профиль».</div>
 <div id="backups">Загрузка архивов…</div>
 </section>
@@ -69,13 +70,18 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <div class="field"><label>Путь profile.json (если в архиве несколько)</label><input id="importEntry" placeholder="profiles/ИМЯ/profile.json"></div>
 <div class="dialog-actions"><button onclick="closeDialog('importDialog')">Отмена</button><button class="primary" onclick="importProfile()">Импортировать</button></div></dialog>
 
+<dialog id="backupImportDialog">
+<div class="dialog-head"><h2>Импорт полной резервной копии</h2><button onclick="closeDialog('backupImportDialog')">✕</button></div>
+<div class="field"><label for="backupArchive">Архив полной резервной копии (.tar.gz)</label><input id="backupArchive" type="file" accept=".tar.gz,.tgz"></div>
+<div class="meta">Архив будет сохранён в общем каталоге резервных копий и появится в списке для восстановления.</div>
+<div class="dialog-actions"><button onclick="closeDialog('backupImportDialog')">Отмена</button><button class="primary" onclick="importBackupArchive()">Импортировать архив</button></div></dialog>
 <dialog id="profileDialog">
 <div class="dialog-head"><h2 id="configTitle">Конфигурация профиля</h2><button onclick="closeDialog('profileDialog')">✕</button></div>
 <div class="field"><label>Адрес сервера</label><div class="value"><code id="configServer"></code><button onclick="copyValue('configServer')">Копировать</button></div></div>
 <div class="field"><label>Секрет подключения</label><div class="value"><code id="configSecret"></code><button onclick="copyValue('configSecret')">Копировать</button></div></div>
 <div class="field"><label>Публичная ссылка Telegram</label><a id="configLink" class="link" target="_blank" rel="noopener"></a><div class="toolbar"><button onclick="copyLink()">Копировать HTTPS-ссылку</button></div></div>
 <div class="field"><label>Прямая ссылка Telegram</label><a id="configDeepLink" class="link"></a><div class="toolbar"><button onclick="copyDeepLink()">Копировать tg:// ссылку</button></div></div>
-<div class="field"><label>QR-код подключения (прямая ссылка Telegram)</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
+<div class="field qr-field"><label>QR-код подключения (прямая ссылка Telegram)</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
 <div class="dialog-actions"><button onclick="closeDialog('profileDialog')">Закрыть</button></div>
 </dialog>
 
@@ -83,7 +89,7 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <div class="dialog-head"><h2 id="editTitle">Изменить профиль</h2><button onclick="closeDialog('editDialog')">✕</button></div>
 <input type="hidden" id="editName">
 <div class="field"><label for="editCarrier">Carrier mode</label><select id="editCarrier"><option value="https">https</option><option value="https-lanes">https-lanes</option><option value="websocket">websocket</option><option value="websocket-lanes">websocket-lanes</option></select></div>
-<div class="field"><label><input type="checkbox" id="rotateSecret" style="min-width:auto"> Перегенерировать секрет профиля</label><div class="meta">После применения старый секрет перестанет работать на клиентах.</div></div>
+<div class="field"><label for="editSecret">Секрет профиля (dd + 32 hex-символа)</label><div class="toolbar"><input id="editSecret" type="text" maxlength="34" minlength="34" autocomplete="off" spellcheck="false" oninput="validateEditSecret()" style="flex:1"><button type="button" onclick="generateEditSecret()">Сгенерировать</button></div><div id="secretValidation" class="meta">Секрет должен содержать ровно 34 символа: dd и 32 шестнадцатеричных символа.</div></div>
 <div class="dialog-actions"><button onclick="closeDialog('editDialog')">Отмена</button><button class="primary" onclick="saveProfile()">Сохранить изменения</button></div>
 </dialog>
 
@@ -137,6 +143,7 @@ function copyDeepLink(){copyText(document.getElementById('configDeepLink').textC
 async function loadProfiles(){
  try{
   const profiles=await api(base+'/api/profiles');
+  window.profileSecrets=Object.fromEntries(profiles.map(p=>[p.name,p.secret]));
   const runtime=document.querySelector('#runtimeSettings');
   if(profiles.length){runtime.textContent='Общие настройки MTProxy · Workers: '+(profiles[0].workers||'1')+' · Max Connections: '+(profiles[0].max_connections||'4096')+' · Изменение доступно только через CLI.'}
   else{runtime.textContent='Общие настройки MTProxy отображаются после загрузки профилей.'}
@@ -162,18 +169,35 @@ async function showProfileConfig(name){
 }
 function editProfile(name,mode){
  document.querySelector('#editName').value=name;document.querySelector('#editTitle').textContent='Изменить · '+name;
- document.querySelector('#editCarrier').value=mode;document.querySelector('#rotateSecret').checked=false;
+ document.querySelector('#editCarrier').value=mode;
+ const secret=window.profileSecrets&&window.profileSecrets[name];
+ document.querySelector('#editSecret').value=secret||'';
+ validateEditSecret();
  document.querySelector('#editDialog').showModal();
 }
 async function saveProfile(){
  const name=document.querySelector('#editName').value;
  const carrier_mode=document.querySelector('#editCarrier').value;
- const regenerate_secret=document.querySelector('#rotateSecret').checked;
- if(regenerate_secret&&!await askConfirm('Старый секрет перестанет работать на клиентах. Продолжить?','Перегенерация секрета','Перегенерировать'))return;
+ const secret=document.querySelector('#editSecret').value;
+ if(!/^dd[0-9a-f]{32}$/.test(secret)){validateEditSecret();notify(Error('Проверьте формат секрета'));return}
+ if(secret!==window.profileSecrets?.[name]&&!await askConfirm('Старый секрет перестанет работать на клиентах. Продолжить?','Изменение секрета','Сохранить'))return;
  try{
-  await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'update',CarrierMode:carrier_mode,RegenerateSecret:regenerate_secret})});
+  await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'update',CarrierMode:carrier_mode,Secret:secret})});
   closeDialog('editDialog');await loadProfiles();notify('Настройки профиля обновлены','success');
  }catch(error){notify(error)}
+}
+function validateEditSecret(){
+ const field=document.querySelector('#editSecret'),hint=document.querySelector('#secretValidation');
+ const valid=/^dd[0-9a-f]{32}$/.test(field.value);
+ field.setCustomValidity(valid?'':'Нужен префикс dd и ровно 32 символа 0-9 или a-f');
+ hint.textContent=valid?'Формат секрета корректен ('+field.value.length+'/34)':'Длина: '+field.value.length+'/34. Требуется dd и 32 символа 0-9 или a-f.';
+ hint.style.color=valid?'var(--success, #36a269)':'var(--muted, #a0a0a0)';
+ return valid;
+}
+function generateEditSecret(){
+ const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+ document.querySelector('#editSecret').value='dd'+Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ validateEditSecret();
 }
 async function exportProfile(name){
  try{const result=await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'export'})});const link=document.createElement('a');link.href=result.download_url;link.download='';document.body.appendChild(link);link.click();link.remove();await loadBackups()}
@@ -200,11 +224,21 @@ async function loadDiagnostics(){
 async function loadBackups(){
  try{
   const backups=await api(base+'/api/backups');
-  document.querySelector('#backups').innerHTML='<h3>Архивы</h3>'+backups.map(b=>{
-   const action=b.kind==='profile'?'<a href="'+base+'/api/profile-backups/'+encodeURIComponent(b.name)+'">Скачать</a>':'<button onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button>';
-   const label=b.kind==='profile'?'Архив профиля':'Полная копия';
-   return '<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">'+label+' · '+(b.size/1048576).toFixed(2)+' MB · '+new Date(b.modified).toLocaleString()+'</div></div>'+action+'</div>';
-  }).join('')||'<div class="meta">Архивов пока нет</div>';
+  document.querySelector('#backups').innerHTML='<h3>Полные резервные копии</h3>'+backups.map(b=>{
+   const action='<div class="actions"><a class="button-link" href="'+base+'/api/backups/download/'+encodeURIComponent(b.name)+'">Экспорт</a><button class="primary" onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button></div>';
+   return '<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">Создана: '+new Date(b.created).toLocaleString()+' · '+(b.size/1048576).toFixed(2)+' MB</div></div>'+action+'</div>';
+  }).join('')||'<div class="meta">Полных резервных копий пока нет</div>';
+ }catch(error){notify(error)}
+}
+async function importBackupArchive(){
+ const file=document.querySelector('#backupArchive').files[0];
+ if(!file){notify(Error('Выберите архив'));return}
+ if(file.size>1024*1024*1024){notify(Error('Размер архива не должен превышать 1 ГБ'));return}
+ const form=new FormData();form.append('archive',file);
+ try{
+  await api(base+'/api/backups/import',{method:'POST',body:form});
+  document.querySelector('#backupArchive').value='';closeDialog('backupImportDialog');
+  await loadBackups();notify('Архив импортирован','success');
  }catch(error){notify(error)}
 }
 async function createBackup(){
