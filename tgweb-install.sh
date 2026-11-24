@@ -2508,7 +2508,7 @@ docker_update_command() {
   info "Проверка Compose-конфигурации ($proxy + MTProxy)..."
   docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Загрузка внешних образов..."
-  docker_compose --profile "$proxy" --profile mtproxy pull || die "Не удалось загрузить внешние образы."
+  docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы."
   info "Сборка обновлённых образов..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Применение обновления..."
