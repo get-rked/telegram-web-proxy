@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare a non-destructive migration of an existing native install into Docker."""
 from __future__ import annotations
-import argparse, ipaddress, json, os, re, secrets, shutil, sys, tarfile, tempfile
+import argparse, hashlib, ipaddress, json, os, re, secrets, shutil, sys, tarfile, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -94,26 +94,113 @@ def atomic_write(path: Path, data: bytes, mode=0o600):
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
 
+def tree_manifest(root: Path):
+    """Return a deterministic content manifest without following symlinks."""
+    result = {".": ("dir",)}
+    for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        kept_dirs = []
+        for name in sorted(dirs):
+            path = current_path / name
+            rel = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                result[rel] = ("symlink", os.readlink(path))
+            else:
+                result[rel] = ("dir",)
+                kept_dirs.append(name)
+        dirs[:] = kept_dirs
+        for name in sorted(files):
+            path = current_path / name
+            rel = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                result[rel] = ("symlink", os.readlink(path))
+            elif path.is_file():
+                digest = hashlib.sha256()
+                size = 0
+                with path.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                        size += len(chunk)
+                result[rel] = ("file", size, digest.hexdigest())
+            else:
+                raise MigrationError(f'Неподдерживаемый специальный файл в каталоге сайта: {path}')
+    return result
+
+
 def copy_tree_atomic(src: Path, dst: Path):
-    if not src.is_dir(): raise MigrationError(f'Каталог сайта не найден: {src}')
+    if not src.is_dir():
+        raise MigrationError(f'Каталог сайта не найден: {src}')
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    source_manifest = tree_manifest(src)
     temp = Path(tempfile.mkdtemp(prefix='.site-migration-', dir=dst.parent))
     shutil.rmtree(temp)
-    shutil.copytree(src, temp, symlinks=False)
-    old = dst.with_name(dst.name + '.before-migration')
-    if old.exists(): raise MigrationError(f'Остался предыдущий каталог миграции: {old}; проверь его вручную.')
-    if dst.exists(): os.replace(dst, old)
-    os.replace(temp, dst)
-    if old.exists(): shutil.rmtree(old)
+    previous = None
+    try:
+        shutil.copytree(src, temp, symlinks=True)
+        copied_manifest = tree_manifest(temp)
+        if copied_manifest != source_manifest:
+            raise MigrationError('Контрольная сумма или структура копии сайта не совпадает с источником.')
+        if dst.exists() or dst.is_symlink():
+            stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+            previous = dst.with_name(dst.name + '.before-migration.' + stamp)
+            suffix = 1
+            while previous.exists() or previous.is_symlink():
+                previous = dst.with_name(dst.name + f'.before-migration.{stamp}.{suffix}')
+                suffix += 1
+            os.replace(dst, previous)
+        os.replace(temp, dst)
+        if tree_manifest(dst) != source_manifest:
+            failed = dst.with_name(dst.name + '.failed-migration.' +
+                                   datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))
+            os.replace(dst, failed)
+            if previous is not None:
+                os.replace(previous, dst)
+            raise MigrationError(
+                f'Проверка сайта после установки не пройдена; новая копия сохранена в {failed}.'
+            )
+        if previous is not None:
+            print(f'Предыдущий каталог сайта сохранён без удаления: {previous}')
+    except Exception:
+        if temp.exists():
+            shutil.rmtree(temp)
+        if previous is not None and previous.exists() and not dst.exists():
+            os.replace(previous, dst)
+        raise
+
+
+def verify_backup(archive: Path):
+    """Read every archived regular file so gzip/tar corruption is detected."""
+    with tarfile.open(archive, 'r:gz') as tar:
+        members = tar.getmembers()
+        if not members:
+            raise MigrationError('Резервная копия пуста.')
+        for member in members:
+            if member.isfile():
+                stream = tar.extractfile(member)
+                if stream is None:
+                    raise MigrationError(f'Не удалось прочитать файл из резервной копии: {member.name}')
+                while stream.read(1024 * 1024):
+                    pass
+    digest = hashlib.sha256()
+    with archive.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    checksum = archive.with_suffix(archive.suffix + '.sha256')
+    atomic_write(checksum, (digest.hexdigest() + '  ' + archive.name + '\n').encode(), 0o600)
+    return checksum
+
 
 def backup_paths(paths, backup_root: Path):
-    backup_root.mkdir(parents=True, exist_ok=True); os.chmod(backup_root, 0o700)
+    backup_root.mkdir(parents=True, exist_ok=True)
+    os.chmod(backup_root, 0o700)
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
     archive = backup_root / f'docker-migration-{stamp}.tar.gz'
     with tarfile.open(archive, 'w:gz') as tar:
-        for p in paths:
-            if p.exists() or p.is_symlink(): tar.add(p, arcname=str(p).lstrip('/'))
+        for path in paths:
+            if path.exists() or path.is_symlink():
+                tar.add(path, arcname=str(path).lstrip('/'))
     os.chmod(archive, 0o600)
-    with tarfile.open(archive, 'r:gz') as tar: tar.getmembers()
+    verify_backup(archive)
     return archive
 
 def nginx_certificates(repo: Path, domain: str):
