@@ -47,3 +47,16 @@ func TestPruneBackupsWhenBelowRetentionLimit(t *testing.T) {
 	a.backupRoot=filepath.Join(t.TempDir(),"backups")
 	if err:=a.pruneBackups(20);err!=nil {t.Fatal(err)}
 }
+
+func TestRestoreRejectsDefaultSecretMismatch(t *testing.T) {
+	a:=testApp(t)
+	a.backupRoot=filepath.Join(t.TempDir(),"backups")
+	backup,err:=a.createBackup();if err!=nil{t.Fatal(err)}
+	secretPath:=filepath.Join(t.TempDir(),"mtproxy.secret")
+	if err:=os.WriteFile(secretPath,[]byte("ffeeddccbbaa99887766554433221100"),0600);err!=nil{t.Fatal(err)}
+	a.mtproxySecret=secretPath
+	before,err:=os.ReadFile(a.profiles);if err!=nil{t.Fatal(err)}
+	if err:=a.restoreBackup(backup.ID);err==nil{t.Fatal("restore accepted a mismatched default profile secret")}
+	after,err:=os.ReadFile(a.profiles);if err!=nil{t.Fatal(err)}
+	if string(before)!=string(after){t.Fatal("profiles changed after rejected restore")}
+}
