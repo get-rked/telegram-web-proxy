@@ -118,12 +118,12 @@ jobs:
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           docker compose build bootstrap relay
           docker compose run --rm --no-deps bootstrap
-          docker run --rm \\
-            -v "$PWD/docker/config:/etc/tproxy-server:ro" \\
-            -v "$PWD/docker/site:/srv/tproxy-site:ro" \\
-            -v "$PWD/docker/profiles:/var/lib/tproxy-profiles:ro" \\
-            --entrypoint /usr/local/bin/tproxy-server telegram-web-proxy-relay:latest \\
-            -config /etc/tproxy-server/config.json \\
+          docker run --rm \
+            -v "$PWD/docker/config:/etc/tproxy-server:ro" \
+            -v "$PWD/docker/site:/srv/tproxy-site:ro" \
+            -v "$PWD/docker/profiles:/var/lib/tproxy-profiles:ro" \
+            --entrypoint /usr/local/bin/tproxy-server telegram-web-proxy-relay:latest \
+            -config /etc/tproxy-server/config.json \
             -profiles-file /var/lib/tproxy-profiles/profiles.json -check
           python3 -m json.tool docker/config/config.example.json >/dev/null
           python3 -m json.tool docker/config/profiles.example.json >/dev/null
