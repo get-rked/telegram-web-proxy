@@ -62,7 +62,7 @@ services:
     cap_drop: [ALL]
     read_only: true
   mtproxy-firewall:
-    profiles: ["mtproxy"]
+    profiles: ["webproxy"]
     build:
       context: .
       dockerfile: docker/Dockerfile.firewall
@@ -79,7 +79,7 @@ services:
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
   mtproxy-volume-init:
-    profiles: ["mtproxy"]
+    profiles: ["webproxy"]
     image: busybox:1.37.0
     user: "0:0"
     volumes:
@@ -100,7 +100,8 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
   mtproxy:
-    profiles: ["mtproxy"]
+    # Private MTProto backend required by the Web Proxy relay; not a public MTProxy service.
+    profiles: ["webproxy"]
     build:
       context: .
       dockerfile: docker/Dockerfile.mtproxy

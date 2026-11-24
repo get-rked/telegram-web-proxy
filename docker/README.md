@@ -8,7 +8,7 @@
 
 Запускайте только один reverse proxy одновременно: оба используют опубликованные relay порты 80 и 443.
 
-## Подготовка
+## Подготовка\n\nУстановка разворачивает Telegram Web Proxy: HTTPS-транспорт обслуживает `tproxy-server` через Caddy или Nginx. Для текущей версии relay нужен локальный MTProto backend на `127.0.0.1:2398`; он работает только внутри сетевого namespace relay и не является самостоятельным публичным прокси.
 
 ```bash
 cp .env.example .env
@@ -24,9 +24,9 @@ cp .env.example .env
 DNS-запись домена должна указывать на сервер, а входящие TCP-порты 80 и 443 должны быть доступны.
 
 ```bash
-docker compose --profile caddy --profile mtproxy config
-docker compose --profile caddy --profile mtproxy build
-docker compose --profile caddy --profile mtproxy up -d
+docker compose --profile caddy --profile webproxy config
+docker compose --profile caddy --profile webproxy build
+docker compose --profile caddy --profile webproxy up -d
 docker compose logs -f caddy
 ```
 
@@ -45,9 +45,9 @@ Nginx ожидает два файла на хосте:
 mkdir -p docker/nginx/certs
 # Поместите fullchain.pem и privkey.pem в эту директорию.
 chmod 600 docker/nginx/certs/privkey.pem
-docker compose --profile nginx --profile mtproxy config
-docker compose --profile nginx --profile mtproxy build
-docker compose --profile nginx --profile mtproxy up -d
+docker compose --profile nginx --profile webproxy config
+docker compose --profile nginx --profile webproxy build
+docker compose --profile nginx --profile webproxy up -d
 docker compose logs -f nginx
 ```
 
@@ -114,9 +114,9 @@ jail-файла до запуска. Не добавляйте широкие п
 (максимальный срок бана в настройке). Это позволяет блокировать конкретного
 посетителя за Cloudflare, не блокируя общий IP Cloudflare для остальных.
 
-## MTProxy backend
+## Внутренний MTProto backend Web Proxy
 
-Официальный MTProxy собирается из закреплённого upstream commit
+Важно: этот контейнер — **внутренний backend**, необходимый текущей реализации `tproxy-server` для завершения MTProto-потоков, приходящих через Web Proxy. Он не публикует отдельный MTProxy-порт в интернет и не формирует ссылку `tg://proxy`. Пользователю выдаётся только ссылка Web Proxy (`t.me/webproxy`). Удалить backend без замены реализации relay нельзя: Web Proxy перестанет передавать трафик Telegram.\n\nОфициальный MTProxy собирается из закреплённого upstream commit
 `69f2f083b57bbd94932cb9f4f32155f33e719ff1`. Он запускается отдельным контейнером
 в сетевом namespace relay и слушает внутренний порт `2398`; статистика доступна
 только внутри namespace на `127.0.0.1:8888/stats`. Порт 2398 не публикуется на
@@ -147,9 +147,9 @@ MTProxy запускается с одним worker по умолчанию.
 Выбрав Caddy или Nginx, добавьте профиль `mtproxy` к команде запуска:
 
 ```bash
-docker compose --profile caddy --profile mtproxy up -d --build
+docker compose --profile caddy --profile webproxy up -d --build
 # либо:
-docker compose --profile nginx --profile mtproxy up -d --build
+docker compose --profile nginx --profile webproxy up -d --build
 ```
 
 Проверка состояния:

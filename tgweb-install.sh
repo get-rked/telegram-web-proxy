@@ -2605,7 +2605,7 @@ docker_wait_ready() {
     (( ready == 1 )) && break
     sleep 5
   done
-  docker_compose --profile "$proxy" --profile mtproxy ps -a
+  docker_compose --profile "$proxy" --profile webproxy ps -a
   for required in relay panel fail2ban "$proxy" mtproxy mtproxy-firewall; do
     line="${states[$required]:-}"
     [[ "$line" == "running|healthy" || "$line" == "running|none" ]] ||
@@ -2824,11 +2824,11 @@ atomic_write(profiles_path, profiles_data)
 atomic_write(mtproxy_path, mtproxy_data)
 print(f"Подготовлено профилей: {len(profiles)}; секрет default синхронизирован.")
 PY
-  docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
+  docker_compose --profile "$proxy" --profile webproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Загружаю внешние образы..."
-  docker_pull_external_images --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы. Причина и диагностика DNS выведены выше."
+  docker_pull_external_images --profile "$proxy" --profile webproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы. Причина и диагностика DNS выведены выше."
   info "Собираю локальные образы..."
-  docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  docker_compose --profile "$proxy" --profile webproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Первоначальная подготовка данных Docker..."
   docker_compose run --rm --no-deps -e PANEL_RESET_CREDENTIALS=1 bootstrap || die "Не удалось подготовить данные первоначальной установки."
   info "Проверяю права публичного сайта..."
@@ -2836,7 +2836,7 @@ PY
   info "Исправляю права доступа к конфигурациям Docker..."
   docker_repair_bind_mount_permissions
   info "Запускаю Telegram Web Proxy..."
-  docker_compose --profile "$proxy" --profile mtproxy up -d || die "Не удалось запустить Docker-проект."
+  docker_compose --profile "$proxy" --profile webproxy up -d || die "Не удалось запустить Docker-проект."
   docker_write_state "$proxy"
   docker_wait_ready "$proxy"
   iptables -S DOCKER-USER >/dev/null 2>&1 ||
@@ -2953,14 +2953,14 @@ docker_update_runtime_command() {
     docker_write_state "$proxy"
   fi
   info "Загрузка внешних образов..."
-  docker_pull_external_images --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы. Причина и диагностика DNS выведены выше."
+  docker_pull_external_images --profile "$proxy" --profile webproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы. Причина и диагностика DNS выведены выше."
   info "Сборка обновлённых образов..."
-  docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  docker_compose --profile "$proxy" --profile webproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
   info "Проверка Compose-конфигурации..."
-  docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
+  docker_compose --profile "$proxy" --profile webproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   docker_prepare_public_site_permissions
   info "Применение обновления..."
-  docker_compose --profile "$proxy" --profile mtproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
+  docker_compose --profile "$proxy" --profile webproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
   docker_compose ps
   ok "Docker-обновление завершено. Именованные тома и конфигурации сохранены."
 }
@@ -3055,7 +3055,7 @@ docker_uninstall_command() {
   echo "Будут сохранены: конфигурация, .env, реквизиты панели, сайт и ВСЕ именованные тома."
   echo "Сторонние и прежние установки вне Docker-проекта не затрагиваются."
   confirm "Остановить и удалить Docker-контейнеры?" || { info "Удаление отменено."; return 0; }
-  docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans || die "Не удалось удалить Docker-контейнеры."
+  docker_compose --profile caddy --profile nginx --profile webproxy down --remove-orphans || die "Не удалось удалить Docker-контейнеры."
   ok "Docker-контейнеры удалены. Данные и тома сохранены."
 }
 
@@ -3090,9 +3090,9 @@ docker_purge_command() {
       read -e -r -p "Для удаления именованных томов введи DELETE VOLUMES: " phrase || die "ввод прерван"
       [[ "$phrase" == "DELETE VOLUMES" ]] || die "Удаление томов отменено."
     fi
-    docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans --rmi local --volumes
+    docker_compose --profile caddy --profile nginx --profile webproxy down --remove-orphans --rmi local --volumes
   else
-    docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans --rmi local
+    docker_compose --profile caddy --profile nginx --profile webproxy down --remove-orphans --rmi local
   fi
   ok "Очистка Docker-проекта завершена."
 }
@@ -3100,7 +3100,7 @@ docker_purge_command() {
 docker_status_command() {
   docker_require_project
   local ps_json proxy
-  ps_json="$(docker_compose --profile caddy --profile nginx --profile mtproxy ps -a --format json)" ||
+  ps_json="$(docker_compose --profile caddy --profile nginx --profile webproxy ps -a --format json)" ||
     die "Не удалось получить состояние Docker-контейнеров."
   printf '%s\n' "$ps_json" | python3 -c '
 import json
@@ -3227,9 +3227,9 @@ docker_restart_command() {
   (($# == 0)) || die "docker restart [SERVICE]"
   if [[ -n "$service" ]]; then
     [[ "$service" =~ ^(relay|panel|caddy|nginx|mtproxy|mtproxy-firewall|stats-bridge|fail2ban)$ ]] || die "Неизвестный сервис: $service"
-    docker_compose --profile caddy --profile nginx --profile mtproxy restart "$service"
+    docker_compose --profile caddy --profile nginx --profile webproxy restart "$service"
   else
-    docker_compose --profile caddy --profile nginx --profile mtproxy restart
+    docker_compose --profile caddy --profile nginx --profile webproxy restart
   fi
   ok "Перезапуск Docker-сервисов завершён."
 }
@@ -3241,9 +3241,9 @@ docker_logs_command() {
   (($# == 0)) || die "docker logs [SERVICE]"
   if [[ -n "$service" ]]; then
     [[ "$service" =~ ^(bootstrap|relay|panel|caddy|nginx|mtproxy|mtproxy-firewall|stats-bridge|fail2ban)$ ]] || die "Неизвестный сервис: $service"
-    docker_compose --profile caddy --profile nginx --profile mtproxy logs --no-color --tail=100 "$service"
+    docker_compose --profile caddy --profile nginx --profile webproxy logs --no-color --tail=100 "$service"
   else
-    docker_compose --profile caddy --profile nginx --profile mtproxy logs --no-color --tail=100
+    docker_compose --profile caddy --profile nginx --profile webproxy logs --no-color --tail=100
   fi
 }
 
