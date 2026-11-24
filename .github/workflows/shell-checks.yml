@@ -112,9 +112,9 @@ jobs:
             -v "/tmp/nginx-certs:/etc/nginx/certs:ro" \
             nginx:1.28-alpine nginx -t
           test -s docker/site/index.html
-          python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py
+          python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py migrate-to-docker.py
+          python3 -m unittest docker/test_bootstrap.py docker/test_migrate.py
           node --check panel/web/app.js
-          python3 -m unittest docker/test_bootstrap.py
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           docker compose build bootstrap relay
           docker compose run --rm --no-deps bootstrap
