@@ -353,7 +353,7 @@ func (a *application) backupsAPI(w http.ResponseWriter,r *http.Request) {
 }
 
 func (a *application) backupItemAPI(w http.ResponseWriter,r *http.Request) {
-	parts:=strings.Split(strings.TrimPrefix(r.URL.Path,"/admin/api/backups/"),"/")
+	parts:=strings.Split(strings.TrimPrefix(r.URL.Path,"/api/backups/"),"/")
 	if len(parts)==1 && r.Method==http.MethodGet {
 		if !backupIDPattern.MatchString(parts[0]){http.Error(w,"invalid backup id",400);return}
 		file,err:=os.Open(filepath.Join(a.backupDir(),parts[0]+".tar.gz"));if err!=nil{http.NotFound(w,r);return};defer file.Close()

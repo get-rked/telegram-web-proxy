@@ -163,3 +163,40 @@ func TestRestoreRollsBackConfigAndProfilesWhenSecretSyncFails(t *testing.T) {
 	if !bytes.Equal(gotProfiles, changedProfiles) { t.Fatalf("profiles were not rolled back: %s", gotProfiles) }
 	if !bytes.Equal(gotConfig, changedConfig) { t.Fatalf("config was not rolled back: %s", gotConfig) }
 }
+
+
+func TestBackupItemAPIDownloadAndRestoreRoutes(t *testing.T) {
+	a := testApp(t)
+	a.backupRoot = filepath.Join(t.TempDir(), "backups")
+	item, err := a.createBackup()
+	if err != nil { t.Fatal(err) }
+
+	download := httptest.NewRecorder()
+	a.backupItemAPI(download, authRequest(http.MethodGet, "/api/backups/"+item.ID, "", false))
+	if download.Code != http.StatusOK { t.Fatalf("download status=%d body=%s", download.Code, download.Body.String()) }
+	if download.Header().Get("Content-Type") != "application/gzip" { t.Fatalf("unexpected download content type: %q", download.Header().Get("Content-Type")) }
+	if download.Body.Len() == 0 { t.Fatal("backup download is empty") }
+
+	restore := httptest.NewRecorder()
+	a.backupItemAPI(restore, authRequest(http.MethodPost, "/api/backups/"+item.ID+"/restore", "{}", true))
+	if restore.Code != http.StatusOK { t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body.String()) }
+	if !strings.Contains(restore.Body.String(), "`restored`") { t.Fatalf("unexpected restore response: %s", restore.Body.String()) }
+}
+
+func TestDiagnosticsRejectsMalformedProfilesFile(t *testing.T) {
+	a := testApp(t)
+	if err := os.WriteFile(a.profiles, []byte("{not-json"), 0600); err != nil { t.Fatal(err) }
+	a.monitorClient = &http.Client{Transport: monitorRoundTripper(func(req *http.Request) (*http.Response,error) {
+		body := "ok\\n"
+		if req.URL.Path == "/relay/readyz" { body = "ready\\n" }
+		if req.URL.Path == "/stats" { body = "uptime\\t1\\n" }
+		return &http.Response{StatusCode:200, Header:make(http.Header), Body:io.NopCloser(strings.NewReader(body)), Request:req}, nil
+	})}
+	response := httptest.NewRecorder()
+	a.diagnostics(response, httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil))
+	var result diagnosticsResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
+	for _, check := range result.Checks {
+		if check.Name == "profiles_file" && check.Status == "ok" { t.Fatal("malformed profiles file was reported healthy") }
+	}
+}
