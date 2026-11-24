@@ -113,6 +113,7 @@ jobs:
             -v "/tmp/nginx-certs:/etc/nginx/certs:ro" \
             -v "$PWD/docker/security/logs:/var/log/tproxy-panel" \
             nginx:1.28-alpine nginx -t
+          docker run --rm -e DOMAIN=proxy.example.com -e ACME_EMAIL=admin@example.com -v "$PWD/docker/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel" caddy:2.11.4-alpine caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --validate
           docker run --rm --entrypoint fail2ban-client -v "$PWD/docker/security/fail2ban/jail.d:/etc/fail2ban/jail.d:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-panel.conf:/etc/fail2ban/filter.d/tproxy-panel.conf:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-caddy-probes.conf:/etc/fail2ban/filter.d/tproxy-caddy-probes.conf:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-nginx-probes.conf:/etc/fail2ban/filter.d/tproxy-nginx-probes.conf:ro" -v "$PWD/docker/security/fail2ban/action.d/docker-user.conf:/etc/fail2ban/action.d/docker-user.conf:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel:ro" crazymax/fail2ban:1.1.0 -t
           test -s docker/site/index.html
           python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py migrate-to-docker.py
