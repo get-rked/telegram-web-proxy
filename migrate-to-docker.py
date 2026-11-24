@@ -100,7 +100,7 @@ def copy_tree_atomic(src: Path, dst: Path):
     shutil.rmtree(temp)
     shutil.copytree(src, temp, symlinks=False)
     old = dst.with_name(dst.name + '.before-migration')
-    if old.exists(): shutil.rmtree(old)
+    if old.exists(): raise MigrationError(f'Остался предыдущий каталог миграции: {old}; проверь его вручную.')
     if dst.exists(): os.replace(dst, old)
     os.replace(temp, dst)
     if old.exists(): shutil.rmtree(old)
@@ -169,9 +169,20 @@ def main():
     if len(token_data) != 32: raise MigrationError(f'token.key должен содержать ровно 32 байта: {token_src}')
     config.update(public_hostname=domain, listen='127.0.0.1:8080', admin_listen='127.0.0.1:8081', public_dir='/srv/tproxy-site', token_key_file='/etc/tproxy-server/token.key')
     config.pop('profiles_file', None)
+    nat_info = ''
+    nat_args = mt_env.get('MTPROXY_NAT_ARGS', '').strip()
+    if nat_args:
+        match = re.fullmatch(r'--nat-info\s+([0-9.]+):([0-9.]+)', nat_args)
+        if not match:
+            raise MigrationError('MTPROXY_NAT_ARGS имеет неизвестный формат; автоматический перенос NAT-параметров остановлен.')
+        try:
+            nat_info = f'{ipaddress.IPv4Address(match.group(1))}:{ipaddress.IPv4Address(match.group(2))}'
+        except ipaddress.AddressValueError:
+            raise MigrationError('MTPROXY_NAT_ARGS содержит некорректные IPv4-адреса.')
+    generated_panel_password = not bool(env.get('PANEL_PASSWORD'))
     env.update(DOMAIN=domain, ACME_EMAIL=email, PANEL_USER=env.get('PANEL_USER','admin'), PANEL_PASSWORD=env.get('PANEL_PASSWORD') or secrets.token_urlsafe(24), MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'))
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_WORKERS']): env['MTPROXY_WORKERS']='1'
-    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS']}
+    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_NAT_INFO': nat_info}
     env_text = update_env_text(env_path, env_updates).decode()
     outputs = [
         (repo/'docker/config/config.json', (json.dumps(config, indent=2)+'\n').encode(), 0o600),
@@ -182,7 +193,7 @@ def main():
     ]
     certs = nginx_certificates(repo, domain) if selected == 'nginx' else []
     backup_root = Path('/var/backups/telegram-web-proxy-docker-migration')
-    backup_candidates = [source/'config/proxy', source/'config/mtproxy', site_path, env_path, repo/'docker/config', repo/'docker/profiles', repo/'docker/mtproxy/secret', repo/'docker/site', repo/'docker/nginx/certs']
+    backup_candidates = [source/'config/proxy', source/'config/mtproxy', site_path, env_path, repo/'docker/config', repo/'docker/profiles', repo/'docker/mtproxy/secret', repo/'docker/site', repo/'docker/nginx/certs'] + [src for src, _, _ in certs]
     print(f'Источник: {source}')
     print(f'Домен: {domain}; reverse proxy: {selected}; профилей: {len(profiles)}')
     print('Будут подготовлены: docker/config/config.json, token.key, docker/profiles/profiles.json, docker/mtproxy/secret, docker/site и .env' + ('; Nginx TLS files' if certs else ''))
@@ -199,7 +210,10 @@ def main():
     print(f'Резервная копия: {archive}')
     print('Миграция подготовлена. Нативные службы всё ещё работают.')
     print('Перед запуском Docker останови native Caddy/Nginx и MTProxy/tproxy-server, чтобы не было конфликта портов и двух экземпляров backend.')
-    print('Docker panel credentials: PANEL_USER=' + env['PANEL_USER'] + ' PANEL_PASSWORD=' + env['PANEL_PASSWORD'])
+    if generated_panel_password:
+        print('Создан новый пароль панели (сохрани его сейчас): PANEL_USER=' + env['PANEL_USER'] + ' PANEL_PASSWORD=' + env['PANEL_PASSWORD'])
+    else:
+        print('Существующие учётные данные панели сохранены в .env.')
     print('Далее запускай только один профиль reverse proxy и профиль MTProxy согласно docker/README.md.')
     return 0
 
