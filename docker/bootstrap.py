@@ -264,7 +264,7 @@ def main():
     os.chmod(panel_credentials_path, 0o600)
     os.chmod(secret_path, 0o600)
     print("bootstrap: configuration validated; existing secrets preserved; initialization complete")
-    if credentials_created:
+    if credentials_created and os.environ.get("PANEL_PRINT_CREDENTIALS", "1") == "1":
         print("bootstrap: PANEL CREDENTIALS (shown once; also saved in panel-credentials.txt):")
         print(f"  URL: https://{DOMAIN}{base_path}/")
         print(f"  LOGIN: {username}")
