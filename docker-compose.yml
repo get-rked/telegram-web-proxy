@@ -1,6 +1,22 @@
 name: telegram-web-proxy
 services:
+  bootstrap:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bootstrap
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      TPROXY_CONFIG_DIR: /config
+      MTPROXY_DIR: /mtproxy
+      TPROXY_UID: "10001"
+      TPROXY_GID: "10001"
+    volumes:
+      - ./docker/config:/config
+      - ./docker/mtproxy:/mtproxy
+    restart: "no"
   relay:
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
     build:
       context: .
       dockerfile: docker/Dockerfile.relay
