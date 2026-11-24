@@ -73,6 +73,12 @@ tproxy_bootstrap_repository() {
     rm -rf -- "$clone_tmp"
     exit 1
   }
+  if [[ -n "$stage" ]]; then
+    printf '%s\n' "$stage" > /var/lib/telegram-web-proxy/native-source-path
+    chmod 0600 /var/lib/telegram-web-proxy/native-source-path
+  else
+    rm -f /var/lib/telegram-web-proxy/native-source-path
+  fi
   if [[ -e "$TPROXY_DEPLOY_DIR" ]]; then mv -- "$TPROXY_DEPLOY_DIR" "$old_tree"; fi
   if ! mv -- "$clone_tmp" "$TPROXY_DEPLOY_DIR"; then
     [[ -e "$old_tree" ]] && mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
@@ -2648,7 +2654,12 @@ PY
 
 docker_install_command() {
   require_root
-  local source_dir="${TPROXY_NATIVE_SOURCE_DIR:-$BASE_DIR}" proxy="" domain="" email="" choice
+  local source_dir="$BASE_DIR" proxy="" domain="" email="" choice
+  if [[ -n "${TPROXY_NATIVE_SOURCE_DIR:-}" ]]; then
+    source_dir="$TPROXY_NATIVE_SOURCE_DIR"
+  elif [[ -s /var/lib/telegram-web-proxy/native-source-path ]]; then
+    source_dir="$(cat /var/lib/telegram-web-proxy/native-source-path)"
+  fi
   while (($#)); do
     case "$1" in
       --source-dir) (($# >= 2)) || die "--source-dir требует путь"; source_dir="$2"; shift 2 ;;
