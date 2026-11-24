@@ -4323,6 +4323,7 @@ profile_cli() {
         --workers) (($# >= 2)) || die "--workers требует значение"; workers="$2"; shift 2 ;;
         --max-connections) (($# >= 2)) || die "--max-connections требует значение"; max_connections="$2"; shift 2 ;;
         --generate) rotate=1; shift ;;
+        --secret) (($# >= 2)) || die "--secret требует значение"; secret="$2"; shift 2 ;;
         *) die "Неизвестный параметр profile update: $1" ;; esac; done
       valid_name "$name" && valid_mode "$mode" || die "Недопустимое имя или Carrier mode."
       [[ -z "$workers" || ( "$workers" =~ ^[1-9][0-9]*$ && ${#workers} -le 3 && "$workers" -le 256 ) ]] || die "Workers должен быть от 1 до 256."
@@ -4331,13 +4332,16 @@ profile_cli() {
       secret="$(jq -r '.secret' "$file")"
       valid_secret "$secret" || die "Секрет профиля некорректен."
       if (( rotate )); then
-        prefix=""; [[ "$secret" == dd* ]] && prefix="dd"
         while :; do
-          secret="${prefix}$(openssl rand -hex 16)"
+          secret="dd$(openssl rand -hex 16)"
           canonical="${secret#dd}"
-          valid_secret "$secret" || continue
-          if ! jq -e --arg s "$canonical" '.profiles[] | select((.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null; then break; fi
+          if ! jq -e --arg n "$name" --arg s "$canonical" '.profiles[] | select(.name != $n and (.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null; then break; fi
         done
+      elif [[ -n "$secret" ]]; then
+        [[ "$secret" =~ ^dd[0-9a-f]{32}$ ]] || die "Секрет должен иметь формат dd + 32 lowercase hex-символа."
+        canonical="${secret#dd}"
+        jq -e --arg n "$name" --arg s "$canonical" '.profiles[] | select(.name != $n and (.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null &&
+          die "Этот секрет уже используется другим профилем."
       fi
       backup_tmp="$(mktemp)"
       cp -a "$file" "$backup_tmp" || { rm -f "$backup_tmp"; die "Не удалось сохранить исходный профиль."; }
