@@ -2945,6 +2945,21 @@ docker_update_command() {
     die "Не удалось загрузить актуальный архив проекта; существующая установка не изменена."
   fi
 
+  # Refresh only the repository's known generic placeholder. A custom site
+  # (including a user-edited De Kleine Markt page) is never overwritten.
+  local site_index="$DOCKER_PROJECT_DIR/docker/site/index.html"
+  if [[ ! -e "$site_index" ]] || {
+    [[ -f "$site_index" ]] &&
+      grep -Fq 'This domain is configured for a private web service.' "$site_index"
+  }; then
+    install -d -m 0755 "$DOCKER_PROJECT_DIR/docker/site"
+    cp -a "$source_dir/docker/site/." "$DOCKER_PROJECT_DIR/docker/site/" ||
+      { rm -rf -- "$sync_tmp"; die "Не удалось восстановить демонстрационный публичный сайт."; }
+    info "Восстановлен демонстрационный сайт De Kleine Markt."
+  else
+    info "Обнаружен пользовательский публичный сайт — оставляю его без изменений."
+  fi
+
   if ! tar -C "$source_dir" \
     --exclude='./.git' --exclude='./.env' --exclude='./docker-compose.override.yml' \
     --exclude='./docker/config' --exclude='./docker/mtproxy' \
