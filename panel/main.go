@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/skip2/go-qrcode"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,15 +73,11 @@ type profileDocument struct {
 
 type profileView struct {
 	Name        string `json:"name"`
-	Backend     string `json:"backend"`
 	CarrierMode string `json:"carrier_mode"`
-	SecretSet   bool   `json:"secret_set"`
 }
 
 type profileRequest struct {
-	Name        string `json:"name"`
-	Backend     string `json:"backend"`
-	CarrierMode string `json:"carrier_mode"`
+	Name string `json:"name"`
 }
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$`)
@@ -373,22 +370,91 @@ func (a *application) backupItemAPI(w http.ResponseWriter,r *http.Request) {
 }
 
 func (a *application) profileItemAPI(w http.ResponseWriter, r *http.Request) {
-	if !a.sameOriginMutation(w, r) {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/profiles/"), "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
+		http.Error(w, "invalid profile path", http.StatusBadRequest)
 		return
 	}
-	name, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/admin/api/profiles/"))
-	if err != nil || name == "" || strings.Contains(name, "/") {
+	name, err := url.PathUnescape(parts[0])
+	if err != nil || strings.Contains(name, "/") {
 		http.Error(w, "invalid profile name", http.StatusBadRequest)
 		return
 	}
-	switch r.Method {
-	case http.MethodPut:
-		a.updateProfile(w, r, name)
-	case http.MethodDelete:
-		a.deleteProfile(w, r, name)
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "config":
+			if r.Method != http.MethodGet { http.Error(w, "method not allowed", 405); return }
+			a.profileConfig(w, r, name)
+			return
+		case "qr":
+			if r.Method != http.MethodGet { http.Error(w, "method not allowed", 405); return }
+			a.profileQR(w, r, name)
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
 	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.sameOriginMutation(w, r) { return }
+	a.deleteProfile(w, r, name)
+}
+
+func (a *application) profileConfig(w http.ResponseWriter, r *http.Request, name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	doc, err := a.readProfiles()
+	if err != nil { http.Error(w, "profiles unavailable or invalid", http.StatusServiceUnavailable); return }
+	index := findProfile(doc.Profiles, name)
+	if index < 0 { http.NotFound(w, r); return }
+	var cfg struct { PublicHostname string `json:"public_hostname"` }
+	data, err := os.ReadFile(a.config)
+	if err != nil || json.Unmarshal(data, &cfg) != nil || strings.TrimSpace(cfg.PublicHostname) == "" {
+		http.Error(w, "public proxy hostname is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	values := url.Values{}
+	values.Set("server", cfg.PublicHostname)
+	values.Set("port", "443")
+	values.Set("secret", doc.Profiles[index].Secret)
+	link := "https://t.me/proxy?" + values.Encode()
+	w.Header().Set("Cache-Control", "no-store")
+	a.audit("profile.config.view:" + name)
+	jsonResponse(w, map[string]any{
+		"name": name, "hostname": cfg.PublicHostname, "port": 443,
+		"carrier_mode": doc.Profiles[index].CarrierMode,
+		"secret": doc.Profiles[index].Secret, "link": link,
+	})
+}
+
+func (a *application) profileQR(w http.ResponseWriter, r *http.Request, name string) {
+	a.mu.Lock()
+	doc, err := a.readProfiles()
+	if err != nil { a.mu.Unlock(); http.Error(w, "profiles unavailable or invalid", http.StatusServiceUnavailable); return }
+	index := findProfile(doc.Profiles, name)
+	if index < 0 { a.mu.Unlock(); http.NotFound(w, r); return }
+	var cfg struct { PublicHostname string `json:"public_hostname"` }
+	data, readErr := os.ReadFile(a.config)
+	a.mu.Unlock()
+	if readErr != nil || json.Unmarshal(data, &cfg) != nil || strings.TrimSpace(cfg.PublicHostname) == "" {
+		http.Error(w, "public proxy hostname is not configured", http.StatusServiceUnavailable); return
+	}
+	values := url.Values{}
+	values.Set("server", cfg.PublicHostname)
+	values.Set("port", "443")
+	values.Set("secret", doc.Profiles[index].Secret)
+	qr, err := qrcode.New("https://t.me/proxy?"+values.Encode(), qrcode.Medium)
+	if err != nil { http.Error(w, "could not create QR code", 500); return }
+	png, err := qr.PNG(320)
+	if err != nil { http.Error(w, "could not create QR code", 500); return }
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "image/png")
+	_, _ = w.Write(png)
+	a.audit("profile.qr.view:" + name)
 }
 
 func (a *application) sameOriginMutation(w http.ResponseWriter, r *http.Request) bool {
@@ -427,7 +493,7 @@ func (a *application) createProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := validateProfileRequest(input); err != nil {
+	if err := validateProfileName(input.Name); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -452,7 +518,7 @@ func (a *application) createProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not generate profile secret", http.StatusInternalServerError)
 		return
 	}
-	doc.Profiles = append(doc.Profiles, profile{Name: input.Name, Secret: secret, Backend: input.Backend, CarrierMode: input.CarrierMode})
+	doc.Profiles = append(doc.Profiles, profile{Name: input.Name, Secret: secret, Backend: "127.0.0.1:2398", CarrierMode: "https"})
 	if err := a.writeProfiles(doc); err != nil {
 		http.Error(w, "could not save profiles", http.StatusInternalServerError)
 		return
@@ -460,48 +526,6 @@ func (a *application) createProfile(w http.ResponseWriter, r *http.Request) {
 	a.audit("profile.create:" + input.Name)
 	// The generated client secret is returned only once, on creation.
 	jsonResponse(w, map[string]any{"profile": viewOf(doc.Profiles[len(doc.Profiles)-1]), "secret": secret})
-}
-
-func (a *application) updateProfile(w http.ResponseWriter, r *http.Request, name string) {
-	var input profileRequest
-	if err := decodeRequest(w, r, &input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateProfileRequest(input); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if name == "default" && input.Name != "default" {
-		http.Error(w, "default profile cannot be renamed", http.StatusConflict)
-		return
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	doc, err := a.readProfiles()
-	if err != nil {
-		http.Error(w, "profiles unavailable or invalid", http.StatusServiceUnavailable)
-		return
-	}
-	index := findProfile(doc.Profiles, name)
-	if index < 0 {
-		http.NotFound(w, r)
-		return
-	}
-	if input.Name != name && hasName(doc.Profiles, input.Name) {
-		http.Error(w, "profile name already exists", http.StatusConflict)
-		return
-	}
-	doc.Profiles[index].Name = input.Name
-	doc.Profiles[index].Backend = input.Backend
-	doc.Profiles[index].CarrierMode = input.CarrierMode
-	if err := a.writeProfiles(doc); err != nil {
-		http.Error(w, "could not save profiles", http.StatusInternalServerError)
-		return
-	}
-	a.audit("profile.update:" + name)
-	jsonResponse(w, map[string]any{"profile": viewOf(doc.Profiles[index])})
 }
 
 func (a *application) deleteProfile(w http.ResponseWriter, r *http.Request, name string) {
@@ -543,19 +567,9 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
-func validateProfileRequest(input profileRequest) error {
-	if !profileNamePattern.MatchString(input.Name) || strings.TrimSpace(input.Name) != input.Name {
+func validateProfileName(name string) error {
+	if !profileNamePattern.MatchString(name) || strings.TrimSpace(name) != name {
 		return errors.New("name must be 1-64 characters and use letters, digits, spaces, dot, underscore or hyphen")
-	}
-	host, port, err := net.SplitHostPort(input.Backend)
-	portNumber, portErr := strconv.Atoi(port)
-	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || portErr != nil || portNumber < 1 || portNumber > 65535 {
-		return errors.New("backend must be a numeric loopback address with a valid port")
-	}
-	switch input.CarrierMode {
-	case "https", "https-lanes", "websocket", "websocket-lanes":
-	default:
-		return errors.New("unsupported carrier_mode")
 	}
 	return nil
 }
@@ -577,17 +591,21 @@ func (a *application) readProfiles() (profileDocument, error) {
 	seenNames := make(map[string]bool)
 	seenSecrets := make(map[string]bool)
 	for _, p := range doc.Profiles {
-		if !profileNamePattern.MatchString(p.Name) || strings.TrimSpace(p.Name) != p.Name {
-			return doc, errors.New("invalid profile name")
+		if err := validateProfileName(p.Name); err != nil { return doc, err }
+		if p.Backend == "" { p.Backend = "127.0.0.1:2398" }
+		if p.CarrierMode == "" { p.CarrierMode = "https" }
+		host, port, backendErr := net.SplitHostPort(p.Backend)
+		portNumber, portErr := strconv.Atoi(port)
+		if backendErr != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || portErr != nil || portNumber < 1 || portNumber > 65535 {
+			return doc, errors.New("invalid internal backend")
 		}
-		if err := validateProfileRequest(profileRequest{Name: p.Name, Backend: p.Backend, CarrierMode: p.CarrierMode}); err != nil {
-			return doc, err
-		}
+		switch p.CarrierMode { case "https", "https-lanes", "websocket", "websocket-lanes": default: return doc, errors.New("unsupported carrier_mode") }
 		canonicalSecret := strings.TrimPrefix(strings.ToLower(p.Secret), "dd")
 		secret, err := hex.DecodeString(canonicalSecret)
 		if err != nil || len(secret) != 16 {
-			return doc, errors.New("profile secret must be 16 bytes of hex, optionally prefixed with dd")
+			return doc, errors.New("profile secret must be 16 bytes of hex")
 		}
+		p.Secret = "dd" + canonicalSecret
 		if seenNames[p.Name] || seenSecrets[canonicalSecret] {
 			return doc, errors.New("duplicate profile name or secret")
 		}
@@ -678,14 +696,12 @@ func backupFile(path string) error {
 
 func newSecret() (string, error) {
 	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(value), nil
+	if _, err := rand.Read(value); err != nil { return "", err }
+	return "dd" + hex.EncodeToString(value), nil
 }
 
 func viewOf(p profile) profileView {
-	return profileView{Name: p.Name, Backend: p.Backend, CarrierMode: p.CarrierMode, SecretSet: p.Secret != ""}
+	return profileView{Name: p.Name, CarrierMode: p.CarrierMode}
 }
 
 func hasName(profiles []profile, name string) bool { return findProfile(profiles, name) >= 0 }
