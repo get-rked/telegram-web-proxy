@@ -66,6 +66,17 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bootstrap.main()
 
+    def test_dd_prefixed_profiles_match_multiple_canonical_mtproxy_secrets(self):
+        default = "dd" + "12" * 16
+        mobile = "34" * 16
+        (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [
+            {"name": "default", "secret": default, "backend": "127.0.0.1:2398", "carrier_mode": "https"},
+            {"name": "mobile", "secret": mobile, "backend": "127.0.0.1:2398", "carrier_mode": "websocket"}
+        ]}))
+        (self.mtproxy_dir / "secret").write_text("12" * 16 + "\\n" + mobile + "\\n")
+        bootstrap.main()
+        self.assertEqual((self.mtproxy_dir / "secret").read_text().splitlines(), ["12" * 16, mobile])
+
     def test_hostname_change_backs_up_existing_config(self):
         bootstrap.main()
         path = self.config_dir / "config.json"
