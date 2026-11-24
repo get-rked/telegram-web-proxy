@@ -2652,8 +2652,8 @@ PY
   local http_code domain_value attempt
   domain_value="$(sed -n 's/^DOMAIN=//p' "$DOCKER_PROJECT_DIR/.env" | head -n 1)"
   http_code=""
-  for attempt in {1..12}; do
-    http_code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+  for attempt in {1..24}; do
+    http_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
       --resolve "$domain_value:443:127.0.0.1" "https://$domain_value/" 2>/dev/null || true)"
     [[ "$http_code" == 200 || "$http_code" == 301 || "$http_code" == 302 ]] && break
     sleep 5
