@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TPROXY · Вход</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 15% 15%,#203c5c,#0b1220 55%);font:15px Inter,system-ui;color:#e8eef8}
+.login{width:min(420px,calc(100% - 32px));padding:38px;border:1px solid #ffffff20;border-radius:24px;background:#101c2bdc;box-shadow:0 24px 80px #0008}
+.brand{font-size:12px;letter-spacing:.22em;color:#82b8ff;font-weight:800}
+h1{font-size:28px;margin:22px 0 8px}
+.muted{color:#9eafc5;margin-bottom:28px}
+label{display:block;margin:16px 0 7px;color:#c6d3e4}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid #33465e;background:#0b1523;color:white;font:inherit}
+button{width:100%;margin-top:24px;padding:14px;border:0;border-radius:12px;background:linear-gradient(110deg,#4c8cff,#63d4c3);font-weight:800;color:#071321;cursor:pointer}
+</style>
+</head>
+<body>
+<form class="login" method="post">
+<div class="brand">TPROXY / CONTROL</div>
+<h1>Вход в панель</h1>
+<div class="muted">Защищённый доступ к управлению прокси</div>
+<label>Логин</label><input name="username" autocomplete="username" required>
+<label>Пароль</label><input type="password" name="password" autocomplete="current-password" required>
+<button>Войти в систему →</button>
+</form>
+</body>
+</html>
