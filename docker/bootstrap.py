@@ -221,33 +221,33 @@ def main():
 
     # Caddy imports this generated route. The secret path is never placed in a public URL or log.
     route = (
-        f"@panel_access path {base_path} {base_path}/*\\n"
-        "log_skip @panel_access\\n"
-        f"@panel_root_no_slash path {base_path}\\n"
-        f"redir @panel_root_no_slash {base_path}/ 308\\n"
-        f"handle_path {base_path}/* {{\\n"
-        "    reverse_proxy panel:8088 {\\n"
-        "        header_up X-Real-IP {client_ip}\\n"
-        "    }\\n"
-        "}\\n"
+        f"@panel_access path {base_path} {base_path}/*\n"
+        "log_skip @panel_access\n"
+        f"@panel_root_no_slash path {base_path}\n"
+        f"redir @panel_root_no_slash {base_path}/ 308\n"
+        f"handle_path {base_path}/* {{\n"
+        "    reverse_proxy panel:8088 {\n"
+        "        header_up X-Real-IP {client_ip}\n"
+        "    }\n"
+        "}\n"
     )
     if not panel_route_path.exists() or panel_route_path.read_text(encoding="utf-8") != route:
         atomic_write(panel_route_path, route.encode("utf-8"), 0o640)
 
     nginx_route = (
-        f"location = {base_path} {{ return 308 {base_path}/; }}\\n"
-        f"location ^~ {base_path}/ {{\\n"
-        f"    rewrite ^{base_path}/(.*)$ /$1 break;\\n"
-        "    limit_req zone=panel_requests burst=20 nodelay;\\n"
-        "    proxy_pass http://$panel_upstream;\\n"
-        "    proxy_http_version 1.1;\\n"
-        "    proxy_set_header Host $host;\\n"
-        "    proxy_set_header X-Real-IP $remote_addr;\\n"
-        "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\\n"
-        "    proxy_set_header X-Forwarded-Proto https;\\n"
-        "    proxy_set_header Upgrade $http_upgrade;\\n"
-        "    proxy_set_header Connection $connection_upgrade;\\n"
-        "}\\n"
+        f"location = {base_path} {{ return 308 {base_path}/; }}\n"
+        f"location ^~ {base_path}/ {{\n"
+        f"    rewrite ^{base_path}/(.*)$ /$1 break;\n"
+        "    limit_req zone=panel_requests burst=20 nodelay;\n"
+        "    proxy_pass http://$panel_upstream;\n"
+        "    proxy_http_version 1.1;\n"
+        "    proxy_set_header Host $host;\n"
+        "    proxy_set_header X-Real-IP $remote_addr;\n"
+        "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "    proxy_set_header X-Forwarded-Proto https;\n"
+        "    proxy_set_header Upgrade $http_upgrade;\n"
+        "    proxy_set_header Connection $connection_upgrade;\n"
+        "}\n"
     )
     if not panel_nginx_route_path.exists() or panel_nginx_route_path.read_text(encoding="utf-8") != nginx_route:
         atomic_write(panel_nginx_route_path, nginx_route.encode("utf-8"), 0o640)
