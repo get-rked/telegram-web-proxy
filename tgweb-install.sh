@@ -2625,12 +2625,12 @@ docker_install_fresh_command() {
     listeners="$(ss -H -ltn "sport = :$port" 2>/dev/null || true)"
     [[ -z "$listeners" ]] || die "TCP-порт $port уже занят. Выбери другой порт или освободи этот порт."
   done
-  python3 - "$DOCKER_PROJECT_DIR/.env.example" "$DOCKER_PROJECT_DIR/.env" "$domain" "$email" <<'PY'
+  python3 - "$DOCKER_PROJECT_DIR/.env.example" "$DOCKER_PROJECT_DIR/.env" "$domain" "$email" "$relay_port" "$admin_port" <<'PY'
 import pathlib
 import re
 import sys
 source, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-domain, email = sys.argv[3], sys.argv[4]
+domain, email, relay_port, admin_port = sys.argv[3:7]
 text = source.read_text(encoding="utf-8")
 for key, value in {"DOMAIN": domain, "ACME_EMAIL": email, "RELAY_PORT": relay_port, "ADMIN_PORT": admin_port}.items():
     text, count = re.subn(rf"(?m)^{key}=.*$", f"{key}={value}", text)
