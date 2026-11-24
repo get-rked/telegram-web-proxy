@@ -24,3 +24,9 @@ config/
 src/
 systemd/
 qr/
+
+# Panel secrets, generated routes and private/security logs are never build inputs.
+docker/private/
+docker/private-credentials/
+docker/generated/
+docker/security/logs/
