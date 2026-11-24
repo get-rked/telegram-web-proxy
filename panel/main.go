@@ -112,7 +112,7 @@ func main() {
 	if err != nil { log.Fatalf("cannot read panel auth config: %v", err) }
 	var authConfig panelAuthConfig
 	if err := json.Unmarshal(authData, &authConfig); err != nil { log.Fatalf("invalid panel auth config: %v", err) }
-	if !strings.HasPrefix(authConfig.BasePath, "/panel-") || strings.Contains(authConfig.BasePath[len("/panel-"):], "/") || authConfig.Username == "" {
+	if !regexp.MustCompile("^/panel-[A-Za-z0-9_-]{20,80}$").MatchString(authConfig.BasePath) || authConfig.Username == "" {
 		log.Fatal("panel auth config has invalid base path or username")
 	}
 	passwordSalt, err := hex.DecodeString(authConfig.PasswordSalt)
@@ -205,12 +205,14 @@ func (a *application) sessionValid(token string) bool {
 }
 
 func (a *application) sessionStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet { http.Error(w, "method not allowed", 405); return }
 	cookie, err := r.Cookie("tproxy_session")
 	jsonResponse(w, map[string]bool{"authenticated": err == nil && a.sessionValid(cookie.Value)})
 }
 
 func (a *application) login(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
 	if !a.sameOriginMutation(w, r) { return }
 	ip := a.clientIP(r)
@@ -244,6 +246,7 @@ func (a *application) login(w http.ResponseWriter, r *http.Request) {
 
 func (a *application) logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
+	if !a.sameOriginMutation(w, r) { return }
 	cookie, err := r.Cookie("tproxy_session")
 	if err == nil { a.sessionMu.Lock(); delete(a.sessions, cookie.Value); a.sessionMu.Unlock() }
 	http.SetCookie(w, &http.Cookie{Name:"tproxy_session", Value:"", Path:a.basePath+"/", HttpOnly:true, Secure:true, SameSite:http.SameSiteStrictMode, MaxAge:-1})
