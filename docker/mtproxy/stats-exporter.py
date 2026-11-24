@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Bridge loopback-only relay and MTProxy admin endpoints to the private panel network."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 from urllib.error import URLError
 from urllib.request import urlopen
 
+ADMIN_PORT = int(os.environ.get("RELAY_ADMIN_PORT", "8081"))
 UPSTREAMS = {
     "/stats": "http://127.0.0.1:8888/stats",
-    "/relay/healthz": "http://127.0.0.1:8081/healthz",
-    "/relay/readyz": "http://127.0.0.1:8081/readyz",
-    "/relay/metrics": "http://127.0.0.1:8081/metrics",
+    "/relay/healthz": f"http://127.0.0.1:{ADMIN_PORT}/healthz",
+    "/relay/readyz": f"http://127.0.0.1:{ADMIN_PORT}/readyz",
+    "/relay/metrics": f"http://127.0.0.1:{ADMIN_PORT}/metrics",
 }
 
 class Handler(BaseHTTPRequestHandler):
