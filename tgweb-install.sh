@@ -2514,6 +2514,57 @@ docker_compose() {
     -f "$DOCKER_PROJECT_DIR/docker-compose.yml" "$@"
 }
 
+docker_force_remove_project_resources() {
+  local remove_volumes="${1:-0}" image_ids container_ids
+  # Include every Compose profile so one-shot setup containers are in scope.
+  image_ids="$(docker_compose --profile setup --profile caddy --profile nginx --profile webproxy images -q 2>/dev/null | sort -u || true)"
+  # Compose down handles networks and volumes where possible. It can miss stale
+  # one-shot containers from inactive profiles, so enforce cleanup by project label.
+  if (( remove_volumes )); then
+    docker_compose --profile setup --profile caddy --profile nginx --profile webproxy down \
+      --remove-orphans --rmi local --volumes --timeout 10 || warn "Compose down завершился с ошибкой; продолжаю принудительную очистку."
+  else
+    docker_compose --profile setup --profile caddy --profile nginx --profile webproxy down \
+      --remove-orphans --rmi local --timeout 10 || warn "Compose down завершился с ошибкой; продолжаю принудительную очистку."
+  fi
+
+  container_ids="$(docker ps -aq --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
+  if [[ -n "$container_ids" ]]; then
+    # Remove stopped and running containers, including stale bootstrap/run containers.
+    while IFS= read -r container_id; do
+      [[ -n "$container_id" ]] || continue
+      docker rm -f -v "$container_id" >/dev/null 2>&1 ||
+        warn "Не удалось удалить контейнер $container_id."
+    done <<< "$container_ids"
+  fi
+
+  # Remove only images referenced by this Compose project; never prune unrelated images.
+  if [[ -n "$image_ids" ]]; then
+    while IFS= read -r image_id; do
+      [[ -n "$image_id" ]] || continue
+      docker image rm -f "$image_id" >/dev/null 2>&1 ||
+        warn "Образ $image_id используется другим контейнером или не может быть удалён."
+    done <<< "$image_ids"
+  fi
+
+  if (( remove_volumes )); then
+    # Compose may leave project volumes behind if an old container held a reference.
+    local volume_names
+    volume_names="$(docker volume ls -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
+    if [[ -n "$volume_names" ]]; then
+      while IFS= read -r volume_name; do
+        [[ -n "$volume_name" ]] || continue
+        docker volume rm -f "$volume_name" >/dev/null 2>&1 ||
+          warn "Не удалось удалить volume $volume_name."
+      done <<< "$volume_names"
+    fi
+  fi
+
+  local remaining
+  remaining="$(docker ps -aq --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
+  [[ -z "$remaining" ]] || die "Остались контейнеры проекта: $remaining"
+}
+
 docker_registry_dns_diagnostic() {
   local resolver_file="/etc/resolv.conf"
   echo
@@ -3055,8 +3106,8 @@ docker_uninstall_command() {
   echo "Будут сохранены: конфигурация, .env, реквизиты панели, сайт и ВСЕ именованные тома."
   echo "Сторонние и прежние установки вне Docker-проекта не затрагиваются."
   confirm "Остановить и удалить Docker-контейнеры?" || { info "Удаление отменено."; return 0; }
-  docker_compose --profile caddy --profile nginx --profile webproxy down --remove-orphans || die "Не удалось удалить Docker-контейнеры."
-  ok "Docker-контейнеры удалены. Данные и тома сохранены."
+  docker_force_remove_project_resources 0
+  ok "Контейнеры и локальные образы проекта удалены. Файлы конфигурации и volumes сохранены."
 }
 
 docker_purge_command() {
@@ -3090,11 +3141,9 @@ docker_purge_command() {
       read -e -r -p "Для удаления именованных томов введи DELETE VOLUMES: " phrase || die "ввод прерван"
       [[ "$phrase" == "DELETE VOLUMES" ]] || die "Удаление томов отменено."
     fi
-    docker_compose --profile caddy --profile nginx --profile webproxy down --remove-orphans --rmi local --volumes
-  else
-    docker_compose --profile caddy --profile nginx --profile webproxy down --remove-orphans --rmi local
   fi
-  ok "Очистка Docker-проекта завершена."
+  docker_force_remove_project_resources "$remove_volumes"
+  ok "Жёсткая очистка Docker-проекта завершена."
 }
 
 docker_status_command() {
