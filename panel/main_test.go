@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"database/sql"
 	"log"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"testing"
 )
 
@@ -24,12 +26,14 @@ func testApp(t *testing.T) *application {
 	if err = os.WriteFile(config, []byte(`{"public_hostname":"proxy.example.com","listen":"127.0.0.1:8080","admin_listen":"127.0.0.1:8081","token_key_file":"/private/token.key"}`), 0600); err != nil { t.Fatal(err) }
 	profiles := filepath.Join(dir, "profiles.json")
 	if err = os.WriteFile(profiles, []byte(`{"profiles":[{"name":"default","secret":"00112233445566778899aabbccddeeff","backend":"127.0.0.1:2398","carrier_mode":"https"}]}`), 0600); err != nil { t.Fatal(err) }
-	return &application{db: db, user: "admin", password: "a-long-test-password", config: config, profiles: profiles}
+	salt := []byte("test-panel-password-salt")
+	hash := sha256.Sum256(append(append([]byte(nil), salt...), []byte("a-long-test-password")...))
+	return &application{db: db, user: "admin", basePath: "/panel-test-session-path-1234567890", passwordSalt: salt, passwordHash: hash[:], sessions: map[string]time.Time{"test-session": time.Now().Add(time.Hour)}, config: config, profiles: profiles}
 }
 
 func authRequest(method, path, body string, mutation bool) *http.Request {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request.SetBasicAuth("admin", "a-long-test-password")
+	request.AddCookie(&http.Cookie{Name:"tproxy_session", Value:"test-session"})
 	request.Host = "proxy.example.com"
 	if mutation {
 		request.Header.Set("Origin", "https://proxy.example.com")
@@ -188,28 +192,32 @@ func TestFailedAuthenticationIsLoggedWithTrustedClientIP(t *testing.T) {
 	var output bytes.Buffer
 	a.authLog = log.New(&output, "", 0)
 	a.trustProxy = true
-	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"admin","password":"wrong-password"}`))
 	request.RemoteAddr = "172.20.0.2:1234"
+	request.Host = "proxy.example.com"
+	request.Header.Set("Origin", "https://proxy.example.com")
+	request.Header.Set("X-TProxy-Request", "1")
 	request.Header.Set("X-Real-IP", "203.0.113.9")
-	request.SetBasicAuth("admin", "wrong-password")
 	response := httptest.NewRecorder()
-	a.auth(a.index)(response, request)
+	a.login(response, request)
 	if response.Code != http.StatusUnauthorized { t.Fatalf("status=%d, want 401", response.Code) }
 	if !strings.Contains(output.String(), "auth_failed ip=203.0.113.9") { t.Fatalf("unexpected auth log: %q", output.String()) }
 }
 
 func TestAuthenticationThrottlesRepeatedFailures(t *testing.T) {
 	a := testApp(t)
-	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"admin","password":"wrong-password"}`))
 	request.RemoteAddr = "203.0.113.25:1234"
-	request.SetBasicAuth("admin", "wrong-password")
+	request.Host = "proxy.example.com"
+	request.Header.Set("Origin", "https://proxy.example.com")
+	request.Header.Set("X-TProxy-Request", "1")
 	for i := 0; i < 10; i++ {
 		response := httptest.NewRecorder()
-		a.auth(a.index)(response, request)
+		a.login(response, request)
 		if response.Code != http.StatusUnauthorized { t.Fatalf("attempt %d status=%d, want 401", i+1, response.Code) }
 	}
 	response := httptest.NewRecorder()
-	a.auth(a.index)(response, request)
+	a.login(response, request)
 	if response.Code != http.StatusTooManyRequests { t.Fatalf("blocked attempt status=%d, want 429", response.Code) }
 	if response.Header().Get("Retry-After") != "900" { t.Fatalf("missing Retry-After: %q", response.Header().Get("Retry-After")) }
 }
@@ -224,7 +232,7 @@ func TestFail2banBanlistBlocksTrustedProxyClient(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
 	request.RemoteAddr = "172.20.0.2:1234"
 	request.Header.Set("X-Real-IP", "203.0.113.44")
-	request.SetBasicAuth("admin", "a-long-test-password")
+	request.AddCookie(&http.Cookie{Name:"tproxy_session", Value:"test-session"})
 	response := httptest.NewRecorder()
 	a.auth(a.index)(response, request)
 	if response.Code != http.StatusTooManyRequests { t.Fatalf("status=%d, want 429", response.Code) }
