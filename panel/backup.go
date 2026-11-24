@@ -49,14 +49,16 @@ func (a *application) restoreBackup(id string)error{
 	if !backupIDPattern.MatchString(id){return errors.New("invalid backup id")}
 	file,err:=os.Open(filepath.Join(a.backupDir(),id+".tar.gz"));if err!=nil{return err};defer file.Close()
 	gz,err:=gzip.NewReader(file);if err!=nil{return err};defer gz.Close();tr:=tar.NewReader(gz)
-	var profileData []byte;found:=false;entries:=0;total:=int64(0)
-	for{h,e:=tr.Next();if e==io.EOF{break};if e!=nil{return e};entries++;total+=h.Size
-		if entries>3||total>8<<20||h.Typeflag!=tar.TypeReg||h.Size<0||h.Size>4<<20{return errors.New("invalid archive entry")}
-		switch h.Name{case "profiles.json":profileData,e=io.ReadAll(io.LimitReader(tr,4<<20));if e!=nil{return e};found=true
-		case "config.json","manifest.json":if _,e=io.Copy(io.Discard,io.LimitReader(tr,4<<20));e!=nil{return e}
+	var profileData,configData []byte;foundProfiles,foundConfig,foundManifest:=false,false,false;entries:=0;total:=int64(0);seen:=map[string]bool{}
+	for{h,e:=tr.Next();if e==io.EOF{break};if e!=nil{return e}
+		if h.Typeflag!=tar.TypeReg||h.Size<0||h.Size>4<<20{return errors.New("invalid archive entry")};entries++;if entries>3||total>8<<20-h.Size{return errors.New("archive exceeds limits")};total+=h.Size
+		if seen[h.Name]{return errors.New("duplicate archive entry")};seen[h.Name]=true
+		switch h.Name{case "profiles.json":profileData,e=io.ReadAll(tr);if e!=nil{return e};foundProfiles=true
+		case "config.json":configData,e=io.ReadAll(tr);if e!=nil{return e};foundConfig=true
+		case "manifest.json":manifest,e:=io.ReadAll(tr);if e!=nil||!json.Valid(manifest){return errors.New("invalid backup manifest")};foundManifest=true
 		default:return errors.New("archive contains unexpected path")}
 	}
-	if !found{return errors.New("profiles.json missing from archive")}
+	if !foundProfiles||!foundConfig||!foundManifest||!json.Valid(configData){return errors.New("backup is incomplete or contains invalid config")}
 	var doc profileDocument;if err:=json.Unmarshal(profileData,&doc);err!=nil{return err}
 	tmpPath:=a.profiles+".restore-validation";if err:=os.WriteFile(tmpPath,profileData,0600);err!=nil{return err}
 	original:=a.profiles;a.profiles=tmpPath;_,validationErr:=a.readProfiles();a.profiles=original;_ = os.Remove(tmpPath)
