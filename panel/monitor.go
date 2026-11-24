@@ -28,7 +28,7 @@ type diagnosticCheck struct { Name string `json:"name"`; Status string `json:"st
 type diagnosticsResponse struct { CheckedAt time.Time `json:"checked_at"`; Checks []diagnosticCheck `json:"checks"` }
 
 func (a *application) relayRequest(ctx context.Context,path string)(int,string,time.Duration,error){
-	req,err:=http.NewRequestWithContext(ctx,http.MethodGet,"http://relay:8081"+path,nil);if err!=nil{return 0,"",0,err}
+	req,err:=http.NewRequestWithContext(ctx,http.MethodGet,"http://relay:9090/relay"+path,nil);if err!=nil{return 0,"",0,err}
 	start:=time.Now();resp,err:=a.monitorClient.Do(req);latency:=time.Since(start);if err!=nil{return 0,"",latency,err};defer resp.Body.Close()
 	body,err:=io.ReadAll(io.LimitReader(resp.Body,2<<20));return resp.StatusCode,string(body),latency,err
 }
