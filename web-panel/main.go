@@ -399,10 +399,12 @@ func (a *App) profileDetails(name string) (map[string]string, error) {
 		server += "/" + strings.Trim(config.BasePath, "/")
 	}
 	secret := proxyClientSecret(profile.Secret, config.BasePath)
-	link := "https://t.me/webproxy?server=" + url.QueryEscape(server) + "&secret=" + url.QueryEscape(secret)
+	query := "server=" + url.QueryEscape(server) + "&secret=" + url.QueryEscape(secret)
+	link := "https://t.me/webproxy?" + query
+	tgLink := "tg://webproxy?" + query
 	return map[string]string{
 		"name": profile.Name, "carrier_mode": profile.CarrierMode,
-		"secret": secret, "server": server, "link": link,
+		"secret": secret, "server": server, "link": link, "tg_link": tgLink,
 	}, nil
 }
 
@@ -479,7 +481,7 @@ func (a *App) profileQR(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "qrencode", "-o", "-", "-t", "PNG", "-s", "8", "-m", "2", details["link"]).Output()
+	output, err := exec.CommandContext(ctx, "qrencode", "-o", "-", "-t", "PNG", "-s", "8", "-m", "2", details["tg_link"]).Output()
 	if err != nil {
 		http.Error(w, "Не удалось сформировать QR-код", http.StatusInternalServerError)
 		return
