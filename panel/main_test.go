@@ -106,7 +106,7 @@ func TestReadProfilesAcceptsDDPrefixedLegacySecret(t *testing.T) {
 func TestProfilesDoNotExposeSecrets(t *testing.T) {
 	a := testApp(t)
 	response := httptest.NewRecorder()
-	a.auth(a.profilesAPI)(response, authRequest(http.MethodGet, "/admin/api/profiles", "", false))
+	a.auth(a.profilesAPI)(response, authRequest(http.MethodGet, "/api/profiles", "", false))
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	if strings.Contains(response.Body.String(), "00112233445566778899aabbccddeeff") || strings.Contains(response.Body.String(), `"secret":`) {
 		t.Fatalf("profile response leaked secret: %s", response.Body.String())
@@ -115,7 +115,7 @@ func TestProfilesDoNotExposeSecrets(t *testing.T) {
 
 func TestProfilesRejectNonGetLegacyHandler(t *testing.T) {
 	a := testApp(t)
-	request := authRequest(http.MethodPut, "/admin/api/profiles", "", true)
+	request := authRequest(http.MethodPut, "/api/profiles", "", true)
 	response := httptest.NewRecorder()
 	a.auth(a.profilesAPI)(response, request)
 	if response.Code != http.StatusMethodNotAllowed { t.Fatalf("status=%d, want 405", response.Code) }
@@ -124,7 +124,7 @@ func TestProfilesRejectNonGetLegacyHandler(t *testing.T) {
 func TestCreateProfileGeneratesSecretAndWritesBackup(t *testing.T) {
 	a := testApp(t)
 	response := httptest.NewRecorder()
-	a.auth(a.profilesAPI)(response, authRequest(http.MethodPost, "/admin/api/profiles",
+	a.auth(a.profilesAPI)(response, authRequest(http.MethodPost, "/api/profiles",
 		`{"name":"mobile"}`, true))
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	var result struct { Secret string `json:"secret"` }
@@ -156,7 +156,7 @@ func TestProfileQRReturnsPNG(t *testing.T) {
 
 func TestMutationRequiresSameOriginAndCustomHeader(t *testing.T) {
 	a := testApp(t)
-	request := authRequest(http.MethodPost, "/admin/api/profiles", `{"name":"mobile","backend":"127.0.0.1:2398","carrier_mode":"https"}`, false)
+	request := authRequest(http.MethodPost, "/api/profiles", `{"name":"mobile","backend":"127.0.0.1:2398","carrier_mode":"https"}`, false)
 	response := httptest.NewRecorder()
 	a.auth(a.profilesAPI)(response, request)
 	if response.Code != http.StatusForbidden { t.Fatalf("status=%d, want 403", response.Code) }
@@ -164,7 +164,7 @@ func TestMutationRequiresSameOriginAndCustomHeader(t *testing.T) {
 
 func TestDefaultProfileCannotBeDeleted(t *testing.T) {
 	a := testApp(t)
-	request := authRequest(http.MethodDelete, "/admin/api/profiles/default", "", true)
+	request := authRequest(http.MethodDelete, "/api/profiles/default", "", true)
 	response := httptest.NewRecorder()
 	a.auth(a.profileItemAPI)(response, request)
 	if response.Code != http.StatusConflict { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
@@ -189,7 +189,7 @@ func TestDeleteNonDefaultProfile(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	doc.Profiles = append(doc.Profiles, profile{Name:"mobile", Secret:"ffeeddccbbaa99887766554433221100", Backend:"127.0.0.1:2398", CarrierMode:"https"})
 	if err := os.WriteFile(a.profiles, mustJSON(t, doc), 0600); err != nil { t.Fatal(err) }
-	request := authRequest(http.MethodDelete, "/admin/api/profiles/mobile", "", true)
+	request := authRequest(http.MethodDelete, "/api/profiles/mobile", "", true)
 	response := httptest.NewRecorder()
 	a.auth(a.profileItemAPI)(response, request)
 	if response.Code != http.StatusNoContent { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
