@@ -9,9 +9,9 @@ import (
 )
 
 func TestDeriveIsDeterministicAndSalted(t *testing.T) {
-	a := derive("test-password", []byte("0123456789abcdef"))
-	b := derive("test-password", []byte("0123456789abcdef"))
-	c := derive("test-password", []byte("fedcba9876543210"))
+	a := passwordHash("test-password", []byte("0123456789abcdef"))
+	b := passwordHash("test-password", []byte("0123456789abcdef"))
+	c := passwordHash("test-password", []byte("fedcba9876543210"))
 	if !bytes.Equal(a, b) {
 		t.Fatal("same password and salt must produce same hash")
 	}
@@ -24,11 +24,11 @@ func TestDeriveIsDeterministicAndSalted(t *testing.T) {
 }
 
 func TestRandomToken(t *testing.T) {
-	a, err := random(24)
+	a, err := randomToken(24)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := random(24)
+	b, err := randomToken(24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestInitCreatesProtectedBootstrapCredentials(t *testing.T) {
 	if err := a.db.QueryRow("SELECT salt,hash FROM users WHERE username=?", login).Scan(&salt, &hash); err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Equal(hash, []byte(password)) || !bytes.Equal(derive(password, salt), hash) {
+	if bytes.Equal(hash, []byte(password)) || !bytes.Equal(passwordHash(password, salt), hash) {
 		t.Fatal("password is not stored as a valid password hash")
 	}
 }
