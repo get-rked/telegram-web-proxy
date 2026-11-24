@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-DATA_DIR=${MTPROXY_DATA_DIR:-/var/lib/mtproxy}
-SECRET_FILE=${MTPROXY_SECRET_FILE:-/run/secrets/mtproxy_secret}
+DATA_DIR=${MTPROXY_DATA_DIR:-/opt/telegram-web-proxy/docker/mtproxy-data}
+SECRET_FILE=${MTPROXY_SECRET_FILE:-/opt/telegram-web-proxy/docker/mtproxy/secret}
 REFRESH_INTERVAL=${MTPROXY_REFRESH_INTERVAL:-86400}
 MAX_CONNECTIONS=${MTPROXY_MAX_CONNECTIONS:-4096}
 NAT_INFO=${MTPROXY_NAT_INFO:-}
