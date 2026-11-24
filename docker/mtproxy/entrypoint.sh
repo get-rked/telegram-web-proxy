@@ -81,7 +81,8 @@ if ! start_proxy; then
     exit 1
 fi
 
-next_refresh=$(($(date +%s) + REFRESH_INTERVAL))
+config_mtime=$(stat -c %Y "$DATA_DIR/proxy-multi.conf")
+next_refresh=$(($config_mtime + REFRESH_INTERVAL))
 while kill -0 "$child" 2>/dev/null; do
     sleep 30
     now=$(date +%s)
