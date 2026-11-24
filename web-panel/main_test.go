@@ -305,6 +305,4 @@ func TestProfileActionUpdateIgnoresRuntimeSettings(t *testing.T) {
 	if strings.Join(args, "|") != strings.Join(want, "|") {
 		t.Fatalf("panel unexpectedly passed CLI-only runtime settings: %#v", args)
 	}
-}) }
 }
-
