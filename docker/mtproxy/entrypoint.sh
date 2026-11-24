@@ -4,6 +4,7 @@ set -eu
 DATA_DIR=${MTPROXY_DATA_DIR:-/var/lib/mtproxy}
 SECRET_FILE=${MTPROXY_SECRET_FILE:-/run/secrets/mtproxy_secret}
 REFRESH_INTERVAL=${MTPROXY_REFRESH_INTERVAL:-86400}
+MAX_CONNECTIONS=${MTPROXY_MAX_CONNECTIONS:-4096}
 NAT_INFO=${MTPROXY_NAT_INFO:-}
 child=
 set --
@@ -43,6 +44,13 @@ if [ "$REFRESH_INTERVAL" -lt 60 ]; then
     echo "ERROR: MTPROXY_REFRESH_INTERVAL must be at least 60 seconds." >&2
     exit 1
 fi
+case "$MAX_CONNECTIONS" in
+    ''|*[!0-9]*) echo "ERROR: MTPROXY_MAX_CONNECTIONS must be a positive integer." >&2; exit 1 ;;
+esac
+if [ "$MAX_CONNECTIONS" -lt 1 ]; then
+    echo "ERROR: MTPROXY_MAX_CONNECTIONS must be greater than zero." >&2
+    exit 1
+fi
 if [ -n "$NAT_INFO" ]; then
     case "$NAT_INFO" in
         *[!0-9.:]*) echo "ERROR: MTPROXY_NAT_INFO must be privateIPv4:publicIPv4." >&2; exit 1 ;;
@@ -76,7 +84,8 @@ start_proxy() {
         -H 2398 \
         "$@" \
         --aes-pwd "$DATA_DIR/proxy-secret" "$DATA_DIR/proxy-multi.conf" \
-        -M "${MTPROXY_WORKERS:-1}" &
+        -M "${MTPROXY_WORKERS:-1}" \
+        -C "$MAX_CONNECTIONS" &
     child=$!
     sleep 3
     if ! kill -0 "$child" 2>/dev/null || ! curl --fail --silent --max-time 2 http://127.0.0.1:8888/stats >/dev/null; then
