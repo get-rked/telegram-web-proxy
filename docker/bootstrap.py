@@ -11,6 +11,7 @@ from pathlib import Path
 
 CONFIG_DIR = Path(os.environ.get("TPROXY_CONFIG_DIR", "/config"))
 MTPROXY_DIR = Path(os.environ.get("MTPROXY_DIR", "/mtproxy"))
+PROFILES_DIR = Path(os.environ.get("PROFILES_DIR", "/profiles"))
 DOMAIN = os.environ.get("DOMAIN", "").strip().lower()
 UID = int(os.environ.get("TPROXY_UID", "10001"))
 GID = int(os.environ.get("TPROXY_GID", "10001"))
@@ -76,8 +77,9 @@ def main():
         fail("DOMAIN must be set to a hostname without scheme, path, or whitespace")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     MTPROXY_DIR.mkdir(parents=True, exist_ok=True)
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     config_path = CONFIG_DIR / "config.json"
-    profiles_path = CONFIG_DIR / "profiles.json"
+    profiles_path = PROFILES_DIR / "profiles.json"
     token_path = CONFIG_DIR / "token.key"
     secret_path = MTPROXY_DIR / "secret"
 
@@ -149,7 +151,7 @@ def main():
     else:
         atomic_write(token_path, secrets.token_bytes(32), 0o600)
 
-    for path in (config_path, profiles_path, token_path):
+    for path in (config_path, token_path, profiles_path):
         os.chown(path, UID, GID)
     os.chown(secret_path, UID, GID)
     os.chmod(token_path, 0o600)
