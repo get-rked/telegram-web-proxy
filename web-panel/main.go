@@ -44,8 +44,9 @@ func(a *App)init()error{
   if _,e=db.Exec("INSERT INTO settings VALUES('base_path',?)",a.base);e!=nil{return e}
   if _,e=db.Exec("INSERT INTO users VALUES(?,?,?)",login,salt,derive(p,salt));e!=nil{return e}
   cred:=fmt.Sprintf("URL_PATH=/%s/\nLOGIN=%s\nPASSWORD=%s\n",a.base,login,p)
-  f,e:=os.OpenFile(filepath.Join(filepath.Dir(path),"panel-credentials.txt"),os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if e==nil{_,e=f.WriteString(cred);ce:=f.Close();if e==nil{e=ce}};if e!=nil&&!os.IsExist(e){return e}
-  log.Printf("ADMIN_BOOTSTRAP credentials_file=%s",filepath.Join(filepath.Dir(path),"panel-credentials.txt"))
+  credPath:=filepath.Join(filepath.Dir(path),"panel-credentials.txt"); _=os.Remove(credPath)
+  f,e:=os.OpenFile(credPath,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if e==nil{_,e=f.WriteString(cred);ce:=f.Close();if e==nil{e=ce}};if e!=nil&&!os.IsExist(e){return e}
+  log.Printf("ADMIN_BOOTSTRAP credentials_file=%s",credPath)
  }else{if e=db.QueryRow("SELECT value FROM settings WHERE key='base_path'").Scan(&a.base);e!=nil{return e}}
  _,_=db.Exec("DELETE FROM sessions WHERE expires < ?",time.Now().Unix());return os.Chmod(path,0600)
 }
