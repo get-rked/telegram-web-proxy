@@ -2634,36 +2634,63 @@ docker_write_state() {
 }
 
 docker_wait_ready() {
-  local proxy="$1" deadline ids inspected line service state health required ready
+  local proxy="$1" deadline ids inspected line service state health exit_code required ready attempts=0
   local -A states=()
-  deadline=$((SECONDS + 300))
+  # The backend and firewall have health checks with a 90-110s startup window.
+  # Keep a hard upper bound, but fail immediately for stopped/unhealthy services.
+  deadline=$((SECONDS + 180))
   while (( SECONDS < deadline )); do
+    ((attempts+=1))
     states=()
-    ids="$(docker ps -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
+    ids="$(docker_compose --profile "$proxy" --profile webproxy ps -aq 2>/dev/null || true)"
     if [[ -n "$ids" ]]; then
       local -a container_ids=()
       mapfile -t container_ids <<< "$ids"
-      inspected="$(docker inspect "${container_ids[@]}" --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
-      while IFS='|' read -r service state health; do
-        [[ -n "$service" ]] && states["$service"]="$state|$health"
+      inspected="$(docker inspect "${container_ids[@]}" --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.State.ExitCode}}' 2>/dev/null || true)"
+      while IFS='|' read -r service state health exit_code; do
+        [[ -n "$service" ]] && states["$service"]="$state|$health|$exit_code"
       done <<< "$inspected"
     fi
+
     ready=1
     for required in relay panel fail2ban "$proxy" mtproxy mtproxy-firewall; do
       line="${states[$required]:-}"
-      if [[ "$line" != "running|healthy" && "$line" != "running|none" ]]; then ready=0; break; fi
+      state="${line%%|*}"
+      health="${line#*|}"
+      health="${health%%|*}"
+      if [[ -z "$line" ]]; then
+        ready=0
+        # Compose up has already returned. If a required service was never
+        # created, don't leave the installer sleeping for the full timeout.
+        if (( attempts >= 3 )); then
+          docker_compose --profile "$proxy" --profile webproxy ps -a || true
+          die "Docker Compose не создал обязательный сервис $required. Проверь активные профили и docker-compose.yml."
+        fi
+        break
+      fi
+      if [[ "$state" == "exited" || "$state" == "dead" || "$state" == "removing" || "$health" == "unhealthy" ]]; then
+        docker_compose --profile "$proxy" --profile webproxy ps -a || true
+        die "Сервис $required завершился или нездоров (state/health: $line). Проверь: sudo $BASE_DIR/tgweb-install.sh docker logs $required"
+      fi
+      if [[ "$state" != "running" || ( "$health" != "healthy" && "$health" != "none" ) ]]; then
+        ready=0
+        break
+      fi
     done
     (( ready == 1 )) && break
     sleep 5
   done
-  docker_compose --profile "$proxy" --profile webproxy ps -a
+
+  docker_compose --profile "$proxy" --profile webproxy ps -a || true
   for required in relay panel fail2ban "$proxy" mtproxy mtproxy-firewall; do
     line="${states[$required]:-}"
-    [[ "$line" == "running|healthy" || "$line" == "running|none" ]] ||
-      die "Сервис $required не готов (state/health: ${line:-не найден}). Проверь: sudo $BASE_DIR/tgweb-install.sh docker logs $required"
+    state="${line%%|*}"
+    health="${line#*|}"
+    health="${health%%|*}"
+    [[ "$state" == "running" && ( "$health" == "healthy" || "$health" == "none" ) ]] ||
+      die "Сервис $required не готов после 180 секунд (state/health: ${line:-не найден}). Проверь: sudo $BASE_DIR/tgweb-install.sh docker logs $required"
   done
 }
-
 docker_prompt_secret() {
   local format_choice generate_choice first second
   if [[ "$NONINTERACTIVE" == "1" ]]; then
