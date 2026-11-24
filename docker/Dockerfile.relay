@@ -1,0 +1,14 @@
+FROM golang:1.26.5-bookworm AS build
+ARG TPROXY_COMMIT=c8adb8b7c6b7fc46c12ae3acb68be9070c26a8e8
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git init && git remote add origin https://github.com/telegramdesktop/tproxy-server.git && git fetch --depth 1 origin "$TPROXY_COMMIT" && git checkout --detach FETCH_HEAD
+RUN go test ./...
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/tproxy-server ./cmd/tproxy-server
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/* && groupadd --system --gid 10001 tproxy && useradd --system --uid 10001 --gid tproxy --home-dir /nonexistent --shell /usr/sbin/nologin tproxy
+COPY --from=build /out/tproxy-server /usr/local/bin/tproxy-server
+USER 10001:10001
+EXPOSE 8080 8081
+ENTRYPOINT ["/usr/local/bin/tproxy-server"]
+CMD ["-config", "/etc/tproxy-server/config.json", "-profiles-file", "/etc/tproxy-server/profiles.json"]
