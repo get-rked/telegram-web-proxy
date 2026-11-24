@@ -533,8 +533,6 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 		Action string
 		CarrierMode string
 		RegenerateSecret bool
-		Workers string
-		MaxConnections string
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
 		errOut(w, http.StatusBadRequest, "Некорректный запрос")
@@ -557,16 +555,6 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		args = []string{"profile", "update", name, "--carrier-mode", body.CarrierMode}
-		if body.Workers != "" {
-			n, err := strconv.Atoi(body.Workers)
-			if err != nil || n < 1 || n > 256 { errOut(w, http.StatusBadRequest, "Workers должен быть от 1 до 256"); return }
-			args = append(args, "--workers", body.Workers)
-		}
-		if body.MaxConnections != "" {
-			n, err := strconv.Atoi(body.MaxConnections)
-			if err != nil || n < 1 || n > 1000000 { errOut(w, http.StatusBadRequest, "Max Connections должен быть от 1 до 1000000"); return }
-			args = append(args, "--max-connections", body.MaxConnections)
-		}
 		if body.RegenerateSecret {
 			args = append(args, "--generate")
 		}
