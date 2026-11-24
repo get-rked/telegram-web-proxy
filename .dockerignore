@@ -16,3 +16,11 @@ docker/nginx/certs/
 # Preserve migration snapshots outside Git and Docker build context
 docker/site.before-migration*/
 docker/site.failed-migration*/
+
+# Native rollback tree may coexist in /opt/telegram-web-proxy.
+# Keep binaries, source checkouts, configuration and systemd units out of Docker build context.
+bin/
+config/
+src/
+systemd/
+qr/
