@@ -221,47 +221,29 @@ redact_sensitive_log() {
 
 usage() {
   cat <<'EOF'
-Usage:
-  sudo ./tgweb-install.sh                          # интерактивное меню
-  sudo ./tproxy-manager.sh install   [опции установки]
-  sudo ./tproxy-manager.sh update    [опции установки]
-  sudo ./tproxy-manager.sh uninstall [--keep-caddy] [--yes]
-  sudo ./tgweb-install.sh purge     [--yes]
-  sudo ./tgweb-install.sh profile list
-  sudo ./tgweb-install.sh profile add ИМЯ (--secret СЕКРЕТ | --generate) [--carrier-mode MODE]
-  sudo ./tgweb-install.sh profile set-carrier ИМЯ MODE
-  sudo ./tgweb-install.sh profile delete ИМЯ --yes
-  sudo ./tgweb-install.sh profile backup ИМЯ
-  sudo ./tgweb-install.sh profile import ARCHIVE (--name ИМЯ | --replace-default) [--entry PATH] --yes
-  sudo ./tgweb-install.sh upstream set-url http://127.0.0.1:PORT
-  sudo ./tgweb-install.sh upstream set-dir /absolute/path
-  sudo ./tgweb-install.sh services restart
-  sudo ./tgweb-install.sh site remove [--yes]
-  sudo ./tgweb-install.sh web-server remove [--yes]
-  sudo ./tgweb-install.sh docker install [--source-dir PATH] [--web-server caddy|nginx] [--hostname FQDN] [--email EMAIL]
-  sudo ./tgweb-install.sh docker update|uninstall|purge [--yes] [--volumes]
-  sudo ./tgweb-install.sh docker status|restart [SERVICE]|logs [SERVICE]|backup
+Telegram Web Proxy — Docker Manager
 
-Опции установки/обновления:
-  --hostname FQDN           Домен
-  --web-server caddy|nginx  Веб-сервер (по умолчанию: caddy)
-  --email EMAIL             Email для Let's Encrypt
-  --secret SECRET           32 hex или dd + 32 hex
-  --secret-prefix MODE       plain или dd (формат генерации)
-  --carrier-mode MODE        https|https-lanes|websocket|websocket-lanes
-  config [--output PATH]     Показать текущие настройки (секреты скрыты)
-  diagnostics                Диагностика: службы, порты, конфигурации и ошибки
-  backup                     Создать резервную копию в стандартном каталоге
-  restore [NUMBER]           Выбрать архив из списка и восстановить
-  --base-path SLUG|none     Базовый путь (default: генерируется)
-  --site-dir PATH           Каталог сайта (default: /opt/telegram-web-proxy/data/website)
-  --no-site                 Не устанавливать сайт
-  --workers N               MTProxy workers (default: 1)
-  --max-connections N       MTProxy max connections (default: 4096)
-  --port N                  Порт relay (default: 8080)
-  --admin-port N            Admin-порт relay (default: 8081)
-  --skip-tests              Не запускать go test
-  --non-interactive, -y     Ничего не спрашивать
+Первый запуск из одноразового файла:
+  sudo bash /tmp/tgweb-install.sh
+
+После развёртывания:
+  sudo /opt/telegram-web-proxy/tgweb-install.sh
+
+Основные команды:
+  docker install [--web-server caddy|nginx] [--hostname FQDN] [--email EMAIL]
+  docker update                 Обновить код и Docker-образы
+  docker status                 Состояние контейнеров
+  docker restart [SERVICE]      Перезапуск Docker-сервисов
+  docker logs [SERVICE]         Последние логи
+  docker backup                 Резервная копия файлов проекта
+  docker uninstall              Удалить контейнеры, сохранить данные
+  docker purge [--volumes]      Удалить контейнеры и образы; volumes отдельно
+
+Установка автоматически определяет, есть ли сохранённая native-конфигурация:
+  - если есть — выполняет контролируемый перенос;
+  - если нет — запрашивает домен/email и выполняет чистую установку.
+
+Для Docker Manager используются Ubuntu/Debian, systemd, apt-get и права root.
 EOF
   return 0
 }
@@ -2607,6 +2589,12 @@ docker_install_fresh_command() {
   if [[ "$proxy" == "nginx" && ( ! -s "$cert_dir/fullchain.pem" || ! -s "$cert_dir/privkey.pem" ) ]]; then
     die "Для чистой установки с Nginx нужны docker/nginx/certs/fullchain.pem и privkey.pem. Для автоматического TLS выбери Caddy."
   fi
+  command -v ss >/dev/null 2>&1 || die "Не найдена команда ss (пакет iproute2)."
+  local port listeners
+  for port in 80 443; do
+    listeners="$(ss -H -ltn "sport = :$port" 2>/dev/null || true)"
+    [[ -z "$listeners" ]] || die "TCP-порт $port уже занят. Освободи его или сначала выполни перенос прежней установки."
+  done
   python3 - "$DOCKER_PROJECT_DIR/.env.example" "$DOCKER_PROJECT_DIR/.env" "$domain" "$email" <<'PY'
 import pathlib
 import re
@@ -4650,22 +4638,18 @@ main() {
 
   MODE="$1"; shift
   case "$MODE" in
-    install)   parse_install_args "$@"; run_install ;;
-    update)    parse_install_args "$@"; run_install ;;
-    uninstall) parse_uninstall_args "$@"; run_uninstall ;;
-    purge)     parse_uninstall_args "$@"; run_purge ;;
-    config)    require_root; run_config "$@" ;;
-    diagnostics) require_root; diagnostics_command ;;
-    backup)    require_root; backup_command "$@" ;;
-    restore)   require_root; restore_command "$@" ;;
-    profile)   profile_cli "$@" ;;
-    upstream)  upstream_cli "$@" ;;
-    services)  require_root; [[ "${1:-}" == restart && $# -eq 1 ]] || die "Использование: services restart"; restart_proxy_services ;;
-    site)      [[ "${1:-}" == remove ]] || die "Использование: site remove [--yes]"; shift; ASSUME_YES=0; parse_uninstall_args "$@"; remove_decoy_site ;;
-    web-server) [[ "${1:-}" == remove ]] || die "Использование: web-server remove [--yes]"; shift; ASSUME_YES=0; parse_uninstall_args "$@"; remove_web_server_interactive ;;
+    install|docker-install) docker_install_command "$@" ;;
+    update|docker-update) docker_update_command "$@" ;;
+    uninstall|docker-uninstall) docker_uninstall_command "$@" ;;
+    purge|docker-purge) docker_purge_command "$@" ;;
+    config|status) docker_status_command ;;
+    diagnostics) docker_status_command; docker_logs_command ;;
+    backup) docker_backup_command ;;
+    restore|profile|upstream|services|site|web-server)
+      die "Эта команда относится к прежнему native-менеджеру. Native-установка сохранена в резервной копии; основной режим теперь Docker Manager." ;;
     docker) docker_cli "$@" ;;
     -h|--help|help) usage; exit 0 ;;
-    *) die "Неизвестная команда: $MODE (install|update|uninstall|purge|docker|config|diagnostics|backup|restore|profile|upstream|services|site|web-server)" ;;
+    *) die "Неизвестная команда: $MODE (docker|install|update|uninstall|purge|status|backup|help)" ;;
   esac
 }
 
