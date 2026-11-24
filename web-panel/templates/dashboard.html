@@ -66,8 +66,9 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <div class="dialog-head"><h2 id="configTitle">Конфигурация профиля</h2><button onclick="closeDialog('profileDialog')">✕</button></div>
 <div class="field"><label>Адрес сервера</label><div class="value"><code id="configServer"></code><button onclick="copyValue('configServer')">Копировать</button></div></div>
 <div class="field"><label>Секрет подключения</label><div class="value"><code id="configSecret"></code><button onclick="copyValue('configSecret')">Копировать</button></div></div>
-<div class="field"><label>Ссылка для Telegram</label><a id="configLink" class="link" target="_blank" rel="noopener"></a><div class="toolbar"><button onclick="copyLink()">Копировать ссылку</button></div></div>
-<div class="field"><label>QR-код подключения</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
+<div class="field"><label>Публичная ссылка Telegram</label><a id="configLink" class="link" target="_blank" rel="noopener"></a><div class="toolbar"><button onclick="copyLink()">Копировать HTTPS-ссылку</button></div></div>
+<div class="field"><label>Прямая ссылка Telegram</label><a id="configDeepLink" class="link"></a><div class="toolbar"><button onclick="copyDeepLink()">Копировать tg:// ссылку</button></div></div>
+<div class="field"><label>QR-код подключения (прямая ссылка Telegram)</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
 <div class="dialog-actions"><button onclick="closeDialog('profileDialog')">Закрыть</button></div>
 </dialog>
 
@@ -97,6 +98,7 @@ function closeDialog(id){document.getElementById(id).close()}
 function copyText(text){navigator.clipboard.writeText(text).catch(()=>{const field=document.createElement('textarea');field.value=text;document.body.appendChild(field);field.select();document.execCommand('copy');field.remove()})}
 function copyValue(id){copyText(document.getElementById(id).textContent)}
 function copyLink(){copyText(document.getElementById('configLink').href)}
+function copyDeepLink(){copyText(document.getElementById('configDeepLink').textContent)}
 async function loadProfiles(){
  try{
   const profiles=await api(base+'/api/profiles');
@@ -118,6 +120,7 @@ async function showProfileConfig(name){
   document.querySelector('#configServer').textContent=data.server;
   document.querySelector('#configSecret').textContent=data.secret;
   const link=document.querySelector('#configLink');link.href=data.link;link.textContent=data.link;
+  const deepLink=document.querySelector('#configDeepLink');deepLink.textContent=data.tg_link;
   document.querySelector('#configQR').src=base+'/api/profiles/'+encodeURIComponent(name)+'/qr';
   document.querySelector('#profileDialog').showModal();
  }catch(error){notify(error)}
