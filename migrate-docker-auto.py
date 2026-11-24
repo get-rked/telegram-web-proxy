@@ -34,6 +34,16 @@ def need(name):
         raise MigrationAbort("Не найдена команда: " + name)
 
 
+def compose(args, check=True, timeout=1800, show=False):
+    command = [
+        "docker", "compose",
+        "--project-directory", str(ROOT),
+        "--project-name", "telegram-web-proxy",
+        "-f", str(ROOT / "docker-compose.yml"),
+    ] + list(args)
+    return cmd(command, check=check, timeout=timeout, show=show)
+
+
 def active(unit):
     return cmd(["systemctl", "is-active", "--quiet", unit], False)[1] == 0
 
@@ -176,8 +186,8 @@ def main():
          "--web-server", proxy, "--apply"], show=True)
 
     print("\n[4/6] Проверка Compose и сборка")
-    cmd(["docker", "compose"] + profiles + ["config", "--quiet"])
-    cmd(["docker", "compose"] + profiles + ["build"], timeout=3600, show=True)
+    compose(profiles + ["config", "--quiet"])
+    compose(profiles + ["build"], timeout=3600, show=True)
 
     if args.prepare_only:
         print("\nПодготовка завершена. Старые службы не остановлены, Docker не запущен.")
@@ -204,12 +214,12 @@ def main():
                 raise MigrationAbort("После остановки служб порт {} всё ещё занят: {}".format(port, rows))
 
         print("\n[6/6] Запуск Docker")
-        cmd(["docker", "compose"] + profiles + ["up", "-d"], timeout=1800, show=True)
+        compose(profiles + ["up", "-d"], timeout=1800, show=True)
         required = {"relay", "panel", "fail2ban", "mtproxy", "mtproxy-firewall", proxy}
         deadline = time.time() + 240
         service_states = {}
         while time.time() < deadline:
-            ids, ids_rc = cmd(["docker", "compose", "ps", "-q", "--all"], False)
+            ids, ids_rc = compose(["ps", "-q", "--all"], False)
             service_states = {}
             if ids_rc == 0 and ids.strip():
                 inspected, inspect_rc = cmd([
@@ -233,7 +243,7 @@ def main():
                 break
             time.sleep(5)
 
-        status, _ = cmd(["docker", "compose", "ps", "-a"], False)
+        status, _ = compose(["ps", "-a"], False)
         print(status)
         not_ready = sorted(
             name for name in required
@@ -246,7 +256,7 @@ def main():
             for name in not_ready:
                 state = service_states.get(name, ("missing", "unknown"))
                 print("  {}: state={}, health={}".format(name, state[0], state[1]))
-                logs, _ = cmd(["docker", "compose", "logs", "--no-color", "--tail=100", name], False)
+                logs, _ = compose(["logs", "--no-color", "--tail=100", name], False)
                 if logs:
                     print(logs)
             raise MigrationAbort("Не готовы обязательные сервисы: " + ", ".join(not_ready))
@@ -284,7 +294,7 @@ def main():
                     break
                 time.sleep(5)
             if web_code not in ("200", "301", "302"):
-                proxy_logs, _ = cmd(["docker", "compose", "logs", "--no-color", "--tail=80", proxy, "relay"], False)
+                proxy_logs, _ = compose(["logs", "--no-color", "--tail=80", proxy, "relay"], False)
                 if proxy_logs:
                     print("\\nЛоги reverse proxy и relay:\\n" + proxy_logs)
                 raise MigrationAbort(
@@ -298,7 +308,7 @@ def main():
     except Exception as error:
         print("\nОшибка переключения: {}".format(error))
         print("Аварийный откат: останавливаю Docker и возвращаю native-службы.")
-        cmd(["docker", "compose"] + profiles + ["down"], False, 600)
+        compose(profiles + ["down"], False, 600)
         for unit in reversed(stopped):
             cmd(["systemctl", "start", unit], False, 120)
         raise MigrationAbort("Переключение не завершено. Исходные файлы не удалялись; проверь логи.")
