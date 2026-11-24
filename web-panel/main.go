@@ -431,7 +431,7 @@ func (a *App) profileDetails(name string) (map[string]string, error) {
 	workers, maxConnections := a.mtproxyRuntimeSettings()
 	return map[string]string{
 		"name": profile.Name, "carrier_mode": profile.CarrierMode,
-		"secret": secret, "server": server, "link": link, "tg_link": tgLink,
+		"secret": profile.Secret, "client_secret": secret, "server": server, "link": link, "tg_link": tgLink,
 		"workers": workers, "max_connections": maxConnections,
 	}, nil
 }
@@ -533,6 +533,7 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 		Action string
 		CarrierMode string
 		RegenerateSecret bool
+		Secret string
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
 		errOut(w, http.StatusBadRequest, "Некорректный запрос")
@@ -556,8 +557,14 @@ func (a *App) profileAction(w http.ResponseWriter, r *http.Request) {
 		}
 		args = []string{"profile", "update", name, "--carrier-mode", body.CarrierMode}
 		if body.RegenerateSecret {
-			args = append(args, "--generate")
+			errOut(w, http.StatusBadRequest, "Используйте поле секрета для задания нового значения")
+			return
 		}
+		if !regexp.MustCompile("^dd[0-9a-f]{32}$").MatchString(body.Secret) {
+			errOut(w, http.StatusBadRequest, "Секрет должен содержать dd и 32 символа в шестнадцатеричном формате")
+			return
+		}
+		args = append(args, "--secret", body.Secret)
 	default:
 		errOut(w, http.StatusBadRequest, "Неизвестная операция")
 		return
@@ -730,14 +737,15 @@ func (a *App) diagnostics(w http.ResponseWriter, r *http.Request) {
 func (a *App) backups(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		full, _ := filepath.Glob(filepath.Join(a.backupDir, "tproxy-backup-*.tar.gz"))
-		profiles, _ := filepath.Glob(filepath.Join(a.backupDir, "profile-backups", "*.tar.gz"))
-		items := []map[string]any{}
-		for _, group := range []struct{ files []string; kind string }{{full, "full"}, {profiles, "profile"}} {
-			sort.Sort(sort.Reverse(sort.StringSlice(group.files)))
-			for _, file := range group.files {
-				if stat, err := os.Stat(file); err == nil {
-					items = append(items, map[string]any{"name": filepath.Base(file), "size": stat.Size(), "modified": stat.ModTime(), "kind": group.kind})
-				}
+		sort.Sort(sort.Reverse(sort.StringSlice(full)))
+		items := make([]map[string]any, 0, len(full))
+		for _, file := range full {
+			name := filepath.Base(file)
+			stamp := strings.TrimSuffix(strings.TrimPrefix(name, "tproxy-backup-"), ".tar.gz")
+			created, parseErr := time.ParseInLocation("20060102-150405", stamp, time.Local)
+			if parseErr != nil { continue }
+			if stat, err := os.Stat(file); err == nil {
+				items = append(items, map[string]any{"name": name, "size": stat.Size(), "created": created})
 			}
 		}
 		jsonOut(w, items)
