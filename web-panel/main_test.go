@@ -205,6 +205,7 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 	}
 	if got["carrier_mode"] != "https-lanes" || got["name"] != "alpha" { t.Fatalf("unexpected profile metadata: %#v", got) }
 	if !strings.Contains(got["link"], "https://t.me/webproxy?") { t.Fatalf("unexpected Telegram link: %q", got["link"]) }
+	if !strings.Contains(got["tg_link"], "tg://webproxy?") { t.Fatalf("unexpected direct Telegram link: %q", got["tg_link"]) }
 }
 
 func TestProfileActionExportReturnsDownloadURL(t *testing.T) {
