@@ -17,13 +17,14 @@ class BootstrapTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.config_dir = root / "config"
         self.mtproxy_dir = root / "mtproxy"
+        self.profiles_dir = root / "profiles"
         self.config_dir.mkdir()
         self.mtproxy_dir.mkdir()
-        (root / "profiles").mkdir()
+        self.profiles_dir.mkdir()
         self.patches = [
             patch.object(bootstrap, "CONFIG_DIR", self.config_dir),
             patch.object(bootstrap, "MTPROXY_DIR", self.mtproxy_dir),
-            patch.object(bootstrap, "PROFILES_DIR", root / "profiles"),
+            patch.object(bootstrap, "PROFILES_DIR", self.profiles_dir),
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
@@ -38,7 +39,7 @@ class BootstrapTests(unittest.TestCase):
 
     def test_first_run_creates_matching_secrets_and_token_key(self):
         bootstrap.main()
-        profile = json.loads((self.config_dir / "profiles.json").read_text())["profiles"][0]
+        profile = json.loads((self.profiles_dir / "profiles.json").read_text())["profiles"][0]
         secret = (self.mtproxy_dir / "secret").read_text().strip()
         self.assertEqual(profile["secret"], secret)
         self.assertEqual(len(bytes.fromhex(secret)), 16)
@@ -54,7 +55,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.config_dir / "token.key").read_bytes(), token_before)
 
     def test_mismatched_existing_secrets_fail_closed(self):
-        (self.config_dir / "profiles.json").write_text(json.dumps({"profiles": [{
+        (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [{
             "name": "default", "secret": "00" * 16,
             "backend": "127.0.0.1:2398", "carrier_mode": "https"
         }]}))
