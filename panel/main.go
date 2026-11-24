@@ -35,6 +35,7 @@ type application struct {
 	config   string
 	profiles string
 	mu       sync.Mutex
+	monitorClient *http.Client
 }
 
 type profile struct {
@@ -91,6 +92,7 @@ func main() {
 		password: os.Getenv("PANEL_PASSWORD"),
 		config:   env("TPROXY_CONFIG", "/etc/tproxy-server/config.json"),
 		profiles: env("TPROXY_PROFILES", "/etc/tproxy-server/profiles.json"),
+		monitorClient: &http.Client{Timeout: 3*time.Second},
 	}
 	if len(a.password) < 16 {
 		log.Fatal("PANEL_PASSWORD must contain at least 16 characters")
@@ -101,6 +103,10 @@ func main() {
 	mux.HandleFunc("/admin/api/status", a.auth(a.status))
 	mux.HandleFunc("/admin/api/profiles", a.auth(a.profilesAPI))
 	mux.HandleFunc("/admin/api/profiles/", a.auth(a.profileItemAPI))
+	mux.HandleFunc("/admin/api/diagnostics", a.auth(a.diagnostics))
+	mux.HandleFunc("/admin/api/metrics", a.auth(a.metrics))
+	mux.HandleFunc("/admin/api/backups", a.auth(a.backupsAPI))
+	mux.HandleFunc("/admin/api/backups/", a.auth(a.backupItemAPI))
 	mux.HandleFunc("/admin/app.js", a.auth(a.javascript))
 	mux.HandleFunc("/admin/", a.auth(a.index))
 	mux.HandleFunc("/admin", a.auth(a.index))
