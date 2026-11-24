@@ -205,6 +205,7 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 		t.Fatal("internal backend leaked into client configuration")
 	}
 	if got["carrier_mode"] != "https-lanes" || got["name"] != "alpha" { t.Fatalf("unexpected profile metadata: %#v", got) }
+	if got["secret"] != "cAEjRWeJq83vASNFZ4mrze8" { t.Fatalf("unexpected client-facing secret: %q", got["secret"]) }
 	if !strings.Contains(got["link"], "https://t.me/webproxy?") { t.Fatalf("unexpected Telegram link: %q", got["link"]) }
 	if !strings.Contains(got["tg_link"], "tg://webproxy?") { t.Fatalf("unexpected direct Telegram link: %q", got["tg_link"]) }
 }
