@@ -69,7 +69,7 @@ func TestInitCreatesProtectedBootstrapCredentials(t *testing.T) {
 	login := strings.TrimPrefix(lines[1], "LOGIN=")
 	password := strings.TrimPrefix(lines[2], "PASSWORD=")
 	var salt, hash []byte
-	if err := a.db.QueryRow("SELECT salt,hash FROM users WHERE username=?", login).Scan(&salt, &hash); err != nil {
+	if err := a.db.QueryRow("SELECT salt,password_hash FROM users WHERE username=?", login).Scan(&salt, &hash); err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(hash, []byte(password)) || !bytes.Equal(passwordHash(password, salt), hash) {
