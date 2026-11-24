@@ -4307,6 +4307,7 @@ profile_cli() {
       valid_name "$name" && valid_mode "$mode" || die "Недопустимое имя или Carrier mode."
       file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
       secret="$(jq -r '.secret' "$file")"
+      valid_secret "$secret" || die "Секрет профиля некорректен."
       if (( rotate )); then
         prefix=""; [[ "$secret" == dd* ]] && prefix="dd"
         while :; do
