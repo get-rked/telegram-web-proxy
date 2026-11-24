@@ -2792,6 +2792,7 @@ backup_command() {
     etc/nginx/conf.d/tproxy-websocket-map.conf \
     etc/letsencrypt \
     etc/systemd/system/tproxy-server.service \
+    etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/mtproxy.service \
     etc/systemd/system/tproxy-firewall.service \
     etc/systemd/system/refresh-mtproxy-config.service \
