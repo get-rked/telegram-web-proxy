@@ -164,6 +164,9 @@ Usage:
   sudo ./tgweb-install.sh services restart
   sudo ./tgweb-install.sh site remove [--yes]
   sudo ./tgweb-install.sh web-server remove [--yes]
+  sudo ./tgweb-install.sh docker install [--source-dir PATH] [--web-server caddy|nginx]
+  sudo ./tgweb-install.sh docker update|uninstall|purge [--yes] [--volumes]
+  sudo ./tgweb-install.sh docker status|restart [SERVICE]|logs [SERVICE]|backup
 
 Опции установки/обновления:
   --hostname FQDN           Домен
@@ -2420,6 +2423,249 @@ run_install() {
 }
 
 # ============================================================================
+#  DOCKER MANAGER
+# ============================================================================
+DOCKER_PROJECT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+DOCKER_PROJECT_NAME="telegram-web-proxy"
+DOCKER_STATE_FILE="$DOCKER_PROJECT_DIR/docker/private/.manager-state"
+
+docker_require_project() {
+  require_root
+  command -v docker >/dev/null 2>&1 || die "Docker не установлен."
+  docker compose version >/dev/null 2>&1 || die "Docker Compose plugin недоступен."
+  [[ -f "$DOCKER_PROJECT_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml рядом со скриптом. Запусти tgweb-install.sh из корня репозитория."
+  [[ -d "$DOCKER_PROJECT_DIR/docker" ]] || die "Не найден каталог docker/."
+  docker info >/dev/null 2>&1 || die "Docker daemon не запущен или недоступен."
+}
+
+docker_compose() {
+  docker compose --project-directory "$DOCKER_PROJECT_DIR" \
+    --project-name "$DOCKER_PROJECT_NAME" \
+    -f "$DOCKER_PROJECT_DIR/docker-compose.yml" "$@"
+}
+
+docker_read_web_server() {
+  local value=""
+  if [[ -r "$DOCKER_STATE_FILE" ]]; then value="$(cat "$DOCKER_STATE_FILE" 2>/dev/null || true)"; fi
+  if [[ "$value" != caddy && "$value" != nginx ]]; then
+    if docker_compose ps --services --filter status=running 2>/dev/null | grep -qx caddy; then
+      value=caddy
+    elif docker_compose ps --services --filter status=running 2>/dev/null | grep -qx nginx; then
+      value=nginx
+    fi
+  fi
+  [[ "$value" == caddy || "$value" == nginx ]] || value=""
+  printf '%s' "$value"
+}
+
+docker_write_state() {
+  local proxy="$1" tmp
+  [[ "$proxy" == caddy || "$proxy" == nginx ]] || die "Неизвестный Docker reverse proxy: $proxy"
+  install -d -m 0700 "$DOCKER_PROJECT_DIR/docker/private"
+  tmp="$(mktemp "$DOCKER_STATE_FILE.XXXXXX")"
+  printf '%s\n' "$proxy" > "$tmp"
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$DOCKER_STATE_FILE"
+}
+
+docker_install_command() {
+  docker_require_project
+  [[ -f "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" ]] || die "Не найден migrate-docker-auto.py."
+  local source_dir="$BASE_DIR" proxy=""
+  while (($#)); do
+    case "$1" in
+      --source-dir) (($# >= 2)) || die "--source-dir требует путь"; source_dir="$2"; shift 2 ;;
+      --web-server) (($# >= 2)) || die "--web-server требует caddy|nginx"; proxy="$2"; shift 2 ;;
+      *) die "Неизвестный параметр docker install: $1" ;;
+    esac
+  done
+  [[ -d "$source_dir" ]] || die "Не найдена исходная native-установка: $source_dir"
+  if [[ -n "$proxy" ]]; then
+    [[ "$proxy" == caddy || "$proxy" == nginx ]] || die "--web-server: допустимо caddy или nginx"
+    python3 "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" --source-dir "$source_dir" --web-server "$proxy" || return $?
+  else
+    python3 "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" --source-dir "$source_dir" || return $?
+  fi
+  [[ -n "$proxy" ]] || proxy="$(cat "$source_dir/config/proxy/web-server" 2>/dev/null || true)"
+  if [[ "$proxy" == caddy || "$proxy" == nginx ]]; then docker_write_state "$proxy"; fi
+  ok "Docker-операция установки/переноса завершена. Нативные файлы сохранены для отката."
+}
+
+docker_update_command() {
+  docker_require_project
+  [[ -s "$DOCKER_PROJECT_DIR/.env" ]] || die "Не найден .env. Сначала выполни docker install."
+  local proxy choice
+  proxy="$(docker_read_web_server)"
+  if [[ -z "$proxy" ]]; then
+    if [[ "$NONINTERACTIVE" == "1" ]]; then die "Не удалось определить Caddy/Nginx. Запусти интерактивное Docker-меню."; fi
+    echo "Выбери reverse proxy для обновления:"
+    echo "  1) Caddy"
+    echo "  2) Nginx"
+    read -r -p "Выбор [1-2]: " choice || die "ввод прерван"
+    case "$choice" in 1) proxy=caddy ;; 2) proxy=nginx ;; *) die "Обновление отменено." ;; esac
+    docker_write_state "$proxy"
+  fi
+  info "Проверка Compose-конфигурации ($proxy + MTProxy)..."
+  docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
+  info "Загрузка внешних образов..."
+  docker_compose --profile "$proxy" --profile mtproxy pull || die "Не удалось загрузить внешние образы."
+  info "Сборка обновлённых образов..."
+  docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  info "Применение обновления..."
+  docker_compose --profile "$proxy" --profile mtproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
+  docker_compose ps
+  ok "Docker-обновление завершено. Именованные тома и конфигурации сохранены."
+}
+
+docker_uninstall_command() {
+  docker_require_project
+  local yes=0
+  while (($#)); do
+    case "$1" in --yes|-y) yes=1; shift ;; *) die "Неизвестный параметр docker uninstall: $1" ;; esac
+  done
+  ASSUME_YES="$yes"
+  ui_header "Удаление Docker-установки"
+  echo "Будут остановлены и удалены контейнеры проекта и его сеть."
+  echo "Будут сохранены: конфигурация, .env, реквизиты панели, сайт и ВСЕ именованные тома."
+  echo "Нативная установка $BASE_DIR не затрагивается."
+  confirm "Остановить и удалить Docker-контейнеры?" || { info "Удаление отменено."; return 0; }
+  docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans || die "Не удалось удалить Docker-контейнеры."
+  ok "Docker-контейнеры удалены. Данные и тома сохранены."
+}
+
+docker_purge_command() {
+  docker_require_project
+  local yes=0 remove_volumes=0 phrase
+  while (($#)); do
+    case "$1" in
+      --yes|-y) yes=1; shift ;;
+      --volumes) remove_volumes=1; shift ;;
+      *) die "Неизвестный параметр docker purge: $1" ;;
+    esac
+  done
+  ASSUME_YES="$yes"
+  ui_header "Очистка Docker-установки"
+  echo "Будут удалены контейнеры, сеть и локальные образы проекта."
+  if (( remove_volumes )); then
+    warn "ВНИМАНИЕ: --volumes удалит panel-data, caddy-data, caddy-config, mtproxy-data и fail2ban-data."
+    warn "Это приведёт к потере данных панели, состояния TLS и данных MTProxy."
+  else
+    echo "Именованные тома и файлы конфигурации будут сохранены."
+  fi
+  confirm "Продолжить очистку?" || { info "Очистка отменена."; return 0; }
+  if (( remove_volumes )); then
+    if [[ "$ASSUME_YES" -eq 0 ]]; then
+      read -r -p "Для удаления именованных томов введи DELETE VOLUMES: " phrase || die "ввод прерван"
+      [[ "$phrase" == "DELETE VOLUMES" ]] || die "Удаление томов отменено."
+    fi
+    docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans --rmi local --volumes
+  else
+    docker_compose --profile caddy --profile nginx --profile mtproxy down --remove-orphans --rmi local
+  fi
+  ok "Очистка Docker-проекта завершена."
+}
+
+docker_status_command() {
+  docker_require_project
+  docker_compose --profile caddy --profile nginx --profile mtproxy ps -a
+  local proxy
+  proxy="$(docker_read_web_server)"
+  [[ -n "$proxy" ]] || proxy="не определён"
+  printf '\nReverse proxy: %s\n' "$proxy"
+}
+
+docker_restart_command() {
+  docker_require_project
+  local service=""
+  if (($#)); then service="$1"; shift; fi
+  (($# == 0)) || die "docker restart [SERVICE]"
+  if [[ -n "$service" ]]; then
+    [[ "$service" =~ ^(relay|panel|caddy|nginx|mtproxy|mtproxy-firewall|stats-bridge|fail2ban)$ ]] || die "Неизвестный сервис: $service"
+    docker_compose restart "$service"
+  else
+    docker_compose --profile caddy --profile nginx --profile mtproxy restart
+  fi
+  ok "Перезапуск Docker-сервисов завершён."
+}
+
+docker_logs_command() {
+  docker_require_project
+  local service=""
+  if (($#)); then service="$1"; shift; fi
+  (($# == 0)) || die "docker logs [SERVICE]"
+  if [[ -n "$service" ]]; then
+    [[ "$service" =~ ^(bootstrap|relay|panel|caddy|nginx|mtproxy|mtproxy-firewall|stats-bridge|fail2ban)$ ]] || die "Неизвестный сервис: $service"
+    docker_compose logs --no-color --tail=100 "$service"
+  else
+    docker_compose --profile caddy --profile nginx --profile mtproxy logs --no-color --tail=100
+  fi
+}
+
+docker_backup_command() {
+  docker_require_project
+  local backup_root="/var/backups/telegram-web-proxy-docker" stamp archive
+  install -d -o root -g root -m 0700 "$backup_root"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  archive="$backup_root/docker-project-$stamp.tar.gz"
+  tar -C "$(dirname "$DOCKER_PROJECT_DIR")" -czpf "$archive" \
+    --exclude="$(basename "$DOCKER_PROJECT_DIR")/.git" \
+    --exclude="$(basename "$DOCKER_PROJECT_DIR")/__pycache__" \
+    "$(basename "$DOCKER_PROJECT_DIR")" || { rm -f "$archive"; die "Не удалось создать резервную копию Docker-проекта."; }
+  tar -tzf "$archive" >/dev/null || { rm -f "$archive"; die "Проверка архива не пройдена."; }
+  chmod 0600 "$archive"
+  ok "Резервная копия файлов создана: $archive"
+  warn "Именованные Docker volumes в этот архив не входят. Для сохранения данных панели/TLS/MTProxy не удаляй тома."
+}
+
+docker_menu() {
+  local choice
+  while true; do
+    ui_header "Docker — установка и обслуживание"
+    ui_option 1 "⇧" "Установить / перенести native → Docker"
+    ui_option 2 "↻" "Обновить и пересобрать контейнеры"
+    ui_option 3 "⌫" "Удалить контейнеры (данные сохранить)"
+    ui_option 4 "✖" "Очистить проект (образы; тома отдельно)"
+    ui_option 5 "▤" "Состояние контейнеров"
+    ui_option 6 "⟳" "Перезапустить сервисы"
+    ui_option 7 "≡" "Последние логи"
+    ui_option 8 "▣" "Резервная копия файлов проекта"
+    ui_option 9 "↩" "Назад"
+    echo
+    read -r -p "Выбор [1-9]: " choice || die "ввод прерван"
+    case "$choice" in
+      1) docker_install_command ;;
+      2) docker_update_command ;;
+      3) docker_uninstall_command ;;
+      4) docker_purge_command ;;
+      5) docker_status_command ;;
+      6) docker_restart_command ;;
+      7) docker_logs_command ;;
+      8) docker_backup_command ;;
+      9|"") return 0 ;;
+      *) warn "Выбери пункт от 1 до 9." ;;
+    esac
+    read -r -p "Enter — назад..." _ || true
+  done
+}
+
+docker_cli() {
+  local action=""
+  if (($#)); then action="$1"; shift; fi
+  case "$action" in
+    install) docker_install_command "$@" ;;
+    update) docker_update_command "$@" ;;
+    uninstall) docker_uninstall_command "$@" ;;
+    purge) docker_purge_command "$@" ;;
+    status|ps) (($# == 0)) || die "docker status"; docker_status_command ;;
+    restart) docker_restart_command "$@" ;;
+    logs) docker_logs_command "$@" ;;
+    backup) (($# == 0)) || die "docker backup"; docker_backup_command ;;
+    ""|menu) (($# == 0)) || die "docker [install|update|uninstall|purge|status|restart|logs|backup]"; docker_menu ;;
+    *) die "Команда docker: install|update|uninstall|purge|status|restart|logs|backup" ;;
+  esac
+}
+
+# ============================================================================
 #  УДАЛЕНИЕ
 # ============================================================================
 
@@ -3490,8 +3736,9 @@ show_menu() {
   ui_option 4 "▤" "Текущая конфигурация"
   ui_option 5 "⚒" "Инструменты"
   ui_option 6 "⏻" "Выход"
+  ui_option 7 "◈" "Docker — установка и обслуживание"
   echo
-  read -r -p "Выбор [1-6]: " choice
+  read -r -p "Выбор [1-7]: " choice
   case "$choice" in
     1) MODE=install ;;
     2) MODE=update ;;
@@ -3499,6 +3746,7 @@ show_menu() {
     4) MODE=config ;;
     5) MODE=tools ;;
     6) exit 0 ;;
+    7) MODE=docker ;;
     *) warn "Неверный выбор." ;;
   esac
 }
@@ -4153,6 +4401,9 @@ main() {
         tools)
           show_tools_menu
           ;;
+        docker)
+          docker_menu
+          ;;
         delete)
           show_deletion_menu
           ;;
@@ -4196,6 +4447,7 @@ main() {
     services)  require_root; [[ "${1:-}" == restart && $# -eq 1 ]] || die "Использование: services restart"; restart_proxy_services ;;
     site)      [[ "${1:-}" == remove ]] || die "Использование: site remove [--yes]"; shift; ASSUME_YES=0; parse_uninstall_args "$@"; remove_decoy_site ;;
     web-server) [[ "${1:-}" == remove ]] || die "Использование: web-server remove [--yes]"; shift; ASSUME_YES=0; parse_uninstall_args "$@"; remove_web_server_interactive ;;
+    docker) docker_cli "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     *) die "Неизвестная команда: $MODE (install|update|uninstall|purge|config|diagnostics|backup|restore|profile|upstream|services|site|web-server)" ;;
   esac
