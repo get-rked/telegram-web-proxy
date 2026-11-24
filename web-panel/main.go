@@ -412,17 +412,17 @@ func (a *App) profileImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, 102<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		errOut(w, http.StatusBadRequest, "Не удалось прочитать архив или превышен лимит 10 МБ")
+		errOut(w, http.StatusBadRequest, "Не удалось прочитать архив или превышен лимит 100 МБ")
 		return
 	}
 	if r.MultipartForm != nil {
 		defer r.MultipartForm.RemoveAll()
 	}
 	file, header, err := r.FormFile("archive")
-	if err != nil || header.Size > 10<<20 {
-		errOut(w, http.StatusBadRequest, "Выберите архив профиля размером до 10 МБ")
+	if err != nil || header.Size > 100<<20 {
+		errOut(w, http.StatusBadRequest, "Выберите архив профиля размером до 100 МБ")
 		return
 	}
 	defer file.Close()
@@ -456,9 +456,9 @@ func (a *App) profileImport(w http.ResponseWriter, r *http.Request) {
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
-	written, copyErr := io.Copy(temp, io.LimitReader(file, (10<<20)+1))
+	written, copyErr := io.Copy(temp, io.LimitReader(file, (100<<20)+1))
 	closeErr := temp.Close()
-	if copyErr != nil || closeErr != nil || written > 10<<20 {
+	if copyErr != nil || closeErr != nil || written > 100<<20 {
 		errOut(w, http.StatusBadRequest, "Не удалось сохранить архив или превышен лимит 10 МБ")
 		return
 	}
