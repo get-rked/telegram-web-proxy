@@ -260,10 +260,22 @@ func (a *application) restoreBackup(id string) error {
 		if err != nil {
 			return errors.New("MTProxy secret file is unavailable")
 		}
-		liveSecret := strings.TrimSpace(string(secretBytes))
+		liveSecrets := strings.Fields(string(secretBytes))
 		defaultIndex := findProfile(doc.Profiles, "default")
-		if defaultIndex < 0 || !strings.EqualFold(liveSecret, doc.Profiles[defaultIndex].Secret) {
-			return errors.New("backup default profile secret does not match the active MTProxy secret")
+		if defaultIndex < 0 {
+			return errors.New("backup default profile is missing")
+		}
+		expected := strings.TrimPrefix(strings.ToLower(doc.Profiles[defaultIndex].Secret), "dd")
+		matched := false
+		for _, value := range liveSecrets {
+			value = strings.TrimPrefix(strings.ToLower(value), "dd")
+			if value == expected {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return errors.New("backup default profile secret does not match the active MTProxy secret list")
 		}
 	}
 
