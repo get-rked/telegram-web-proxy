@@ -75,7 +75,6 @@ start_proxy() {
         -p 8888 \
         -H 2398 \
         "$@" \
-        ${NAT_INFO:+--nat-info "$NAT_INFO"} \
         --aes-pwd "$DATA_DIR/proxy-secret" "$DATA_DIR/proxy-multi.conf" \
         -M "${MTPROXY_WORKERS:-1}" &
     child=$!
