@@ -2624,7 +2624,7 @@ docker_prompt_secret() {
 
 docker_repair_bind_mount_permissions() {
   local dir file
-  for dir in docker/config docker/mtproxy docker/profiles docker/private; do
+  for dir in docker/config docker/mtproxy docker/profiles docker/private docker/panel-data docker/mtproxy-data; do
     [[ -d "$DOCKER_PROJECT_DIR/$dir" ]] || continue
     chown 10001:10001 "$DOCKER_PROJECT_DIR/$dir" || die "Не удалось назначить владельца 10001:10001 для $dir."
     chmod 0750 "$DOCKER_PROJECT_DIR/$dir" || die "Не удалось установить права 0750 для $dir."
