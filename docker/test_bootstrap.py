@@ -69,8 +69,8 @@ class BootstrapTests(unittest.TestCase):
         route = (self.panel_route_dir / "panel-route.caddy").read_text()
         self.assertIn("handle_path " + auth["base_path"] + "/*", route)
         self.assertTrue(route.endswith("\n"), "Caddy route must contain real line endings")
-        self.assertTrue(nginx_route.endswith("\n"), "Nginx route must contain real line endings")
         nginx_route = (self.panel_route_dir / "panel-route.nginx.conf").read_text()
+        self.assertTrue(nginx_route.endswith("\n"), "Nginx route must contain real line endings")
         self.assertIn("location ^~ " + auth["base_path"] + "/", nginx_route)
 
     def test_second_run_preserves_secrets_and_token_key(self):
