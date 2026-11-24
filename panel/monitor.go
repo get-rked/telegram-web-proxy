@@ -15,6 +15,7 @@ import (
 )
 
 type systemMetrics struct {
+	CPUPercent float64 `json:"cpu_percent"`
 	MemTotal uint64 `json:"memory_total_bytes"`
 	MemAvailable uint64 `json:"memory_available_bytes"`
 	MemUsedPct float64 `json:"memory_used_percent"`
@@ -61,7 +62,7 @@ func (a *application) metrics(w http.ResponseWriter,r *http.Request){
 	jsonResponse(w,out)
 }
 func readSystemMetrics()systemMetrics{
-	m:=systemMetrics{PanelGoroutines:runtime.NumGoroutine()}
+	m:=systemMetrics{PanelGoroutines:runtime.NumGoroutine(),CPUPercent:readCPUPercent()}
 	if f,err:=os.Open("/proc/meminfo");err==nil{
 		sc:=bufio.NewScanner(f);vals:=map[string]uint64{}
 		for sc.Scan(){fields:=strings.Fields(sc.Text());if len(fields)>1{if v,e:=strconv.ParseUint(fields[1],10,64);e==nil{vals[strings.TrimSuffix(fields[0],":")]=v*1024}}};_ = f.Close()
@@ -69,6 +70,10 @@ func readSystemMetrics()systemMetrics{
 	}
 	var fs syscall.Statfs_t;if err:=syscall.Statfs("/",&fs);err==nil{m.DiskTotal=fs.Blocks*uint64(fs.Bsize);m.DiskUsed=(fs.Blocks-fs.Bfree)*uint64(fs.Bsize);if m.DiskTotal>0{m.DiskUsedPct=float64(m.DiskUsed)/float64(m.DiskTotal)*100}}
 	return m
+}
+func readCPUPercent()float64{
+	read:=func()(uint64,uint64){f,err:=os.Open("/proc/stat");if err!=nil{return 0,0};defer f.Close();sc:=bufio.NewScanner(f);if !sc.Scan(){return 0,0};fields:=strings.Fields(sc.Text());if len(fields)<5{return 0,0};var total,idle uint64;for i,v:=range fields[1:]{n,e:=strconv.ParseUint(v,10,64);if e!=nil{continue};total+=n;if i==3||i==4{idle+=n}};return total,idle}
+	firstTotal,firstIdle:=read();time.Sleep(120*time.Millisecond);secondTotal,secondIdle:=read();if secondTotal<=firstTotal{return 0};delta:=secondTotal-firstTotal;idle:=secondIdle-firstIdle;if delta==0{return 0};return float64(delta-idle)/float64(delta)*100
 }
 func parsePrometheus(body string)map[string]float64{
 	out:=map[string]float64{};sc:=bufio.NewScanner(strings.NewReader(body))
