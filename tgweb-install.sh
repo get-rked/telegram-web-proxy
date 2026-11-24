@@ -33,8 +33,12 @@ tproxy_bootstrap_repository() {
       echo "Не удалось получить обновления из $TPROXY_DEPLOY_BRANCH; локальная версия не изменена." >&2
       exit 1
     fi
-    if ! git -C "$TPROXY_DEPLOY_DIR" checkout -B "$TPROXY_DEPLOY_BRANCH" FETCH_HEAD; then
-      echo "Не удалось переключить проект на актуальную версию; установка остановлена." >&2
+    # Обновляем checkout принудительно: curl может перезаписать tracked-файл
+    # прямо внутри репозитория, и обычный checkout тогда блокирует обновление.
+    # Принудительно заменяем только отслеживаемые Git файлы; untracked-файлы
+    # и пользовательские данные не удаляем.
+    if ! git -C "$TPROXY_DEPLOY_DIR" checkout --force -B "$TPROXY_DEPLOY_BRANCH" FETCH_HEAD; then
+      echo "Не удалось загрузить актуальную версию $TPROXY_DEPLOY_BRANCH." >&2
       exit 1
     fi
     printf 'Актуальная версия ветки %s загружена: %s\n' "$TPROXY_DEPLOY_BRANCH" "$(git -C "$TPROXY_DEPLOY_DIR" rev-parse --short HEAD)"
