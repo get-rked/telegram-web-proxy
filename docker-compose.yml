@@ -220,7 +220,6 @@ services:
       PANEL_TRUST_PROXY: "true"
       PANEL_BANLIST_DIR: /opt/telegram-web-proxy/docker/security/logs/banlist
     depends_on:
-      bootstrap: {condition: service_completed_successfully}
       panel-volume-init: {condition: service_completed_successfully}
     volumes:
       - ./docker/panel-data:/opt/telegram-web-proxy/docker/panel-data
