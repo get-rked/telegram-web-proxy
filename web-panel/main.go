@@ -426,6 +426,7 @@ func (a *App) profiles(w http.ResponseWriter, r *http.Request) {
 			items = append(items, details)
 		}
 		sort.Slice(items, func(i, j int) bool {
+			if i == j { return false }
 			if items[i]["name"] == "default" { return true }
 			if items[j]["name"] == "default" { return false }
 			return items[i]["name"] < items[j]["name"]
