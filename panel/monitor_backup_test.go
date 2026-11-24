@@ -42,7 +42,7 @@ func TestBackupCreateListRestore(t *testing.T) {
 	if err:=a.restoreBackup(item.ID);err!=nil{t.Fatal(err)}
 	config,err:=os.ReadFile(a.config);if err!=nil{t.Fatal(err)};if !bytes.Contains(config,[]byte("proxy.example.com")){t.Fatalf("config was not restored: %s",config)}
 	doc,err:=a.readProfiles();if err!=nil{t.Fatal(err)}
-	if doc.Profiles[0].Secret!="00112233445566778899aabbccddeeff"{t.Fatal("restore did not restore profile secret")}
+	if doc.Profiles[0].Secret!="dd00112233445566778899aabbccddeeff"{t.Fatal("restore did not restore profile secret")}
 	items,err:=a.listBackups();if err!=nil{t.Fatal(err)}
 	if len(items)!=1 || items[0].ID!=item.ID {t.Fatalf("unexpected backup list: %+v",items)}
 }

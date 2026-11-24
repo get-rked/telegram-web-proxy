@@ -151,7 +151,7 @@ func TestProfileQRReturnsPNG(t *testing.T) {
 	response := httptest.NewRecorder()
 	a.profileQR(response, authRequest(http.MethodGet, "/api/profiles/default/qr", "", false), "default")
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
-	if response.Header().Get("Content-Type") != "image/png" || !strings.HasPrefix(string(response.Body.Bytes()), "\\x89PNG") { t.Fatal("QR response is not a PNG image") }
+	if response.Header().Get("Content-Type") != "image/png" || len(response.Body.Bytes()) < 4 || !bytes.Equal(response.Body.Bytes()[:4], []byte{0x89, 'P', 'N', 'G'}) { t.Fatal("QR response is not a PNG image") }
 }
 
 func TestMutationRequiresSameOriginAndCustomHeader(t *testing.T) {
