@@ -91,7 +91,12 @@ tproxy_bootstrap_repository() {
     local native_item
     for native_item in bin config data src systemd qr backups; do
       if [[ -e "$stage/$native_item" && ! -e "$TPROXY_DEPLOY_DIR/$native_item" ]]; then
-        cp -a "$stage/$native_item" "$TPROXY_DEPLOY_DIR/$native_item"
+        if ! cp -a "$stage/$native_item" "$TPROXY_DEPLOY_DIR/$native_item"; then
+          rm -rf -- "$TPROXY_DEPLOY_DIR"
+          [[ -e "$old_tree" ]] && mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
+          echo "Не удалось вернуть native-файлы в прежние пути; восстановлен старый каталог." >&2
+          exit 1
+        fi
       fi
     done
   fi
