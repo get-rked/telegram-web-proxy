@@ -279,8 +279,12 @@ def main():
     for path in (config_path, token_path, profiles_path, panel_auth_path, panel_route_path, panel_nginx_route_path):
         os.chown(path, UID, GID)
     os.chown(secret_path, UID, GID)
-    os.chown(PROFILES_DIR, UID, GID)
-    os.chmod(PROFILES_DIR, 0o750)
+    # Bind-mounted host directories must be traversable by non-root relay/panel.
+    # Repair restrictive permissions on every bootstrap, including upgrades.
+    for directory in (CONFIG_DIR, MTPROXY_DIR, PROFILES_DIR, PANEL_AUTH_DIR):
+        os.chown(directory, UID, GID)
+        os.chmod(directory, 0o750)
+    os.chmod(config_path, 0o640)
     os.chmod(profiles_path, 0o600)
     os.chmod(token_path, 0o600)
     os.chmod(panel_auth_path, 0o600)
