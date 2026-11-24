@@ -154,6 +154,8 @@ def main():
     for path in (config_path, token_path, profiles_path):
         os.chown(path, UID, GID)
     os.chown(secret_path, UID, GID)
+    os.chown(PROFILES_DIR, UID, GID)
+    os.chmod(PROFILES_DIR, 0o750)
     os.chmod(token_path, 0o600)
     os.chmod(secret_path, 0o600)
     print("bootstrap: configuration validated; existing secrets preserved; initialization complete")
