@@ -182,9 +182,10 @@ def main():
         except ipaddress.AddressValueError:
             raise MigrationError('MTPROXY_NAT_ARGS содержит некорректные IPv4-адреса.')
     generated_panel_password = len(env.get('PANEL_PASSWORD', '')) < 16
-    env.update(DOMAIN=domain, ACME_EMAIL=email, PANEL_USER=env.get('PANEL_USER','admin'), PANEL_PASSWORD=env.get('PANEL_PASSWORD') if len(env.get('PANEL_PASSWORD', '')) >= 16 else secrets.token_urlsafe(24), MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'))
+    env.update(DOMAIN=domain, ACME_EMAIL=email, PANEL_USER=env.get('PANEL_USER','admin'), PANEL_PASSWORD=env.get('PANEL_PASSWORD') if len(env.get('PANEL_PASSWORD', '')) >= 16 else secrets.token_urlsafe(24), MTPROXY_WORKERS=mt_env.get('MTPROXY_WORKERS','1'), MTPROXY_MAX_CONNECTIONS=mt_env.get('MTPROXY_MAX_CONNECTIONS','4096'))
     if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_WORKERS']): env['MTPROXY_WORKERS']='1'
-    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_NAT_INFO': nat_info}
+    if not re.fullmatch(r'[1-9][0-9]*', env['MTPROXY_MAX_CONNECTIONS']):\n        raise MigrationError('MTPROXY_MAX_CONNECTIONS в mtproxy.env должен быть положительным целым числом.')
+    env_updates = {'DOMAIN': domain, 'ACME_EMAIL': email, 'PANEL_USER': env['PANEL_USER'], 'PANEL_PASSWORD': env['PANEL_PASSWORD'], 'MTPROXY_WORKERS': env['MTPROXY_WORKERS'], 'MTPROXY_MAX_CONNECTIONS': env['MTPROXY_MAX_CONNECTIONS'], 'MTPROXY_NAT_INFO': nat_info}
     env_text = update_env_text(env_path, env_updates).decode()
     outputs = [
         (repo/'docker/config/config.json', (json.dumps(config, indent=2)+'\n').encode(), 0o600),
