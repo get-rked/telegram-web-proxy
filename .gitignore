@@ -13,3 +13,9 @@
 # Preserve migration snapshots outside Git and Docker build context
 docker/site.before-migration*/
 docker/site.failed-migration*/
+
+# Runtime-generated panel access secrets and private routes
+/docker/private/panel-auth.json
+/docker/private-credentials/panel-credentials.txt
+/docker/generated/panel-route.caddy
+/docker/generated/panel-route.nginx.conf
