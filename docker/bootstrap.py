@@ -213,9 +213,11 @@ def main():
     else:
         atomic_write(token_path, secrets.token_bytes(32), 0o600)
 
-    # Generate the private panel URL and credentials exactly once.
+    # Preserve panel credentials during routine bootstrap/update. A deliberate
+    # fresh installation sets PANEL_RESET_CREDENTIALS=1 to rotate them.
+    reset_panel_credentials = os.environ.get("PANEL_RESET_CREDENTIALS") == "1"
     credentials_created = False
-    if panel_auth_path.exists():
+    if panel_auth_path.exists() and not reset_panel_credentials:
         auth = load_json(panel_auth_path)
         if not isinstance(auth, dict) or not isinstance(auth.get("base_path"), str) or not isinstance(auth.get("username"), str) or not isinstance(auth.get("password_salt"), str) or not isinstance(auth.get("password_hash"), str):
             fail("panel-auth.json is invalid; refusing to replace panel credentials")
