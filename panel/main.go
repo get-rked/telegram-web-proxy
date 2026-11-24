@@ -166,6 +166,7 @@ func (a *application) auth(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
+		a.clearAuthFailures(ip)
 		next(w, r)
 	}
 }
@@ -176,10 +177,21 @@ func (a *application) authIsBlocked(ip string) bool {
 	return time.Now().Before(state.BlockedUntil)
 }
 
+func (a *application) clearAuthFailures(ip string) {
+	a.authMu.Lock(); defer a.authMu.Unlock()
+	delete(a.authFailures, ip)
+}
+
 func (a *application) recordAuthFailure(ip string) {
 	a.authMu.Lock(); defer a.authMu.Unlock()
 	if a.authFailures == nil { a.authFailures = make(map[string]authFailure) }
 	now := time.Now()
+	if len(a.authFailures) >= 10000 {
+		for key, item := range a.authFailures {
+			if now.Sub(item.WindowStart) > 10*time.Minute || (!item.BlockedUntil.IsZero() && now.After(item.BlockedUntil)) { delete(a.authFailures, key) }
+		}
+		if len(a.authFailures) >= 10000 { return }
+	}
 	state := a.authFailures[ip]
 	if state.WindowStart.IsZero() || now.Sub(state.WindowStart) > 10*time.Minute { state = authFailure{WindowStart: now} }
 	state.Count++
