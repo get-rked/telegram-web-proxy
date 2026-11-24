@@ -37,7 +37,7 @@ class BootstrapTests(unittest.TestCase):
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "RELAY_PORT", 18080),
             patch.object(bootstrap, "ADMIN_PORT", 18081),
-            patch.dict(os.environ, {"PANEL_PRINT_CREDENTIALS": "0"}),
+            patch.dict(os.environ, {"PANEL_PRINT_CREDENTIALS": "0", "PANEL_RESET_CREDENTIALS": "0"}),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
         ]
@@ -102,6 +102,27 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.config_dir / "token.key").read_bytes(), token_before)
         self.assertEqual((self.panel_auth_dir / "panel-auth.json").read_bytes(), panel_auth_before)
         self.assertEqual((self.panel_credentials_dir / "panel-credentials.txt").read_bytes(), panel_credentials_before)
+
+    def test_explicit_fresh_install_rotates_panel_credentials(self):
+        bootstrap.main()
+        auth_path = self.panel_auth_dir / "panel-auth.json"
+        credentials_path = self.panel_credentials_dir / "panel-credentials.txt"
+        auth_before = json.loads(auth_path.read_text())
+        credentials_before = credentials_path.read_text()
+
+        with patch.dict(os.environ, {"PANEL_RESET_CREDENTIALS": "1"}):
+            bootstrap.main()
+
+        auth_after = json.loads(auth_path.read_text())
+        credentials_after = credentials_path.read_text()
+        self.assertNotEqual(auth_after["base_path"], auth_before["base_path"])
+        self.assertNotEqual(auth_after["username"], auth_before["username"])
+        self.assertNotEqual(auth_after["password_hash"], auth_before["password_hash"])
+        self.assertNotEqual(credentials_after, credentials_before)
+        self.assertIn(auth_after["base_path"], credentials_after)
+        self.assertIn(auth_after["username"], credentials_after)
+        self.assertEqual(auth_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(credentials_path.stat().st_mode & 0o777, 0o600)
 
     def test_mismatched_existing_secrets_fail_closed(self):
         (self.profiles_dir / "profiles.json").write_text(json.dumps({"profiles": [{
