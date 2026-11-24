@@ -2913,8 +2913,18 @@ PY
   docker_prepare_public_site_permissions
   info "Исправляю права доступа к конфигурациям Docker..."
   docker_repair_bind_mount_permissions
-  info "Запускаю Telegram Web Proxy..."
-  docker_compose --profile "$proxy" --profile webproxy up -d || die "Не удалось запустить Docker-проект."
+  info "Проверяю, что Compose видит все обязательные сервисы..."
+  local -a required_services=(relay stats-bridge panel fail2ban mtproxy-firewall mtproxy "$proxy")
+  local configured_services service
+  configured_services="$(docker_compose --profile "$proxy" --profile webproxy config --services)" ||
+    die "Не удалось получить список сервисов из docker-compose.yml."
+  for service in "${required_services[@]}"; do
+    grep -Fqx -- "$service" <<< "$configured_services" ||
+      die "В итоговой Compose-конфигурации отсутствует сервис $service. Проверь используемый docker-compose.yml."
+  done
+  info "Запускаю Telegram Web Proxy (явно перечисляю обязательные сервисы)..."
+  docker_compose --profile "$proxy" --profile webproxy up -d "${required_services[@]}" ||
+    die "Не удалось запустить обязательные Docker-сервисы."
   docker_write_state "$proxy"
   docker_wait_ready "$proxy"
   iptables -S DOCKER-USER >/dev/null 2>&1 ||
