@@ -117,9 +117,17 @@ if ! start_proxy "$@"; then
 fi
 
 config_mtime=$(stat -c %Y "$DATA_DIR/proxy-multi.conf")
+secret_hash=$(sha256sum "$SECRET_FILE" | awk '{print $1}')
 next_refresh=$(($config_mtime + REFRESH_INTERVAL))
 while kill -0 "$child" 2>/dev/null; do
     sleep 30
+    current_secret_hash=$(sha256sum "$SECRET_FILE" | awk '{print $1}')
+    if [ "$current_secret_hash" != "$secret_hash" ]; then
+        echo "mtproxy: profile secret list changed; restarting with synchronized secrets"
+        stop_proxy
+        exec "$0"
+    fi
+
     now=$(date +%s)
     if [ "$now" -lt "$next_refresh" ]; then
         continue
