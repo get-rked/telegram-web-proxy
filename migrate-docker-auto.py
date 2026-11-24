@@ -38,6 +38,18 @@ def active(unit):
     return cmd(["systemctl", "is-active", "--quiet", unit], False)[1] == 0
 
 
+def running_project_containers():
+    """Inspect Docker labels directly; Compose config may require the not-yet-created .env."""
+    output, rc = cmd([
+        "docker", "ps",
+        "--filter", "label=com.docker.compose.project=telegram-web-proxy",
+        "--format", "{{.Names}}",
+    ], False)
+    if rc:
+        raise MigrationAbort("Не удалось проверить работающие контейнеры Docker: " + output)
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
 def listeners(port):
     out, rc = cmd(["ss", "-H", "-ltnp"], False)
     if rc:
@@ -121,9 +133,9 @@ def main():
     security, info_rc = cmd(["docker", "info", "--format", "{{json .SecurityOptions}}"], False)
     if info_rc:
         raise MigrationAbort("Docker daemon не запущен или недоступен текущему пользователю.")
-    existing, _ = cmd(["docker", "compose", "ps", "--services", "--status", "running"], False)
-    if existing.strip():
-        raise MigrationAbort("В этом Docker-проекте уже работают контейнеры: " + existing.replace("\\n", ", ") +
+    existing = running_project_containers()
+    if existing:
+        raise MigrationAbort("В этом Docker-проекте уже работают контейнеры: " + ", ".join(existing) +
                              ". Сначала разберись с существующим запуском; автоматическая миграция остановлена.")
     if "rootless" in security.lower():
         raise MigrationAbort("Rootless Docker несовместим с текущей схемой Fail2ban/DOCKER-USER.")
