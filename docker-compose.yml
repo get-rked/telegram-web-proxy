@@ -8,21 +8,21 @@ services:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       RELAY_PORT: ${RELAY_PORT:-8080}
       ADMIN_PORT: ${ADMIN_PORT:-8081}
-      TPROXY_CONFIG_DIR: /config
-      MTPROXY_DIR: /mtproxy
-      PROFILES_DIR: /profiles
-      PANEL_AUTH_DIR: /panel-auth
-      PANEL_CREDENTIALS_DIR: /panel-credentials
-      PANEL_ROUTE_DIR: /panel-route
+      TPROXY_CONFIG_DIR: /opt/telegram-web-proxy/docker/config
+      MTPROXY_DIR: /opt/telegram-web-proxy/docker/mtproxy
+      PROFILES_DIR: /opt/telegram-web-proxy/docker/profiles
+      PANEL_AUTH_DIR: /opt/telegram-web-proxy/docker/private
+      PANEL_CREDENTIALS_DIR: /opt/telegram-web-proxy/docker/private-credentials
+      PANEL_ROUTE_DIR: /opt/telegram-web-proxy/docker/generated
       TPROXY_UID: "10001"
       TPROXY_GID: "10001"
     volumes:
-      - ./docker/config:/config
-      - ./docker/mtproxy:/mtproxy
-      - ./docker/profiles:/profiles
-      - ./docker/private:/panel-auth
-      - ./docker/private-credentials:/panel-credentials
-      - ./docker/generated:/panel-route
+      - ./docker/config:/opt/telegram-web-proxy/docker/config
+      - ./docker/mtproxy:/opt/telegram-web-proxy/docker/mtproxy
+      - ./docker/profiles:/opt/telegram-web-proxy/docker/profiles
+      - ./docker/private:/opt/telegram-web-proxy/docker/private
+      - ./docker/private-credentials:/opt/telegram-web-proxy/docker/private-credentials
+      - ./docker/generated:/opt/telegram-web-proxy/docker/generated
     restart: "no"
   relay:
     depends_on:
@@ -111,14 +111,14 @@ services:
       mtproxy-volume-init: {condition: service_completed_successfully}
     environment:
       MTPROXY_SECRET_FILE: /opt/telegram-web-proxy/docker/mtproxy/secret
-      MTPROXY_DATA_DIR: /var/lib/mtproxy
+      MTPROXY_DATA_DIR: /opt/telegram-web-proxy/docker/mtproxy-data
       MTPROXY_WORKERS: ${MTPROXY_WORKERS:-1}
       MTPROXY_MAX_CONNECTIONS: ${MTPROXY_MAX_CONNECTIONS:-4096}
       MTPROXY_REFRESH_INTERVAL: ${MTPROXY_REFRESH_INTERVAL:-86400}
       MTPROXY_NAT_INFO: ${MTPROXY_NAT_INFO:-}
     volumes:
       - ./docker/mtproxy:/opt/telegram-web-proxy/docker/mtproxy:ro
-      - mtproxy-data:/var/lib/mtproxy
+      - ./docker/mtproxy-data:/opt/telegram-web-proxy/docker/mtproxy-data
       - type: tmpfs
         target: /tmp
         tmpfs:
@@ -144,7 +144,7 @@ services:
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./docker/generated:/etc/caddy/generated:ro
-      - ./docker/security/logs:/opt/telegram-web-proxy/docker/security/logs:rw
+      - ./docker/security/logs:/var/log/tproxy-panel:rw
       - caddy-data:/data
       - caddy-config:/config
     environment:
@@ -166,7 +166,7 @@ services:
     volumes:
       - ./docker/nginx/default.conf:/etc/nginx/templates/default.conf.template:ro
       - ./docker/generated:/etc/nginx/generated:ro
-      - ./docker/security/logs:/opt/telegram-web-proxy/docker/security/logs:rw
+      - ./docker/security/logs:/var/log/tproxy-panel:rw
       - ./docker/nginx/certs:/etc/nginx/certs:ro
     healthcheck:
       test: ["CMD", "nginx", "-t"]
@@ -178,7 +178,7 @@ services:
     image: busybox:1.37.0
     user: "0:0"
     volumes:
-      - panel-data:/data
+      - ./docker/panel-data:/opt/telegram-web-proxy/docker/panel-data
       - ./docker/security/logs:/security-logs
     command: ["sh", "-c", "mkdir -p /security-logs/banlist && touch /security-logs/auth.log /security-logs/access.log && chown -R 10001:10001 /data /security-logs && chmod 0770 /security-logs && chmod 0750 /security-logs/banlist && chmod 0600 /security-logs/auth.log && chmod 0660 /security-logs/access.log"]
     restart: "no"
@@ -198,7 +198,7 @@ services:
       - ./docker/security/fail2ban/filter.d/tproxy-caddy-probes.conf:/etc/fail2ban/filter.d/tproxy-caddy-probes.conf:ro
       - ./docker/security/fail2ban/filter.d/tproxy-nginx-probes.conf:/etc/fail2ban/filter.d/tproxy-nginx-probes.conf:ro
       - ./docker/security/fail2ban/action.d/docker-user.conf:/etc/fail2ban/action.d/docker-user.conf:ro
-      - ./docker/security/logs:/opt/telegram-web-proxy/docker/security/logs:rw
+      - ./docker/security/logs:/var/log/tproxy-panel:rw
       - fail2ban-data:/data
     depends_on:
       panel: {condition: service_started}
@@ -227,7 +227,7 @@ services:
       - ./docker/private:/opt/telegram-web-proxy/docker/private:ro
       - ./docker/profiles:/opt/telegram-web-proxy/docker/profiles:rw
       - ./docker/mtproxy:/opt/telegram-web-proxy/docker/mtproxy:rw
-      - ./docker/security/logs:/opt/telegram-web-proxy/docker/security/logs:rw
+      - ./docker/security/logs:/var/log/tproxy-panel:rw
       - type: tmpfs
         target: /tmp
         tmpfs:
