@@ -3,6 +3,9 @@ WORKDIR /src
 COPY panel/go.mod ./
 RUN go mod download
 COPY panel/ ./
+# Resolve and record package-level checksums inside the build context.
+# This keeps the image build self-contained even when go.sum is absent.
+RUN go mod tidy
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/panel .
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/panel /panel
