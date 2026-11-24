@@ -46,25 +46,12 @@ services:
       - /run:rw,noexec,nosuid,size=8m
   mtproxy-firewall:
     profiles: ["mtproxy"]
-    image: alpine:3.22
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.firewall
     network_mode: service:relay
     depends_on:
       relay: {condition: service_healthy}
-    command:
-      - /bin/sh
-      - -ec
-      - |
-        apk add --no-cache nftables >/dev/null
-        nft delete table inet mtproxy_guard 2>/dev/null || true
-        nft -f - <<'NFT'
-        table inet mtproxy_guard {
-          chain input {
-            type filter hook input priority -100; policy accept;
-            iifname != "lo" tcp dport { 2398, 8888 } drop
-          }
-        }
-        NFT
-        exec sleep infinity
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]
     healthcheck:
