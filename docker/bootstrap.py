@@ -15,6 +15,7 @@ MTPROXY_DIR = Path(os.environ.get("MTPROXY_DIR", "/mtproxy"))
 PROFILES_DIR = Path(os.environ.get("PROFILES_DIR", "/profiles"))
 PANEL_AUTH_DIR = Path(os.environ.get("PANEL_AUTH_DIR", "/panel-auth"))
 PANEL_CREDENTIALS_DIR = Path(os.environ.get("PANEL_CREDENTIALS_DIR", "/panel-credentials"))
+PANEL_ROUTE_DIR = Path(os.environ.get("PANEL_ROUTE_DIR", "/panel-route"))
 DOMAIN = os.environ.get("DOMAIN", "").strip().lower()
 UID = int(os.environ.get("TPROXY_UID", "10001"))
 GID = int(os.environ.get("TPROXY_GID", "10001"))
@@ -104,13 +105,15 @@ def main():
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     PANEL_AUTH_DIR.mkdir(parents=True, exist_ok=True)
     PANEL_CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
+    PANEL_ROUTE_DIR.mkdir(parents=True, exist_ok=True)
     config_path = CONFIG_DIR / "config.json"
     profiles_path = PROFILES_DIR / "profiles.json"
     token_path = CONFIG_DIR / "token.key"
     secret_path = MTPROXY_DIR / "secret"
     panel_auth_path = PANEL_AUTH_DIR / "panel-auth.json"
     panel_credentials_path = PANEL_CREDENTIALS_DIR / "panel-credentials.txt"
-    panel_route_path = CONFIG_DIR / "panel-route.caddy"
+    panel_route_path = PANEL_ROUTE_DIR / "panel-route.caddy"
+    panel_nginx_route_path = PANEL_ROUTE_DIR / "panel-route.nginx.conf"
 
     # Validate and preserve an existing profile file; otherwise create one.
     if profiles_path.exists():
@@ -218,20 +221,37 @@ def main():
 
     # Caddy imports this generated route. The secret path is never placed in a public URL or log.
     route = (
-        f"@panel_access path {base_path} {base_path}/*\n"
-        "log_skip @panel_access\n"
-        f"@panel_root_no_slash path {base_path}\n"
-        f"redir @panel_root_no_slash {base_path}/ 308\n"
-        f"handle_path {base_path}/* {{\n"
-        "    reverse_proxy panel:8088 {\n"
-        "        header_up X-Real-IP {client_ip}\n"
-        "    }\n"
-        "}\n"
+        f"@panel_access path {base_path} {base_path}/*\\n"
+        "log_skip @panel_access\\n"
+        f"@panel_root_no_slash path {base_path}\\n"
+        f"redir @panel_root_no_slash {base_path}/ 308\\n"
+        f"handle_path {base_path}/* {{\\n"
+        "    reverse_proxy panel:8088 {\\n"
+        "        header_up X-Real-IP {client_ip}\\n"
+        "    }\\n"
+        "}\\n"
     )
     if not panel_route_path.exists() or panel_route_path.read_text(encoding="utf-8") != route:
         atomic_write(panel_route_path, route.encode("utf-8"), 0o640)
 
-    for path in (config_path, token_path, profiles_path, panel_auth_path, panel_route_path):
+    nginx_route = (
+        f"location = {base_path} {{ return 308 {base_path}/; }}\\n"
+        f"location ^~ {base_path}/ {{\\n"
+        "    limit_req zone=panel_requests burst=20 nodelay;\\n"
+        "    proxy_pass http://$panel_upstream/;\\n"
+        "    proxy_http_version 1.1;\\n"
+        "    proxy_set_header Host $host;\\n"
+        "    proxy_set_header X-Real-IP $remote_addr;\\n"
+        "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\\n"
+        "    proxy_set_header X-Forwarded-Proto https;\\n"
+        "    proxy_set_header Upgrade $http_upgrade;\\n"
+        "    proxy_set_header Connection $connection_upgrade;\\n"
+        "}\\n"
+    )
+    if not panel_nginx_route_path.exists() or panel_nginx_route_path.read_text(encoding="utf-8") != nginx_route:
+        atomic_write(panel_nginx_route_path, nginx_route.encode("utf-8"), 0o640)
+
+    for path in (config_path, token_path, profiles_path, panel_auth_path, panel_route_path, panel_nginx_route_path):
         os.chown(path, UID, GID)
     os.chown(secret_path, UID, GID)
     os.chown(PROFILES_DIR, UID, GID)
@@ -240,6 +260,7 @@ def main():
     os.chmod(token_path, 0o600)
     os.chmod(panel_auth_path, 0o600)
     os.chmod(panel_route_path, 0o640)
+    os.chmod(panel_nginx_route_path, 0o640)
     os.chmod(panel_credentials_path, 0o600)
     os.chmod(secret_path, 0o600)
     print("bootstrap: configuration validated; existing secrets preserved; initialization complete")
