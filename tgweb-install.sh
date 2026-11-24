@@ -46,7 +46,11 @@ tproxy_bootstrap_repository() {
         echo "Не удалось загрузить актуальный архив проекта; существующая установка не изменена." >&2
         exit 1
       fi
-      command -v rsync >/dev/null 2>&1 || apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y rsync
+      if ! command -v rsync >/dev/null 2>&1; then
+        echo "Устанавливаю отсутствующую зависимость rsync..."
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y rsync
+      fi
       if ! rsync -a \
         --exclude='/.git/***' --exclude='/.env' --exclude='/docker-compose.override.yml' \
         --exclude='/docker/config/***' --exclude='/docker/mtproxy/***' \
