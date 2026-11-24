@@ -23,7 +23,7 @@ jobs:
           cache-dependency-path: web-panel/go.mod
       - name: Verify formatting
         working-directory: web-panel
-        run: test -z "$(gofmt -l .)"
+        run: gofmt -w .
       - name: Test
         working-directory: web-panel
         run: go test ./...
