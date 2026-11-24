@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"context"
 	"fmt"
 	"io"
@@ -42,6 +43,24 @@ func (a *application) diagnostics(w http.ResponseWriter,r *http.Request){
 	if r.Method!=http.MethodGet{http.Error(w,"method not allowed",405);return}
 	ctx,cancel:=context.WithTimeout(r.Context(),5*time.Second);defer cancel()
 	result:=diagnosticsResponse{CheckedAt:time.Now().UTC()}
+	// Verify the public HTTPS edge (DNS, TCP, TLS certificate and HTTP response).
+	// This is a transport-edge check, not a substitute for a real Telegram client handshake.
+	var public struct { PublicHostname string `json:"public_hostname"` }
+	configData, configErr := os.ReadFile(a.config)
+	transportCheck := diagnosticCheck{Name:"webproxy_https",Status:"error"}
+	if configErr == nil && json.Unmarshal(configData,&public)==nil && strings.TrimSpace(public.PublicHostname)!="" {
+		req, reqErr := http.NewRequestWithContext(ctx,http.MethodGet,"https://"+public.PublicHostname+"/",nil)
+		if reqErr == nil {
+			started:=time.Now()
+			resp, requestErr:=a.monitorClient.Do(req)
+			transportCheck.Latency=time.Since(started).Milliseconds()
+			if requestErr == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode < 500 { transportCheck.Status="ok"; transportCheck.Detail=fmt.Sprintf("HTTPS/TLS доступен, HTTP %d",resp.StatusCode) } else { transportCheck.Detail=fmt.Sprintf("публичный HTTPS вернул HTTP %d",resp.StatusCode) }
+			} else { transportCheck.Detail="публичный HTTPS/TLS недоступен" }
+		} else { transportCheck.Detail="не удалось сформировать HTTPS-проверку" }
+	} else { transportCheck.Detail="не задан public_hostname" }
+	result.Checks=append(result.Checks,transportCheck)
 	for _,ep:=range []struct{name,path,expected string}{{"relay_health","/healthz","ok"},{"relay_ready","/readyz","ready"}}{
 		status,body,latency,err:=a.relayRequest(ctx,ep.path);check:=diagnosticCheck{Name:ep.name,Status:"error",Latency:latency.Milliseconds()}
 		if err!=nil{check.Detail="relay недоступен"}else if status==200&&strings.TrimSpace(body)==ep.expected{check.Status="ok";check.Detail="доступен"}else{check.Detail=fmt.Sprintf("HTTP %d",status)}
