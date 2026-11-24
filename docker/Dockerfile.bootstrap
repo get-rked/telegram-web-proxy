@@ -1,0 +1,4 @@
+FROM python:3.13-slim
+COPY docker/bootstrap.py /usr/local/bin/tproxy-bootstrap
+RUN chmod 0755 /usr/local/bin/tproxy-bootstrap
+ENTRYPOINT ["/usr/local/bin/tproxy-bootstrap"]
