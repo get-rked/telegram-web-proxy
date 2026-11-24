@@ -247,7 +247,9 @@ prompt_value() {
   while :; do
     read -r -p "$label: " input || die "ввод прерван"
     if [[ -z "$input" ]]; then echo "  ⚠️  обязательно"; continue; fi
-    if err="$("$validator" "$input")"; then      printf -v "$__var" '%s' "$input"; return 0    else
+    if err="$("$validator" "$input")"; then
+      printf -v "$__var" '%s' "$input"; return 0
+    else
       echo "  ⚠️  $err — попробуй ещё раз"
     fi
   done
@@ -496,7 +498,9 @@ package_installed() {
 caddyfile_routes_to_tproxy() {
   [[ -s /etc/caddy/Caddyfile ]] || return 1
   grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
-  grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile}
+  grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile
+}
+
 # Проверка полной совместимости Caddy с текущими параметрами.
 caddy_config_compatible() {
   [[ -s /etc/caddy/Caddyfile && -x /usr/local/bin/caddy ]] || return 1
@@ -744,8 +748,10 @@ PYTHON
     output="$(TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" "$caddy_bin" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | python3 "$parser" caddy "$HOSTNAME_ARG")"; rc=$?
     set -e
     rm -f "$parser"
-    if (( rc != 0 )); then die "Не удалось безопасно определить сайт Caddy на 80/443 (чужой домен или неоднозначная конфигурация). Ничего не изменено."; fi    root="$output"
-    [[ -d "$root" && "$root" != / ]] || die "Корневой каталог существующего сайта недопустим или не найден: $root"    [[ -f "$root/index.html" ]] || die "В каталоге $root нет index.html. Установщик не будет угадывать структуру сайта."
+    if (( rc != 0 )); then die "Не удалось безопасно определить сайт Caddy на 80/443 (чужой домен или неоднозначная конфигурация). Ничего не изменено."; fi
+    root="$output"
+    [[ -d "$root" && "$root" != / ]] || die "Корневой каталог существующего сайта недопустим или не найден: $root"
+    [[ -f "$root/index.html" ]] || die "В каталоге $root нет index.html. Установщик не будет угадывать структуру сайта."
   fi
   SITE_DIR="$(realpath "$root")"
   INSTALL_SITE=0
@@ -992,9 +998,11 @@ check_telegram_connectivity() {
     if [[ "$NONINTERACTIVE" == "1" ]]; then
       die "Проверка Telegram DC не пройдена; non-interactive установка остановлена"
     fi
-    confirm "Продолжить несмотря на недоступность Telegram DC?" || die "установка отменена после проверки сети"  fi
+    confirm "Продолжить несмотря на недоступность Telegram DC?" || die "установка отменена после проверки сети"
+  fi
   if (( ! core_ok )); then
-    warn "core.telegram.org недоступен по HTTPS. Проверка DC прошла отдельно; проверь сетевые ограничения и DNS."  fi
+    warn "core.telegram.org недоступен по HTTPS. Проверка DC прошла отдельно; проверь сетевые ограничения и DNS."
+  fi
 }
 
 check_dns() {
@@ -1240,10 +1248,12 @@ ensure_go() {
     mv "$dir/go" "/opt/go${GO_FALLBACK_VERSION}"
   fi
   rm -f "$archive"; rm -rf "$dir"
-  GO_BIN="/opt/go${GO_FALLBACK_VERSION}/bin/go"  ok "Go: $("$GO_BIN" version)"
+  GO_BIN="/opt/go${GO_FALLBACK_VERSION}/bin/go"
+  ok "Go: $("$GO_BIN" version)"
 }
 
-build_tproxy() {  info "Собираю tproxy-server…"
+build_tproxy() {
+  info "Собираю tproxy-server…"
   cd "$REPO_DIR"
   if [[ "$SKIP_TESTS" -ne 1 ]]; then
     info "  go test ./…"
@@ -1489,10 +1499,12 @@ profile_storage_rebuild() {
       die "profiles.json повреждён, а индивидуальных файлов профилей нет. Восстановление без исходных секретов невозможно."
     fi
   fi
+
   while IFS= read -r -d '' dir; do
     name="${dir##*/}"
     [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] ||
-      die "Недопустимое имя каталога профиля: $name"    [[ -s "$dir/profile.json" ]] ||
+      die "Недопустимое имя каталога профиля: $name"
+    [[ -s "$dir/profile.json" ]] ||
       die "В каталоге профиля отсутствует profile.json: $dir"
   done < <(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d -print0)
 
@@ -1736,12 +1748,14 @@ EOF
 
 verify_site_permissions() {
   info "Проверяю права на $SITE_DIR…"
-  local unreadable=0  while IFS= read -r -d '' f; do
+  local unreadable=0
+  while IFS= read -r -d '' f; do
     if ! sudo -u tproxy test -r "$f"; then
       warn "tproxy не может прочитать: $f"
       unreadable=1
     fi
-  done < <(find "$SITE_DIR" -type f -print0)  if [[ $unreadable -eq 1 ]]; then
+  done < <(find "$SITE_DIR" -type f -print0)
+  if [[ $unreadable -eq 1 ]]; then
     die "tproxy не может читать сайт. Исправь права вручную; установщик не меняет права существующего сайта."
     :
     :
@@ -1984,13 +1998,15 @@ run_config() {
   if (( count > 1 )); then
     echo
     ui_header "Выбор профиля для просмотра"
-    while IFS=$'\t' read -r profile_name carrier_mode; do      index=$((index + 1))
+    while IFS=$'\t' read -r profile_name carrier_mode; do
+      index=$((index + 1))
       ui_option "$index" "◆" "$profile_name · $carrier_mode"
     done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https")] | @tsv' "$profiles")
     ui_option 0 "←" "Назад"
     read -r -p "Выбери профиль [0-$count]: " choice || die "ввод прерван"
     [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) || { info "Просмотр отменён"; return 0; }
-  fi  index=$((choice - 1))
+  fi
+  index=$((choice - 1))
   profile_name="$(jq -r --argjson i "$index" '.profiles[$i].name' "$profiles")"
   secret="$(jq -r --argjson i "$index" '.profiles[$i].secret // empty' "$profiles")"
   backend="$(jq -r --argjson i "$index" '.profiles[$i].backend // empty' "$profiles")"
@@ -2232,14 +2248,16 @@ EOF
     cat <<'EOF'
   Сначала будет проверено, какие зависимости и компоненты уже установлены.
   Будут добавлены только отсутствующие пакеты; существующие Go, Caddy,
-  Nginx и подходящая сборка MTProxy будут повторно использованы.  Конфигурации сторонних сайтов сохраняются или резервируются перед изменением.
+  Nginx и подходящая сборка MTProxy будут повторно использованы.
+  Конфигурации сторонних сайтов сохраняются или резервируются перед изменением.
   Домен должен указывать на IP этого сервера.
 EOF
   fi
   cat <<'EOF'
 
   ПОРТЫ
-  - 80/tcp и 443/tcp — публичные HTTP/HTTPS для Caddy/Nginx; должны быть    доступны извне. При установке их не должен занимать другой веб-сервер;
+  - 80/tcp и 443/tcp — публичные HTTP/HTTPS для Caddy/Nginx; должны быть
+    доступны извне. При установке их не должен занимать другой веб-сервер;
     при обновлении их может занимать уже установленный Caddy или Nginx.
   - 8080/tcp и 8081/tcp — внутренние порты приложения (127.0.0.1).
     При установке должны быть свободны; при смене портов при обновлении
@@ -2486,10 +2504,12 @@ remove_decoy_site() {
   rm -rf -- "$SITE_DIR"
   ok "Каталог сайта удалён: $SITE_DIR"
 }
-remove_web_server_interactive() {  require_root
+remove_web_server_interactive() {
+  require_root
   local installed_web_server
   installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
-  if [[ "$installed_web_server" != caddy && "$installed_web_server" != nginx ]]; then    if systemctl is-active --quiet nginx.service || command -v nginx >/dev/null 2>&1; then installed_web_server=nginx
+  if [[ "$installed_web_server" != caddy && "$installed_web_server" != nginx ]]; then
+    if systemctl is-active --quiet nginx.service || command -v nginx >/dev/null 2>&1; then installed_web_server=nginx
     elif systemctl is-active --quiet caddy.service || [[ -x /usr/local/bin/caddy || -x /usr/bin/caddy ]]; then installed_web_server=caddy
     else warn "Установленный Caddy/Nginx не обнаружен."; return 0; fi
   fi
@@ -2737,10 +2757,8 @@ backup_command() {
     etc/nginx/conf.d/tproxy-websocket-map.conf \
     etc/letsencrypt \
     etc/systemd/system/tproxy-server.service \
-    etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/mtproxy.service \
     etc/systemd/system/tproxy-firewall.service \
-    etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/refresh-mtproxy-config.service \
     etc/systemd/system/refresh-mtproxy-config.timer \
     etc/systemd/system/caddy.service \
@@ -2807,7 +2825,7 @@ restore_command() {
     [[ "$normalized" != /* ]] || die "Небезопасный абсолютный путь в архиве: $entry"
     [[ ! "/$normalized/" =~ /\.\./ ]] || die "Небезопасный путь в архиве: $entry"
     case "$normalized" in
-      opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/tproxy-panel.service|etc/systemd/system/mtproxy.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
+      opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/tproxy-panel.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
       *) die "В архиве обнаружен путь вне разрешённого списка: $entry" ;;
     esac
   done < <(tar -tzf "$archive")
@@ -2990,8 +3008,10 @@ profile_manifest_sync() {
   while IFS= read -r -d '' file; do
     [[ "$file" == "$PROFILE_DIR/default/profile.json" ]] || profile_files+=("$file")
   done < <(find "$PROFILE_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.json -print0 | sort -z)
+
   (( ${#profile_files[@]} > 0 )) || die "В каталогах не найдено ни одного профиля."
   (( ${#profile_files[@]} <= 32 )) || die "В хранилище не может быть более 32 профилей."
+
   tmp="$(mktemp "$PROFILES_FILE.XXXXXX")"
   if ! jq -s '{profiles: .}' "${profile_files[@]}" > "$tmp" ||
      ! jq -e '
@@ -3237,10 +3257,12 @@ profile_menu() {
     while IFS= read -r profile_row; do
       name="$(cut -f1 <<< "$profile_row")"; mode="$(cut -f2 <<< "$profile_row")"; backend="$(cut -f3 <<< "$profile_row")"
       case "$mode" in https) mode_label="HTTPS" ;; https-lanes) mode_label="HTTPS · несколько каналов" ;; websocket) mode_label="WebSocket" ;; websocket-lanes) mode_label="WebSocket · несколько каналов" ;; *) mode_label="$mode" ;; esac
-      printf "  ◆ %-20s | %-28s | backend %s\n" "$name" "$mode_label" "$backend"    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
+      printf "  ◆ %-20s | %-28s | backend %s\n" "$name" "$mode_label" "$backend"
+    done < <(jq -r '.profiles[] | [.name, (.carrier_mode // "https"), .backend] | @tsv' "$PROFILES_FILE")
     echo
     ui_option 1 "+" "Добавить профиль"
-    ui_option 2 "↻" "Изменить Carrier mode выбранного профиля"    ui_option 3 "✖" "Удалить дополнительный профиль"
+    ui_option 2 "↻" "Изменить Carrier mode выбранного профиля"
+    ui_option 3 "✖" "Удалить дополнительный профиль"
     ui_option 4 "▤" "Создать резервную копию профиля"
     ui_option 5 "⇧" "Импортировать профиль из резервной копии"
     ui_option 6 "←" "Назад"
@@ -3485,10 +3507,12 @@ show_menu() {
     2) MODE=update ;;
     3) MODE=delete ;;
     4) MODE=config ;;
-    5) MODE=tools ;;    6) exit 0 ;;
+    5) MODE=tools ;;
+    6) exit 0 ;;
     *) warn "Неверный выбор." ;;
   esac
 }
+
 ui_separator() {
   if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
     printf '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
@@ -3733,12 +3757,14 @@ profile_import_menu() {
   local -a archives=() profile_paths=()
   mapfile -t archives < <(profile_archive_list)
   ((${#archives[@]})) || { warn "Архивы профилей и полные резервные копии не найдены."; return 0; }
-  ui_header "Импорт профиля из резервной копии"  for i in "${!archives[@]}"; do
+  ui_header "Импорт профиля из резервной копии"
+  for i in "${!archives[@]}"; do
     if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
       printf '  \033[1;34m%2d)\033[0m %s\n' "$((i+1))" "${archives[$i]##*/}"
     else
       printf '  %2d) %s\n' "$((i+1))" "${archives[$i]##*/}"
-    fi  done
+    fi
+  done
   read -r -p "Выбери архив (0 — отмена): " selection || return 0
   [[ "$selection" =~ ^[0-9]+$ ]] || { warn "Неверный номер."; return 0; }
   (( selection > 0 && selection <= ${#archives[@]} )) || return 0
@@ -3981,13 +4007,15 @@ upstream_menu() {
 
     printf '  Найденные приложения:\n'
     for ((i=0; i<${#ports[@]}; i++)); do
-      ui_option "$((i+1))" "●" "http://127.0.0.1:${ports[$i]}  [HTTP ${codes[$i]}]"    done
+      ui_option "$((i+1))" "●" "http://127.0.0.1:${ports[$i]}  [HTTP ${codes[$i]}]"
+    done
     printf '\n'
     ui_option "$((${#ports[@]}+1))" "↻" "Обновить список"
     ui_option "$((${#ports[@]}+2))" "←" "Назад"
     echo
     read -r -p "Выбери приложение [1-$((${#ports[@]}+2))]: " answer
-    if [[ $answer == "$((${#ports[@]}+1))" ]]; then continue; fi    if [[ $answer == "$((${#ports[@]}+2))" || -z $answer ]]; then return 0; fi
+    if [[ $answer == "$((${#ports[@]}+1))" ]]; then continue; fi
+    if [[ $answer == "$((${#ports[@]}+2))" || -z $answer ]]; then return 0; fi
     if [[ $answer =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#ports[@]} )); then
       selected=$((answer-1))
       port="${ports[$selected]}"
@@ -4229,14 +4257,16 @@ profile_cli() {
       file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
       tmp="$(mktemp "$file.XXXXXX")"; jq --arg m "$mode" '.carrier_mode=$m' "$file" > "$tmp"
       chown root:tproxy "$tmp"; chmod 0640 "$tmp"; mv -f "$tmp" "$file"; profile_manifest_sync
-      "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Проверка конфигурации не пройдена."      systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
+      "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Проверка конфигурации не пройдена."
+      systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
       ok "Carrier mode профиля $name изменён." ;;
     delete)
       [[ $# -eq 2 && "$2" == --yes ]] || die "profile delete ИМЯ --yes"
       name="$1"; valid_name "$name" || die "Недопустимое имя."
       [[ "$name" != default ]] || die "Профиль default защищён."
       [[ -d "$PROFILE_DIR/$name" ]] || die "Профиль не найден."
-      count="$(jq '.profiles | length' "$PROFILES_FILE")"; (( count > 1 )) || die "Нельзя удалить последний профиль."      rm -rf -- "${PROFILE_DIR:?}/${name:?}"
+      count="$(jq '.profiles | length' "$PROFILES_FILE")"; (( count > 1 )) || die "Нельзя удалить последний профиль."
+      rm -rf -- "${PROFILE_DIR:?}/${name:?}"
       profile_manifest_sync; write_mtproxy_secrets; patch_mtproxy_unit
       systemctl restart mtproxy tproxy-server || die "Не удалось перезапустить службы."
       ok "Профиль $name удалён." ;;
@@ -4329,7 +4359,6 @@ upstream_cli() {
   systemctl restart tproxy-server || { cp -a "$backup" "$CONFIG_FILE"; systemctl restart tproxy-server || true; die "Перезапуск не удался; конфигурация восстановлена."; }
   ok "Настройка публичного сайта обновлена."
 }
-
 
 install_admin_panel() {
   require_root
@@ -4437,73 +4466,4 @@ PYTHON
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   trap 'update_exit_handler "$?"' EXIT
   main "$@"
-fi; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
-      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
-    }
-  fi
-  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
-  if ! dpkg-query -W -f='${Status}' fail2ban 2>/dev/null | grep -q '^install ok installed$'; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
-      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
-    }
-  fi
-  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
-  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
-  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
-  install -m 0644 "$repo_dir/web-panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
-  install -d -m 0755 /etc/fail2ban/jail.d
-  install -m 0644 "$repo_dir/web-panel/fail2ban-jail.conf" /etc/fail2ban/jail.d/tproxy-panel.local
-
-  panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" PANEL_SCRIPT="$BASE_DIR/tgweb-install.sh" "$BIN_DIR/tproxy-panel" -print-basepath)"
-  [[ "$panel_base" =~ ^[A-Za-z0-9_-]{32}$ ]] || { rm -rf "$source_tmp"; die "Панель вернула некорректный basepath."; }
-
-  if [[ "$WEB_SERVER" == "caddy" ]]; then
-    python3 - "$panel_base" "$RELAY_PORT" <<'PYTHON'
-import pathlib, sys
-path = pathlib.Path("/etc/caddy/Caddyfile")
-base, relay = sys.argv[1:3]
-text = path.read_text()
-needle = f"reverse_proxy 127.0.0.1:{relay} {{"
-if f"handle /{base}/*" not in text:
-    if needle not in text:
-        raise SystemExit("Caddyfile relay route not found")
-    block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765\n\t}}\n\n\t"
-    text = text.replace(needle, block + needle, 1)
-    path.write_text(text)
-PYTHON
-    TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || {
-      rm -rf "$source_tmp"; die "Проверка Caddyfile после добавления панели не пройдена."
-    }
-    systemctl reload caddy.service || systemctl restart caddy.service || {
-      rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Caddy."
-    }
-  else
-    python3 - "$panel_base" <<'PYTHON'
-import pathlib, sys
-path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
-base = sys.argv[1]
-text = path.read_text()
-if f"location ^~ /{base}/" not in text:
-    tls = text.find("listen 443 ssl;")
-    if tls < 0:
-        raise SystemExit("TLS server block not found")
-    marker = text.find(" location / {", tls)
-    if marker < 0:
-        raise SystemExit("TLS proxy location not found")
-    block = f""" location ^~ /{base}/ {{
-  proxy_pass http://127.0.0.1:18765;
-  proxy_http_version 1.1;
-  proxy_set_header Host $host;
-  proxy_set_header X-Real-IP $remote_addr;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  proxy_set_header X-Forwarded-Proto https;
-  proxy_set_header X-Forwarded-Host $host;
-  proxy_read_timeout 90s;
- }}
-"""
-    text = text[:marker] + block + text[marker:]
-    path.write_text(text)
-PYTHON
-    nginx -t || { rm -rf "$source_tmp"; die "Проверка Nginx после добавления панели не пройдена."; }
-    systemctl reload nginx.service || systemctl restart nginx.service || {
+fi
