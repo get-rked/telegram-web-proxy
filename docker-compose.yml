@@ -152,7 +152,6 @@ services:
   panel-volume-init:
     image: busybox:1.37.0
     user: "0:0"
-    command: ["sh", "-c", "chown -R 10001:10001 /data"]
     volumes:
       - panel-data:/data
       - ./docker/security/logs:/security-logs
