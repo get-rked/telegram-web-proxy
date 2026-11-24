@@ -37,8 +37,6 @@ class BootstrapTests(unittest.TestCase):
             patch.object(bootstrap, "DOMAIN", "proxy.example.test"),
             patch.object(bootstrap, "RELAY_PORT", 18080),
             patch.object(bootstrap, "ADMIN_PORT", 18081),
-            patch.object(bootstrap, "LEGACY_PUBLIC_DIR", root / "legacy-site"),
-            patch.object(bootstrap, "LEGACY_TOKEN_KEY_FILE", root / "legacy-token.key"),
             patch.dict(os.environ, {"PANEL_PRINT_CREDENTIALS": "0"}),
             patch.object(bootstrap, "UID", os.getuid()),
             patch.object(bootstrap, "GID", os.getgid()),
