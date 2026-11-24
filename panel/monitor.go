@@ -33,10 +33,10 @@ func (a *application) relayRequest(ctx context.Context,path string)(int,string,t
 	start:=time.Now();resp,err:=a.monitorClient.Do(req);latency:=time.Since(start);if err!=nil{return 0,"",latency,err};defer resp.Body.Close()
 	body,err:=io.ReadAll(io.LimitReader(resp.Body,2<<20));return resp.StatusCode,string(body),latency,err
 }
-func (a *application) mtproxyStats(ctx context.Context)(string,error){
+func (a *application) backendStats(ctx context.Context)(string,error){
 	req,err:=http.NewRequestWithContext(ctx,http.MethodGet,"http://relay:9090/stats",nil);if err!=nil{return "",err}
 	resp,err:=a.monitorClient.Do(req);if err!=nil{return "",err};defer resp.Body.Close()
-	if resp.StatusCode!=http.StatusOK{return "",fmt.Errorf("MTProxy stats HTTP %d",resp.StatusCode)}
+	if resp.StatusCode!=http.StatusOK{return "",fmt.Errorf("backend stats HTTP %d",resp.StatusCode)}
 	body,err:=io.ReadAll(io.LimitReader(resp.Body,1<<20));return string(body),err
 }
 func (a *application) diagnostics(w http.ResponseWriter,r *http.Request){
@@ -66,7 +66,7 @@ func (a *application) diagnostics(w http.ResponseWriter,r *http.Request){
 		if err!=nil{check.Detail="relay недоступен"}else if status==200&&strings.TrimSpace(body)==ep.expected{check.Status="ok";check.Detail="доступен"}else{check.Detail=fmt.Sprintf("HTTP %d",status)}
 		result.Checks=append(result.Checks,check)
 	}
-	stats,err:=a.mtproxyStats(ctx);mt:=diagnosticCheck{Name:"mtproxy_stats",Status:"error"}
+	stats,err:=a.backendStats(ctx);mt:=diagnosticCheck{Name:"backend_stats",Status:"error"}
 	if err!=nil{mt.Detail="статистика MTProxy недоступна"}else if strings.TrimSpace(stats)==""{mt.Detail="пустой ответ"}else{mt.Status="ok";mt.Detail="статистика получена"}
 	result.Checks=append(result.Checks,mt)
 	if _,err:=os.Stat(a.profiles);err!=nil{result.Checks=append(result.Checks,diagnosticCheck{Name:"profiles_file",Status:"error",Detail:"файл профилей недоступен"})}else{result.Checks=append(result.Checks,diagnosticCheck{Name:"profiles_file",Status:"ok",Detail:"файл профилей доступен"})}
@@ -77,7 +77,7 @@ func (a *application) metrics(w http.ResponseWriter,r *http.Request){
 	ctx,cancel:=context.WithTimeout(r.Context(),5*time.Second);defer cancel()
 	out:=map[string]any{"system":readSystemMetrics(),"sampled_at":time.Now().UTC()}
 	_,relay,_,err:=a.relayRequest(ctx,"/metrics");if err==nil{out["relay"]=parsePrometheus(relay)}else{out["relay_error"]="relay metrics unavailable"}
-	mt,err:=a.mtproxyStats(ctx);if err==nil{out["mtproxy"]=parseTabStats(mt)}else{out["mtproxy_error"]="MTProxy metrics unavailable"}
+	mt,err:=a.backendStats(ctx);if err==nil{out["backend"]=parseTabStats(mt)}else{out["backend_error"]="MTProxy metrics unavailable"}
 	jsonResponse(w,out)
 }
 func readSystemMetrics()systemMetrics{

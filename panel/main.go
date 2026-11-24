@@ -364,7 +364,7 @@ func (a *application) backupItemAPI(w http.ResponseWriter,r *http.Request) {
 	if len(parts)==2 && parts[1]=="restore" && r.Method==http.MethodPost {
 		if !a.sameOriginMutation(w,r){return}
 		if err:=a.restoreBackup(parts[0]);err!=nil{http.Error(w,"backup validation or restore failed; check panel logs",400);return}
-		a.audit("backup.restore:"+parts[0]);jsonResponse(w,map[string]string{"status":"restored","note":"Relay will validate the restored configuration; MTProxy will reload the synchronized secret list."});return
+		a.audit("backup.restore:"+parts[0]);jsonResponse(w,map[string]string{"status":"restored","note":"Relay will validate the restored configuration; the backend will reload the synchronized secret list."});return
 	}
 	http.Error(w,"not found",404)
 }
@@ -626,24 +626,24 @@ func (a *application) writeProfiles(doc profileDocument) error {
 	original, err := os.ReadFile(a.profiles)
 	if err != nil { return err }
 	if err := writeAtomicFile(a.profiles, data, 0600); err != nil { return err }
-	if err := a.syncMTProxySecrets(doc); err != nil {
+	if err := a.syncBackendSecrets(doc); err != nil {
 		if rollbackErr := writeAtomicFile(a.profiles, original, 0600); rollbackErr != nil {
-			return fmt.Errorf("MTProxy secret sync failed (%v) and profiles rollback failed (%v)", err, rollbackErr)
+			return fmt.Errorf("backend secret sync failed (%v) and profiles rollback failed (%v)", err, rollbackErr)
 		}
-		return fmt.Errorf("MTProxy secret sync failed; profiles rolled back: %w", err)
+		return fmt.Errorf("backend secret sync failed; profiles rolled back: %w", err)
 	}
 	return nil
 }
 
-func (a *application) syncMTProxySecrets(doc profileDocument) error {
+func (a *application) syncBackendSecrets(doc profileDocument) error {
 	if a.mtproxySecret == "" { return nil }
 	var values []string
 	seen := make(map[string]bool, len(doc.Profiles))
 	for _, item := range doc.Profiles {
 		value := backendSecret(item)
 		decoded, err := hex.DecodeString(value)
-		if err != nil || len(decoded) != 16 { return errors.New("invalid profile secret; refusing MTProxy sync") }
-		if seen[value] { return errors.New("duplicate profile secret; refusing MTProxy sync") }
+		if err != nil || len(decoded) != 16 { return errors.New("invalid profile secret; refusing backend secret sync") }
+		if seen[value] { return errors.New("duplicate profile secret; refusing backend secret sync") }
 		seen[value] = true
 		values = append(values, value)
 	}

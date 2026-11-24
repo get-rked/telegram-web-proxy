@@ -2,7 +2,7 @@
 
 **Версия скрипта: 1.2.3**
 
-Установщик разворачивает и обслуживает Telegram Web Proxy только в Docker. Поддерживается Ubuntu/Debian x86_64 с systemd и apt. В состав проекта входят tproxy-server, MTProxy, Caddy или Nginx, панель управления и Fail2ban.
+Установщик разворачивает и обслуживает Telegram Web Proxy только в Docker. Поддерживается Ubuntu/Debian x86_64 с systemd и apt. В состав проекта входят tproxy-server, внутренний backend Web Proxy, Caddy или Nginx, панель управления и Fail2ban.
 
 **Native → Docker миграции нет.** Установщик не ищет прежнюю native-конфигурацию, не читает её параметры и не переносит файлы или службы. Если каталог `/opt/telegram-web-proxy` уже существует и не является актуальным Git checkout проекта, при первом развёртывании он сохраняется целиком в резервной копии и отдельно переименованном каталоге; содержимое не анализируется и не импортируется.
 
@@ -13,7 +13,7 @@
 - Настройка домена и email Let's Encrypt.
 - Отдельный выбор relay- и admin-портов с проверкой занятости до запуска контейнеров.
 - Генерация Web Proxy секрета или ввод собственного; формат без префикса или с `dd`.
-- Сохранение выбранного `dd` в профиле Web Proxy и нормализация секрета для MTProxy.
+- Сохранение выбранного `dd` в профиле Web Proxy и разделение клиентского и внутреннего секретов.
 - Защищённая панель управления, Fail2ban, диагностика, логи и резервные копии.
 - Сохранение пользовательского сайта и Docker volumes при штатном обновлении.
 
@@ -34,8 +34,8 @@
 | TCP 443 | HTTPS, сайт и Web Proxy | Открыть извне |
 | TCP 8080 | Relay tproxy-server по умолчанию | Внутри Docker, loopback |
 | TCP 8081 | Admin/health по умолчанию | Внутри Docker, loopback |
-| TCP 2398 | Backend MTProxy | Внутренний |
-| TCP 8888 | Статистика MTProxy | Внутренний |
+| TCP 2398 | Внутренний backend Web Proxy | Внутренний |
+| TCP 8888 | Статистика backend | Внутренний |
 
 Relay и admin-порты задаются в `.env` как `RELAY_PORT` и `ADMIN_PORT`, а в конфигурации приложения привязываются к `127.0.0.1`. Эти порты не публикуются на хост и не должны открываться в firewall. Установщик дополнительно проверяет, что выбранные номера не заняты локальными службами, чтобы не повторять запуск с конфликтующими значениями.
 
@@ -105,14 +105,14 @@ sudo /opt/telegram-web-proxy/tgweb-install.sh docker purge
 
 ## Конфигурация и секреты
 
-- `.env` содержит домен, email, relay/admin-порты и параметры MTProxy.
+- `.env` содержит домен, email, relay/admin-порты и параметры backend.
 - `docker/config/` содержит конфигурацию relay и token key.
 - `docker/profiles/` содержит профили Web Proxy.
 - `docker/backend/secret` содержит внутренние секреты backend.
 - `docker/private/` и `docker/private-credentials/` содержат приватную авторизацию панели и реквизиты доступа.
 - Docker volumes хранят данные панели, TLS, backend и Fail2ban.
 
-Префикс `dd` сохраняется в секрете профиля Web Proxy. Для MTProxy bootstrap записывает тот же секрет без префикса — формат, который ожидает MTProxy. Не публикуй `.env`, `docker/private/`, `docker/private-credentials/`, `docker/backend/secret`, `docker/config/` и резервные копии.
+Префикс `dd` сохраняется в секрете профиля Web Proxy. Bootstrap формирует отдельный внутренний секрет backend из клиентского секрета Web Proxy. Не публикуй `.env`, `docker/private/`, `docker/private-credentials/`, `docker/backend/secret`, `docker/config/` и резервные копии.
 
 ## Nginx
 
