@@ -43,6 +43,38 @@ func authRequest(method, path, body string, mutation bool) *http.Request {
 	return request
 }
 
+func TestLoginCreatesSecureBasePathScopedSession(t *testing.T) {
+	a := testApp(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"admin","password":"a-long-test-password"}`))
+	request.RemoteAddr = "203.0.113.20:1234"
+	request.Host = "proxy.example.com"
+	request.Header.Set("Origin", "https://proxy.example.com")
+	request.Header.Set("X-TProxy-Request", "1")
+	response := httptest.NewRecorder()
+	a.login(response, request)
+	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 { t.Fatalf("cookies=%d, want 1", len(cookies)) }
+	cookie := cookies[0]
+	if cookie.Name != "tproxy_session" || cookie.Path != a.basePath+"/" || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("unexpected session cookie: %+v", cookie)
+	}
+	check := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	check.AddCookie(cookie)
+	status := httptest.NewRecorder()
+	a.sessionStatus(status, check)
+	if !strings.Contains(status.Body.String(), `"authenticated":true`) { t.Fatalf("session not recognized: %s", status.Body.String()) }
+}
+
+func TestLogoutRevokesSession(t *testing.T) {
+	a := testApp(t)
+	request := authRequest(http.MethodPost, "/api/logout", "{}", true)
+	response := httptest.NewRecorder()
+	a.auth(a.logout)(response, request)
+	if response.Code != http.StatusNoContent { t.Fatalf("status=%d, want 204", response.Code) }
+	if a.sessionValid("test-session") { t.Fatal("logout did not revoke session") }
+}
+
 func TestStatusRequiresAuthentication(t *testing.T) {
 	a := testApp(t)
 	mux := http.NewServeMux()
