@@ -132,6 +132,46 @@ sudo ./tgweb-install.sh install \
   --non-interactive
 ```
 
+### Docker-установка и обслуживание
+
+В той же программе есть отдельный раздел **Docker — установка и обслуживание**. Он не меняет команды управления native-установкой: старые `install`, `update`, `uninstall` и `purge` продолжают управлять systemd/native-развёртыванием.
+
+Запуск меню:
+```bash
+sudo ./tgweb-install.sh
+```
+Выбери пункт **7 — Docker — установка и обслуживание**.
+
+Команды Docker-менеджера:
+```bash
+# Перенести существующую native-установку в Docker и выполнить переключение
+sudo ./tgweb-install.sh docker install
+
+# То же, но явно выбрать reverse proxy или каталог native-установки
+sudo ./tgweb-install.sh docker install --web-server caddy
+sudo ./tgweb-install.sh docker install --source-dir /opt/telegram-web-proxy
+
+# Пересобрать и обновить контейнеры по текущему содержимому репозитория
+sudo ./tgweb-install.sh docker update
+
+# Удалить контейнеры и сеть, сохранив конфигурацию и именованные тома
+sudo ./tgweb-install.sh docker uninstall
+
+# Удалить контейнеры и локальные образы; тома оставить
+sudo ./tgweb-install.sh docker purge
+
+# Удалить также именованные тома (данные панели, TLS и MTProxy будут потеряны)
+sudo ./tgweb-install.sh docker purge --volumes
+
+# Состояние, перезапуск, логи и резервная копия файлов проекта
+sudo ./tgweb-install.sh docker status
+sudo ./tgweb-install.sh docker restart
+sudo ./tgweb-install.sh docker logs panel
+sudo ./tgweb-install.sh docker backup
+```
+
+**Важно:** `docker uninstall` не удаляет named volumes и файлы конфигурации. `docker purge` без `--volumes` тоже сохраняет тома. Для полного удаления данных томов нужен отдельный явный флаг `--volumes`. Нативная установка в `/opt/telegram-web-proxy` не удаляется ни одной Docker-командой. Резервная копия `docker backup` включает файлы проекта, включая приватные настройки и `.env`, но не включает содержимое Docker volumes.
+
 ### Обновление
 
 ```bash
