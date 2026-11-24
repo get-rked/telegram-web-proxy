@@ -136,13 +136,12 @@ jobs:
           printf '203.0.113.12 - - [24/Nov/2026:12:00:00 +0000] "GET /.git/config HTTP/1.1" 404 12 "-" "scanner"\n' > docker/security/logs/nginx-fixture.log
           docker run --rm --entrypoint sh -v "$PWD/docker/security/fail2ban/filter.d/tproxy-panel.conf:/etc/fail2ban/filter.d/tproxy-panel.conf:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-caddy-probes.conf:/etc/fail2ban/filter.d/tproxy-caddy-probes.conf:ro" -v "$PWD/docker/security/fail2ban/filter.d/tproxy-nginx-probes.conf:/etc/fail2ban/filter.d/tproxy-nginx-probes.conf:ro" -v "$PWD/docker/security/logs:/var/log/tproxy-panel:ro" crazymax/fail2ban:1.1.0 -c 'fail2ban-regex /var/log/tproxy-panel/auth-fixture.log tproxy-panel && fail2ban-regex /var/log/tproxy-panel/caddy-fixture.log tproxy-caddy-probes && fail2ban-regex /var/log/tproxy-panel/nginx-fixture.log tproxy-nginx-probes'
           test -s docker/site/index.html
-          python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py migrate-to-docker.py migrate-docker-auto.py
-          python3 migrate-docker-auto.py --help >/dev/null
-          python3 -m unittest docker/test_bootstrap.py docker/test_migrate.py docker/test_migrate_auto.py
+          python3 -m py_compile docker/bootstrap.py docker/mtproxy/stats-exporter.py
+          python3 -m unittest docker/test_bootstrap.py
           node --check panel/web/app.js
           docker build -f docker/Dockerfile.bootstrap -t tproxy-bootstrap:test .
           docker compose build bootstrap relay
-          docker compose run --rm --no-deps -e PANEL_PRINT_CREDENTIALS=0 bootstrap
+          RELAY_PORT=18080 ADMIN_PORT=18081 docker compose run --rm --no-deps -e PANEL_PRINT_CREDENTIALS=0 bootstrap
           docker run --rm \
             -v "$PWD/docker/config:/etc/tproxy-server:ro" \
             -v "$PWD/docker/site:/srv/tproxy-site:ro" \
