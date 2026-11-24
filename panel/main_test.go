@@ -135,14 +135,14 @@ func TestCreateProfileGeneratesSecretAndWritesBackup(t *testing.T) {
 	if err != nil || len(backups) != 1 { t.Fatalf("backups=%v err=%v", backups, err) }
 }
 
-func TestProfileConfigReturnsDDSecretAndClientLink(t *testing.T) {
+func TestProfileConfigReturnsClientWebProxySecretAndClientLink(t *testing.T) {
 	a := testApp(t)
 	response := httptest.NewRecorder()
 	a.profileConfig(response, authRequest(http.MethodGet, "/api/profiles/default/config", "", false), "default")
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	var result struct { Secret string `json:"secret"`; Link string `json:"link"`; Port int `json:"port"` }
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
-	if result.Secret != "00112233445566778899aabbccddeeff" { t.Fatalf("wrong client secret: %q", result.Secret) }
+	if result.Secret != "00112233445566778899aabbccddeeff" { t.Fatalf("wrong client Web Proxy secret: %q", result.Secret) }
 	if result.Port != 443 || !strings.Contains(result.Link, "https://t.me/webproxy?") || !strings.Contains(result.Link, "secret=00112233445566778899aabbccddeeff") || !strings.Contains(result.Link, "server=proxy.example.com") || strings.Contains(result.Link, "t.me/proxy?") { t.Fatalf("invalid Web Proxy link: %+v", result) }
 }
 
@@ -213,7 +213,7 @@ func TestWriteProfilesUsesOwnerOnlyPermissions(t *testing.T) {
 	if got:=info.Mode().Perm();got!=0600{t.Fatalf("profiles mode=%04o, want 0600",got)}
 }
 
-func TestWriteProfilesSynchronizesAllMTProxySecrets(t *testing.T) {
+func TestWriteProfilesSynchronizesAllBackendSecrets(t *testing.T) {
 	a := testApp(t)
 	secretPath := filepath.Join(t.TempDir(), "mtproxy.secret")
 	if err := os.WriteFile(secretPath, []byte("00112233445566778899aabbccddeeff\n"), 0600); err != nil { t.Fatal(err) }

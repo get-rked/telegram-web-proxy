@@ -108,11 +108,11 @@ sudo /opt/telegram-web-proxy/tgweb-install.sh docker purge
 - `.env` содержит домен, email, relay/admin-порты и параметры MTProxy.
 - `docker/config/` содержит конфигурацию relay и token key.
 - `docker/profiles/` содержит профили Web Proxy.
-- `docker/mtproxy/secret` содержит нормализованные секреты MTProxy.
+- `docker/backend/secret` содержит внутренние секреты backend.
 - `docker/private/` и `docker/private-credentials/` содержат приватную авторизацию панели и реквизиты доступа.
-- Docker volumes хранят данные панели, TLS, MTProxy и Fail2ban.
+- Docker volumes хранят данные панели, TLS, backend и Fail2ban.
 
-Префикс `dd` сохраняется в секрете профиля Web Proxy. Для MTProxy bootstrap записывает тот же секрет без префикса — формат, который ожидает MTProxy. Не публикуй `.env`, `docker/private/`, `docker/private-credentials/`, `docker/mtproxy/secret`, `docker/config/` и резервные копии.
+Префикс `dd` сохраняется в секрете профиля Web Proxy. Для MTProxy bootstrap записывает тот же секрет без префикса — формат, который ожидает MTProxy. Не публикуй `.env`, `docker/private/`, `docker/private-credentials/`, `docker/backend/secret`, `docker/config/` и резервные копии.
 
 ## Nginx
 
@@ -131,7 +131,7 @@ sudo /opt/telegram-web-proxy/tgweb-install.sh docker purge
 sudo /opt/telegram-web-proxy/tgweb-install.sh docker status
 sudo /opt/telegram-web-proxy/tgweb-install.sh docker logs relay
 sudo /opt/telegram-web-proxy/tgweb-install.sh docker logs caddy
-sudo /opt/telegram-web-proxy/tgweb-install.sh docker logs mtproxy
+sudo /opt/telegram-web-proxy/tgweb-install.sh docker logs backend
 ```
 
 HTTP-ответ сайта сам по себе не доказывает работоспособность Web Proxy — обязательно проверь фактическое подключение в Telegram-клиенте.
@@ -141,5 +141,5 @@ HTTP-ответ сайта сам по себе не доказывает раб
 - [telegramdesktop/tproxy-server](https://github.com/telegramdesktop/tproxy-server) — relay и Web Proxy.
 - [Caddy](https://caddyserver.com/) — TLS и reverse proxy.
 - [Nginx](https://nginx.org/) — альтернативный reverse proxy.
-- [MTProxy](https://github.com/TelegramMessenger/MTProxy) — backend прокси.
+- Внутренний backend текущей реализации relay — служебный компонент Web Proxy.
 - [Fail2ban](https://github.com/fail2ban/fail2ban) — защита панели и сетевых endpoints.

@@ -426,7 +426,7 @@ func (a *application) profileConfig(w http.ResponseWriter, r *http.Request, name
 	jsonResponse(w, map[string]any{
 		"name": name, "hostname": cfg.PublicHostname, "port": 443,
 		"carrier_mode": doc.Profiles[index].CarrierMode,
-		"secret": doc.Profiles[index].Secret, "link": link,
+		"client_secret": webProxyClientSecret(doc.Profiles[index]), "secret": webProxyClientSecret(doc.Profiles[index]), "link": link,
 	})
 }
 
@@ -640,7 +640,7 @@ func (a *application) syncMTProxySecrets(doc profileDocument) error {
 	var values []string
 	seen := make(map[string]bool, len(doc.Profiles))
 	for _, item := range doc.Profiles {
-		value := strings.TrimPrefix(strings.ToLower(item.Secret), "dd")
+		value := backendSecret(item)
 		decoded, err := hex.DecodeString(value)
 		if err != nil || len(decoded) != 16 { return errors.New("invalid profile secret; refusing MTProxy sync") }
 		if seen[value] { return errors.New("duplicate profile secret; refusing MTProxy sync") }
@@ -692,6 +692,10 @@ func backupFile(path string) error {
 	}
 	return closeErr
 }
+
+func webProxyClientSecret(p profile) string { return strings.TrimPrefix(strings.ToLower(p.Secret), "dd") }
+
+func backendSecret(p profile) string { return webProxyClientSecret(p) }
 
 func newSecret() (string, error) {
 	value := make([]byte, 16)
