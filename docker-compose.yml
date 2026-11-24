@@ -99,6 +99,7 @@ services:
       MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
       MTPROXY_DATA_DIR: /var/lib/mtproxy
       MTPROXY_WORKERS: ${MTPROXY_WORKERS:-1}
+      MTPROXY_REFRESH_INTERVAL: ${MTPROXY_REFRESH_INTERVAL:-86400}
     volumes:
       - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:ro
       - mtproxy-data:/var/lib/mtproxy
