@@ -195,6 +195,9 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 	if err := os.MkdirAll(profileDir, 0700); err != nil { t.Fatal(err) }
 	config := `{"public_hostname":"proxy.example.test","base_path":"random-path"}`
 	profile := `{"name":"alpha","secret":"0123456789abcdef0123456789abcdef","backend":"127.0.0.1:2398","carrier_mode":"https-lanes"}`
+	mtproxyDir := filepath.Join(dir, "config", "mtproxy")
+	if err := os.MkdirAll(mtproxyDir, 0700); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(mtproxyDir, "mtproxy.env"), []byte("MTPROXY_WORKERS=6\\nMTPROXY_MAX_CONNECTIONS=18000\\n"), 0600); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(config), 0600); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(profile), 0600); err != nil { t.Fatal(err) }
 	a := &App{configDir: configDir}
@@ -205,6 +208,7 @@ func TestProfileDetailsUsesPublicConnectionDataNotBackend(t *testing.T) {
 		t.Fatal("internal backend leaked into client configuration")
 	}
 	if got["carrier_mode"] != "https-lanes" || got["name"] != "alpha" { t.Fatalf("unexpected profile metadata: %#v", got) }
+	if got["workers"] != "6" || got["max_connections"] != "18000" { t.Fatalf("runtime settings missing from profile details: %#v", got) }
 	if got["secret"] != "cAEjRWeJq83vASNFZ4mrze8" { t.Fatalf("unexpected client-facing secret: %q", got["secret"]) }
 	if !strings.Contains(got["link"], "https://t.me/webproxy?") { t.Fatalf("unexpected Telegram link: %q", got["link"]) }
 	if !strings.Contains(got["tg_link"], "tg://webproxy?") { t.Fatalf("unexpected direct Telegram link: %q", got["tg_link"]) }
