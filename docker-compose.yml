@@ -31,6 +31,14 @@ services:
       - ./docker/config:/etc/tproxy-server:ro
       - ./docker/site:/srv/tproxy-site:ro
       - ./docker/profiles:/var/lib/tproxy-profiles:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 16777216
+      - type: tmpfs
+        target: /run
+        tmpfs:
+          size: 8388608
     healthcheck:
       test: ["CMD", "/usr/local/bin/tproxy-server", "-config", "/etc/tproxy-server/config.json", "-profiles-file", "/var/lib/tproxy-profiles/profiles.json", "-check"]
       interval: 30s
@@ -44,15 +52,6 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     read_only: true
-    volumes:
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          size: 16777216
-      - type: tmpfs
-        target: /run
-        tmpfs:
-          size: 8388608
   mtproxy-firewall:
     profiles: ["mtproxy"]
     build:
@@ -109,6 +108,10 @@ services:
     volumes:
       - ./docker/mtproxy:/run/mtproxy:ro
       - mtproxy-data:/var/lib/mtproxy
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 8388608
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8888/stats >/dev/null"]
       interval: 30s
@@ -118,11 +121,6 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     read_only: true
-    volumes:
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          size: 8388608
   caddy:
     profiles: ["caddy"]
     image: caddy:2.11.4-alpine
@@ -213,14 +211,13 @@ services:
       - ./docker/profiles:/var/lib/tproxy-profiles:rw
       - ./docker/mtproxy:/run/mtproxy:rw
       - ./docker/security/logs:/var/log/tproxy-panel:rw
-    networks: [proxy-internal]
-    security_opt: [no-new-privileges:true]
-    read_only: true
-    volumes:
       - type: tmpfs
         target: /tmp
         tmpfs:
           size: 8388608
+    networks: [proxy-internal]
+    security_opt: [no-new-privileges:true]
+    read_only: true
 networks:
   proxy-internal:
     driver: bridge
