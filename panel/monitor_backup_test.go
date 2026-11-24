@@ -73,7 +73,7 @@ func TestDiagnosticsChecksRelayAndMTProxy(t *testing.T) {
 	a:=testApp(t)
 	a.monitorClient=&http.Client{Transport:monitorRoundTripper(func(req *http.Request)(*http.Response,error){
 		body:="ok\n"
-		switch req.URL.Path {case "/readyz":body="ready\n";case "/stats":body="uptime\t123\n"}
+		switch req.URL.Path {case "/relay/readyz":body="ready\n";case "/stats":body="uptime\t123\n"}
 		return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(bytes.NewBufferString(body)),Request:req},nil
 	})}
 	response:=httptest.NewRecorder()
