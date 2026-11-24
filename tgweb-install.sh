@@ -4370,6 +4370,7 @@ install_admin_panel() {
     die "Не удалось получить исходный код административной панели."
   fi
   cd "$repo_dir/web-panel"
+  "$GO_BIN" mod download || { cd - >/dev/null; rm -rf "$source_tmp"; die "Не удалось загрузить зависимости административной панели."; }
   if [[ "$SKIP_TESTS" -ne 1 ]]; then
     "$GO_BIN" test ./... || { cd - >/dev/null; rm -rf "$source_tmp"; die "Тесты административной панели не пройдены."; }
   fi
