@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TPROXY · Панель управления</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1220;--panel:#111d2d;--line:#26374d;--muted:#8fa2ba;--text:#edf4ff;--blue:#73a9ff;--mint:#65d8c1}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 80% 0%,#172d48 0,transparent 34%),var(--bg);color:var(--text);font:14px Inter,system-ui,sans-serif}
+.shell{max-width:1250px;margin:auto;padding:28px}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:30px}
+.brand{font-weight:900;letter-spacing:.17em;color:var(--blue)}
+.brand small{display:block;color:var(--muted);letter-spacing:0;margin-top:5px}
+.hero{padding:30px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(120deg,#182b43,#101a29);margin-bottom:20px}
+.eyebrow{color:var(--mint);font-size:11px;font-weight:800;letter-spacing:.2em}
+.hero h1{font-size:clamp(25px,4vw,38px);margin:12px 0 7px}
+.sub,.meta{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;min-width:0}
+.card h2{font-size:17px;margin:0 0 16px}
+.wide{grid-column:1/-1}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid #ffffff10}
+.row:last-child{border:0}
+.name{font-weight:750}
+.meta{font-size:12px;margin-top:5px}
+.actions,.toolbar,.formline{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+button,input{font:inherit}
+button,input{border:1px solid var(--line);border-radius:9px;padding:10px;background:#0b1523;color:var(--text)}
+button{cursor:pointer;background:#1b3552;border-color:#3b587a}
+button.primary{background:linear-gradient(110deg,#4c8cff,#63cdbd);border:0;color:#071321;font-weight:800}
+button.danger{border-color:#78444b;background:#3a202a;color:#ffc5c8}
+button:disabled{opacity:.5;cursor:wait}
+input{min-width:220px}
+.output{white-space:pre-wrap;max-height:420px;overflow:auto;background:#09111d;border:1px solid var(--line);padding:15px;border-radius:12px;color:#b9c9dc;font:12px ui-monospace,monospace}
+.qr{max-width:220px;background:white;padding:10px;border-radius:12px}
+.logout{color:#b8c8dc;text-decoration:none;border:1px solid var(--line);padding:10px 14px;border-radius:10px}
+.foot{color:#6f829a;text-align:center;padding:24px 0;font-size:12px}
+@media(max-width:760px){.shell{padding:16px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}.hero{padding:22px}.row{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<main class="shell">
+<header class="top">
+<div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div>
+<a class="logout" href="#" onclick="logout()">Выйти ↗</a>
+</header>
+<section class="hero">
+<div class="eyebrow">CONTROL CENTER</div>
+<h1>Управление прокси</h1>
+<div class="sub">Профили, состояние инфраструктуры и резервные копии в одном месте</div>
+</section>
+<div class="grid">
+<section class="card">
+<h2>Система</h2><p>● Панель авторизована</p>
+<div class="meta">Внутренний сервис доступен только через локальный reverse proxy.</div>
+</section>
+<section class="card">
+<h2>Быстрые действия</h2>
+<div class="toolbar"><button class="primary" onclick="createBackup()">＋ Создать резервную копию</button><button onclick="loadAll()">↻ Обновить данные</button></div>
+<div class="meta">Все операции выполняются штатным установщиком и его валидаторами.</div>
+</section>
+<section class="card wide">
+<h2>Профили</h2>
+<div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">Создать профиль</button></div>
+<div id="profiles">Загрузка профилей…</div>
+</section>
+<section class="card wide">
+<h2>Конфигурация</h2>
+<button onclick="loadConfig()">Показать конфигурацию (секреты скрыты)</button>
+<pre id="config" class="output">Нажмите «Показать конфигурацию».</pre>
+</section>
+<section class="card wide">
+<h2>Диагностика</h2>
+<button onclick="loadDiagnostics()">Запустить диагностику</button>
+<pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre>
+</section>
+<section class="card wide">
+<h2>Резервные копии</h2>
+<div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="loadBackups()">Обновить список</button></div>
+<div id="backups">Загрузка архивов…</div>
+</section>
+<section class="card">
+<h2>QR-код подключения</h2>
+<img class="qr" src="api/qr" alt="QR-код прокси">
+<p class="meta">QR-код основного профиля</p>
+</section>
+</div>
+<div class="foot">TPROXY MANAGER · Secure administration</div>
+</main>
+<script>
+let csrf='';
+const base=location.pathname.replace(/\/$/,'');
+async function api(path,opts={}){
+ opts.credentials='same-origin';
+ opts.headers=Object.assign({'Content-Type':'application/json','X-CSRF-Token':csrf},opts.headers||{});
+ const response=await fetch(path,opts);
+ csrf=response.headers.get('X-CSRF-Token')||csrf;
+ if(response.status===401){location.href='login';throw Error('Сессия завершена')}
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok)throw Error(data.error||'Ошибка запроса');
+ return data;
+}
+function esc(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function notify(error){alert(error.message||String(error))}
+async function loadProfiles(){
+ try{
+  const profiles=await api(base+'/api/profiles');
+  document.querySelector('#profiles').innerHTML=profiles.map(p=>'<div class="row"><div><div class="name">'+esc(p.name)+'</div><div class="meta">'+esc(p.carrier_mode)+' · '+esc(p.backend)+'</div></div>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div>').join('')||'Профили не найдены';
+ }catch(error){notify(error)}
+}
+async function addProfile(){
+ try{
+  const name=document.querySelector('#newName').value.trim();
+  if(!name)throw Error('Укажите имя профиля');
+  await api(base+'/api/profiles',{method:'POST',body:JSON.stringify({Name:name})});
+  document.querySelector('#newName').value='';
+  await loadProfiles();
+ }catch(error){notify(error)}
+}
+async function deleteProfile(name){
+ if(!confirm('Удалить профиль '+name+'?'))return;
+ try{await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'delete'})});await loadProfiles()}catch(error){notify(error)}
+}
+async function loadConfig(){
+ try{const config=await api(base+'/api/config');document.querySelector('#config').textContent=JSON.stringify(config,null,2)}
+ catch(error){document.querySelector('#config').textContent=error.message}
+}
+async function loadDiagnostics(){
+ try{const result=await api(base+'/api/diagnostics');document.querySelector('#diagnostics').textContent=result.output||'Нет вывода'}
+ catch(error){document.querySelector('#diagnostics').textContent=error.message}
+}
+async function loadBackups(){
+ try{
+  const backups=await api(base+'/api/backups');
+  document.querySelector('#backups').innerHTML=backups.map(b=>'<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">'+(b.size/1048576).toFixed(2)+' MB · '+new Date(b.modified).toLocaleString()+'</div></div><button onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button></div>').join('')||'Архивов пока нет';
+ }catch(error){notify(error)}
+}
+async function createBackup(){
+ if(!confirm('Создать полную резервную копию конфигурации?'))return;
+ try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'create'})});await loadBackups();alert('Резервная копия создана')}
+ catch(error){notify(error)}
+}
+async function restoreBackup(name){
+ if(!confirm('ВНИМАНИЕ: восстановление заменит текущую конфигурацию. Продолжить?'))return;
+ try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'restore',Name:name})});alert('Восстановление завершено. Панель перезапустится.');setTimeout(()=>location.reload(),5000)}
+ catch(error){notify(error)}
+}
+async function logout(){
+ try{await api(base+'/logout',{method:'POST',body:'{}'})}catch(error){location.href='login'}
+}
+async function loadAll(){await loadProfiles();await loadBackups()}
+loadAll();
+</script>
+</body>
+</html>
