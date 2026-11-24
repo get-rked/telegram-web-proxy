@@ -78,6 +78,8 @@ jobs:
           go vet ./...
       - name: Build panel image
         run: docker build -f docker/Dockerfile.panel -t tproxy-panel:test .
+      - name: Build relay image
+        run: docker build -f docker/Dockerfile.relay -t tproxy-relay:test .
 
   docker-compose:
     name: Compose configuration validation
