@@ -4307,8 +4307,8 @@ profile_cli() {
         --generate) rotate=1; shift ;;
         *) die "Неизвестный параметр profile update: $1" ;; esac; done
       valid_name "$name" && valid_mode "$mode" || die "Недопустимое имя или Carrier mode."
-      [[ -z "$workers" || ( "$workers" =~ ^[1-9][0-9]*$ && "$workers" -le 256 ) ]] || die "Workers должен быть от 1 до 256."
-      [[ -z "$max_connections" || ( "$max_connections" =~ ^[1-9][0-9]*$ && "$max_connections" -le 1000000 ) ]] || die "Max Connections должен быть от 1 до 1000000."
+      [[ -z "$workers" || ( "$workers" =~ ^[1-9][0-9]*$ && ${#workers} -le 3 && "$workers" -le 256 ) ]] || die "Workers должен быть от 1 до 256."
+      [[ -z "$max_connections" || ( "$max_connections" =~ ^[1-9][0-9]*$ && ${#max_connections} -le 7 && "$max_connections" -le 1000000 ) ]] || die "Max Connections должен быть от 1 до 1000000."
       file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
       secret="$(jq -r '.secret' "$file")"
       valid_secret "$secret" || die "Секрет профиля некорректен."
