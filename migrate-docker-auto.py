@@ -18,10 +18,12 @@ class MigrationAbort(Exception):
     pass
 
 
-def cmd(args, check=True, timeout=1800):
+def cmd(args, check=True, timeout=1800, show=False):
     p = subprocess.run(args, text=True, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, timeout=timeout)
     output = (p.stdout or "").strip()
+    if show and output:
+        print(output, flush=True)
     if check and p.returncode:
         raise MigrationAbort("{} failed:\n{}".format(" ".join(args), output))
     return output, p.returncode
@@ -126,11 +128,11 @@ def main():
 
     print("\n[3/6] Создание резервной копии и перенос конфигурации")
     cmd(["python3", str(ROOT / "migrate-to-docker.py"), "--source-dir", str(source),
-         "--web-server", proxy, "--apply"])
+         "--web-server", proxy, "--apply"], show=True)
 
     print("\n[4/6] Проверка Compose и сборка")
     cmd(["docker", "compose"] + profiles + ["config"])
-    cmd(["docker", "compose"] + profiles + ["build"], timeout=3600)
+    cmd(["docker", "compose"] + profiles + ["build"], timeout=3600, show=True)
 
     if args.prepare_only:
         print("\nПодготовка завершена. Старые службы не остановлены, Docker не запущен.")
@@ -157,7 +159,7 @@ def main():
                 raise MigrationAbort("После остановки служб порт {} всё ещё занят: {}".format(port, rows))
 
         print("\n[6/6] Запуск Docker")
-        cmd(["docker", "compose"] + profiles + ["up", "-d"], timeout=1800)
+        cmd(["docker", "compose"] + profiles + ["up", "-d"], timeout=1800, show=True)
         deadline = time.time() + 180
         while time.time() < deadline:
             state, _ = cmd(["docker", "compose", "ps", "--format", "json"], False)
@@ -168,6 +170,11 @@ def main():
 
         status, _ = cmd(["docker", "compose", "ps"], False)
         print(status)
+        running, _ = cmd(["docker", "compose", "ps", "--services", "--status", "running"], False)
+        required = {"relay", "panel", "fail2ban", "mtproxy", proxy}
+        missing = sorted(required - set(running.splitlines()))
+        if missing:
+            raise MigrationAbort("Не все обязательные контейнеры работают: " + ", ".join(missing))
         _, rc = cmd(["iptables", "-S", "DOCKER-USER"], False)
         if rc:
             raise MigrationAbort("Не создана цепочка DOCKER-USER: Fail2ban не сможет блокировать Docker-трафик.")
