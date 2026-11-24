@@ -157,7 +157,7 @@ Usage:
   sudo ./tgweb-install.sh profile list
   sudo ./tgweb-install.sh profile add ИМЯ (--secret СЕКРЕТ | --generate) [--carrier-mode MODE]
   sudo ./tgweb-install.sh profile set-carrier ИМЯ MODE
-  sudo ./tgweb-install.sh profile update ИМЯ --carrier-mode MODE [--generate]
+  sudo ./tgweb-install.sh profile update ИМЯ --carrier-mode MODE [--workers N] [--max-connections N] [--generate]
   sudo ./tgweb-install.sh profile delete ИМЯ --yes
   sudo ./tgweb-install.sh profile backup ИМЯ
   sudo ./tgweb-install.sh profile import ARCHIVE (--name ИМЯ | --replace-default) [--entry PATH] --yes
@@ -4253,7 +4253,7 @@ main() {
 # CLI-интерфейс операций, ранее доступных только из меню.
 profile_cli() {
   need_root; need_files
-  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0 rotate=0 backup_tmp=""
+  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0 rotate=0 backup_tmp="" workers="" max_connections="" env_backup="" env_tmp=""
   shift || true
   case "$action" in
     list)
@@ -4302,9 +4302,13 @@ profile_cli() {
       name="$1"; shift
       while (($#)); do case "$1" in
         --carrier-mode) (($# >= 2)) || die "--carrier-mode требует значение"; mode="$2"; shift 2 ;;
+        --workers) (($# >= 2)) || die "--workers требует значение"; workers="$2"; shift 2 ;;
+        --max-connections) (($# >= 2)) || die "--max-connections требует значение"; max_connections="$2"; shift 2 ;;
         --generate) rotate=1; shift ;;
         *) die "Неизвестный параметр profile update: $1" ;; esac; done
       valid_name "$name" && valid_mode "$mode" || die "Недопустимое имя или Carrier mode."
+      [[ -z "$workers" || ( "$workers" =~ ^[1-9][0-9]*$ && "$workers" -le 256 ) ]] || die "Workers должен быть от 1 до 256."
+      [[ -z "$max_connections" || ( "$max_connections" =~ ^[1-9][0-9]*$ && "$max_connections" -le 1000000 ) ]] || die "Max Connections должен быть от 1 до 1000000."
       file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
       secret="$(jq -r '.secret' "$file")"
       valid_secret "$secret" || die "Секрет профиля некорректен."
@@ -4319,6 +4323,25 @@ profile_cli() {
       fi
       backup_tmp="$(mktemp)"
       cp -a "$file" "$backup_tmp" || { rm -f "$backup_tmp"; die "Не удалось сохранить исходный профиль."; }
+      if [[ -n "$workers" || -n "$max_connections" ]]; then
+        [[ -s "$MT_ENV" ]] || { rm -f "$backup_tmp"; die "Не найден файл настроек MTProxy: $MT_ENV"; }
+        env_backup="$(mktemp)"
+        cp -a "$MT_ENV" "$env_backup" || { rm -f "$backup_tmp" "$env_backup"; die "Не удалось сохранить настройки MTProxy."; }
+        env_tmp="$(mktemp "$MT_ENV.XXXXXX")"
+        if ! awk -v w="$workers" -v c="$max_connections" '
+          BEGIN { seen_w=0; seen_c=0 }
+          /^MTPROXY_WORKERS=/ { if (w != "") { print "MTPROXY_WORKERS=" w; seen_w=1 } else print; next }
+          /^MTPROXY_MAX_CONNECTIONS=/ { if (c != "") { print "MTPROXY_MAX_CONNECTIONS=" c; seen_c=1 } else print; next }
+          { print }
+          END {
+            if (w != "" && !seen_w) print "MTPROXY_WORKERS=" w
+            if (c != "" && !seen_c) print "MTPROXY_MAX_CONNECTIONS=" c
+          }
+        ' "$MT_ENV" > "$env_tmp"; then
+          rm -f "$backup_tmp" "$env_backup" "$env_tmp"; die "Не удалось обновить параметры MTProxy."
+        fi
+        chown root:mtproxy "$env_tmp"; chmod 0640 "$env_tmp"; mv -f "$env_tmp" "$MT_ENV"
+      fi
       tmp="$(mktemp "$file.XXXXXX")"
       if ! jq --arg s "$secret" --arg m "$mode" '.secret=$s | .carrier_mode=$m' "$file" > "$tmp"; then
         rm -f "$tmp" "$backup_tmp"; die "Не удалось обновить профиль."
@@ -4328,14 +4351,15 @@ profile_cli() {
          ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check ||
          ! systemctl restart mtproxy tproxy-server; then
         cp -a "$backup_tmp" "$file"
+        [[ -z "$env_backup" ]] || cp -a "$env_backup" "$MT_ENV"
         profile_manifest_sync || true
         write_mtproxy_secrets || true
         patch_mtproxy_unit || true
         systemctl restart mtproxy tproxy-server 2>/dev/null || true
-        rm -f "$backup_tmp"
+        rm -f "$backup_tmp" "$env_backup" "$env_tmp"
         die "Изменение профиля не прошло проверку; исходная конфигурация восстановлена."
       fi
-      rm -f "$backup_tmp"
+      rm -f "$backup_tmp" "$env_backup" "$env_tmp"
       ok "Профиль $name обновлён." ;;
     delete)
       [[ $# -eq 2 && "$2" == --yes ]] || die "profile delete ИМЯ --yes"
