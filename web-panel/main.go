@@ -778,17 +778,28 @@ func validateFullBackupArchive(path string) error {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	entries := 0
+	hasConfig := false
+	hasInstaller := false
 	for {
 		header, err := tr.Next()
 		if err == io.EOF { break }
 		if err != nil { return err }
 		entries++
 		if entries > 100000 { return fmt.Errorf("too many archive entries") }
-		if header.Name == "" || filepath.IsAbs(header.Name) || strings.Contains(header.Name, "..") {
+		clean := filepath.Clean(header.Name)
+		if header.Name == "" || filepath.IsAbs(header.Name) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("invalid archive path")
 		}
+		if clean == "opt/telegram-web-proxy/config" || strings.HasPrefix(clean, "opt/telegram-web-proxy/config"+string(filepath.Separator)) {
+			hasConfig = true
+		}
+		if clean == "opt/telegram-web-proxy/tgweb-install.sh" {
+			hasInstaller = true
+		}
 	}
-	if entries == 0 { return fmt.Errorf("empty archive") }
+	if entries == 0 || !hasConfig || !hasInstaller {
+		return fmt.Errorf("not a full Telegram proxy backup")
+	}
 	return nil
 }
 
