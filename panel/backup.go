@@ -34,6 +34,8 @@ func (a *application) backupDir() string {
 }
 
 func (a *application) createBackup() (backupInfo, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	var info backupInfo
 	dir := a.backupDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -208,6 +210,8 @@ func pruneFileBackups(path string, keep int) error {
 }
 
 func (a *application) restoreBackup(id string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if !backupIDPattern.MatchString(id) {
 		return errors.New("invalid backup id")
 	}
