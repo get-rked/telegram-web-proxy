@@ -27,15 +27,42 @@ tproxy_bootstrap_repository() {
   local stamp backup_root archive clone_tmp old_tree
   if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]] \
     && [[ "$(git -C "$TPROXY_DEPLOY_DIR" remote get-url origin 2>/dev/null || true)" == "$TPROXY_DEPLOY_REPO" ]]; then
-    # Если пользователь скачал свежий standalone-скрипт, обновляем только менеджер,
-    # не трогая Compose-файлы, конфигурацию, профили и данные Docker-проекта.
-    local downloaded_script installed_script
+    # Пользователь обновляет проект повторным скачиванием одного скрипта.
+    # Синхронизируем исходники из branch archive без git pull и сохраняем
+    # каталоги с рабочими данными, секретами и локальными настройками.
+    local downloaded_script installed_script sync_tmp sync_archive source_dir archive_url
     downloaded_script="$(readlink -f -- "$0")"
     installed_script="$(readlink -f -- "$TPROXY_DEPLOY_DIR/tgweb-install.sh")"
     if [[ "$downloaded_script" != "$installed_script" ]]; then
-      install -m 0755 -- "$downloaded_script" "$TPROXY_DEPLOY_DIR/.tgweb-install.sh.new"
-      mv -f -- "$TPROXY_DEPLOY_DIR/.tgweb-install.sh.new" "$TPROXY_DEPLOY_DIR/tgweb-install.sh"
-      printf 'Обновлён менеджер из скачанного скрипта. Данные и конфигурация проекта сохранены.\n'
+      sync_tmp="$(mktemp -d /opt/.telegram-web-proxy-sync.XXXXXX)"
+      sync_archive="$sync_tmp/project.tar.gz"
+      source_dir="$sync_tmp/source"
+      archive_url="https://codeload.github.com/get-rked/telegram-web-proxy/tar.gz/refs/heads/$TPROXY_DEPLOY_BRANCH"
+      mkdir -p "$source_dir"
+      if ! curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$archive_url" -o "$sync_archive" ||
+         ! tar -xzf "$sync_archive" --strip-components=1 -C "$source_dir" ||
+         [[ ! -s "$source_dir/docker-compose.yml" || ! -s "$source_dir/tgweb-install.sh" ]]; then
+        rm -rf -- "$sync_tmp"
+        echo "Не удалось загрузить актуальный архив проекта; существующая установка не изменена." >&2
+        exit 1
+      fi
+      command -v rsync >/dev/null 2>&1 || DEBIAN_FRONTEND=noninteractive apt-get install -y rsync
+      if ! rsync -a --delete \
+        --exclude='/.git/***' --exclude='/.env' --exclude='/docker-compose.override.yml' \
+        --exclude='/docker/config/***' --exclude='/docker/mtproxy/***' \
+        --exclude='/docker/profiles/***' --exclude='/docker/private/***' \
+        --exclude='/docker/private-credentials/***' --exclude='/docker/generated/***' \
+        --exclude='/docker/site/***' --exclude='/docker/panel-data/***' \
+        --exclude='/docker/mtproxy-data/***' --exclude='/docker/security/logs/***' \
+        --exclude='/docker/nginx/certs/***' \
+        "$source_dir/" "$TPROXY_DEPLOY_DIR/"; then
+        rm -rf -- "$sync_tmp"
+        echo "Не удалось синхронизировать исходники; рабочие данные сохранены." >&2
+        exit 1
+      fi
+      rm -rf -- "$sync_tmp"
+      chmod 0755 "$TPROXY_DEPLOY_DIR/tgweb-install.sh"
+      printf 'Исходники проекта обновлены из архива GitHub. Конфигурации, секреты и данные сохранены.\n'
     fi
     exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
   fi
