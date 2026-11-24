@@ -3055,21 +3055,28 @@ for item in containers:
     name = cell(item.get("Name") or item.get("Names") or "—", 30)
     state = str(item.get("State") or item.get("Status") or "unknown").lower()
     health = str(item.get("Health") or "").lower()
-    status = cell(item.get("Status") or state, 34)
+    status = cell(item.get("Status") or state, 28)
     if health and health not in status.lower():
-        status = cell(status + " (" + health + ")", 34)
+        status = cell(status + " (" + health + ")", 28)
     if state in ("running", "up") and health not in ("unhealthy",):
         color = "green" if health in ("healthy", "") else "yellow"
     elif state in ("created", "paused", "restarting"):
         color = "yellow"
-    elif state in ("exited", "dead", "removing") or health == "unhealthy":
+    elif state in ("exited", "dead") or health == "unhealthy":
         color = "red"
     else:
         color = "gray"
-    rows.append((service, name, paint(state, color), paint(status, color), ports_of(item)))
+    state_labels = {
+        "running": "Работает", "up": "Работает", "created": "Создан",
+        "paused": "Приостановлен", "restarting": "Перезапуск",
+        "exited": "Остановлен", "dead": "Ошибка", "removing": "Удаляется",
+        "unknown": "Неизвестно"
+    }
+    rows.append((service, name, paint(state_labels.get(state, state), color),
+                 paint(status, color), ports_of(item)))
 
 headers = ("СЕРВИС", "КОНТЕЙНЕР", "СОСТОЯНИЕ", "СТАТУС", "ПОРТЫ")
-widths = [20, 30, 14, 34, 48]
+widths = [18, 24, 14, 28, 36]
 def border(left, middle, right, fill):
     return left + middle.join(fill * (width + 2) for width in widths) + right
 def line(values):
@@ -3094,7 +3101,7 @@ else:
 print(border("└", "┴", "┘", "─"))
 print()
 print("Цвета: " + paint("● работает", "green") + "  " +
-      paint("● ожидает / перезапускается", "yellow") + "  " +
+      paint("● ожидает / перезапуск", "yellow") + "  " +
       paint("● ошибка / остановлен", "red") + "  " +
       paint("● неизвестно", "gray"))
 '
