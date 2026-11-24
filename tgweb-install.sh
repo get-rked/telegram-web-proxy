@@ -13,6 +13,80 @@ set -Eeuo pipefail
 trap 'if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then printf "\\033[1;31m❌ ERROR\033[0m at line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2; else printf "❌ ERROR at line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2; fi' ERR
 umask 077
 
+# ------------------------- self-deploy bootstrap ----------------------------
+TPROXY_DEPLOY_DIR="/opt/telegram-web-proxy"
+TPROXY_DEPLOY_REPO="https://github.com/get-rked/telegram-web-proxy.git"
+TPROXY_DEPLOY_BRANCH="feature/docker-web-panel"
+
+tproxy_bootstrap_repository() {
+  [[ "${TPROXY_BOOTSTRAP_DONE:-0}" == "1" ]] && return 0
+  [[ "${EUID}" -eq 0 ]] || {
+    printf 'Запусти установщик от root: sudo bash %q\n' "$0" >&2
+    exit 1
+  }
+  local script_path stamp backup_root archive stage clone_tmp old_tree
+  script_path="$(readlink -f -- "$0")"
+  if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]]; then
+    if [[ "$script_path" != "$TPROXY_DEPLOY_DIR/tgweb-install.sh" ]]; then
+      exec env TPROXY_BOOTSTRAP_DONE=1 TPROXY_NATIVE_SOURCE_DIR="${TPROXY_NATIVE_SOURCE_DIR:-}" bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
+    fi
+    return 0
+  fi
+  printf '\n=== Первоначальное развёртывание Telegram Web Proxy ===\n'
+  command -v apt-get >/dev/null 2>&1 || { echo "Поддерживаются Ubuntu/Debian с apt-get." >&2; exit 1; }
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git tar
+  backup_root="/var/backups/telegram-web-proxy"
+  install -d -o root -g root -m 0700 "$backup_root" /var/lib/telegram-web-proxy
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  stage="/var/lib/telegram-web-proxy/native-source-$stamp"
+  clone_tmp="/opt/.telegram-web-proxy-deploy-$stamp"
+  old_tree="/opt/.telegram-web-proxy-old-$stamp"
+  archive=""
+  if [[ -e "$TPROXY_DEPLOY_DIR" || -L "$TPROXY_DEPLOY_DIR" ]]; then
+    [[ ! -L "$TPROXY_DEPLOY_DIR" && -d "$TPROXY_DEPLOY_DIR" ]] || { echo "Отказ: $TPROXY_DEPLOY_DIR существует, но не является обычным каталогом." >&2; exit 1; }
+    archive="$backup_root/native-install-$stamp.tar.gz"
+    echo "[1/4] Создаю резервную копию прежней установки..."
+    tar -C /opt -czpf "$archive" telegram-web-proxy
+    tar -tzf "$archive" >/dev/null || { echo "Проверка архива не пройдена; исходный каталог не изменён." >&2; exit 1; }
+    chmod 0600 "$archive"
+    echo "[2/4] Извлекаю исходные настройки для переноса..."
+    install -d -o root -g root -m 0700 "$stage"
+    tar -C "$stage" --strip-components=1 -xzf "$archive"
+    if [[ ! -s "$stage/config/proxy/config.json" ]]; then
+      echo "Старая конфигурация Web Proxy не найдена; будет предложена чистая установка."
+      stage=""
+    fi
+  else
+    stage=""
+  fi
+  echo "[3/4] Загружаю репозиторий в $TPROXY_DEPLOY_DIR..."
+  rm -rf -- "$clone_tmp"
+  git clone --depth 1 --single-branch --branch "$TPROXY_DEPLOY_BRANCH" "$TPROXY_DEPLOY_REPO" "$clone_tmp" || {
+    echo "Не удалось загрузить репозиторий; прежняя установка сохранена." >&2
+    rm -rf -- "$clone_tmp"
+    exit 1
+  }
+  [[ -s "$clone_tmp/tgweb-install.sh" && -s "$clone_tmp/docker-compose.yml" ]] || {
+    echo "Загруженный репозиторий неполный; прежняя установка сохранена." >&2
+    rm -rf -- "$clone_tmp"
+    exit 1
+  }
+  if [[ -e "$TPROXY_DEPLOY_DIR" ]]; then mv -- "$TPROXY_DEPLOY_DIR" "$old_tree"; fi
+  if ! mv -- "$clone_tmp" "$TPROXY_DEPLOY_DIR"; then
+    [[ -e "$old_tree" ]] && mv -- "$old_tree" "$TPROXY_DEPLOY_DIR"
+    echo "Не удалось развернуть репозиторий; выполнен возврат прежнего каталога." >&2
+    exit 1
+  fi
+  rm -rf -- "$old_tree"
+  chmod 0755 "$TPROXY_DEPLOY_DIR/tgweb-install.sh"
+  echo "[4/4] Репозиторий установлен."
+  [[ -n "$archive" ]] && echo "Резервная копия прежней установки: $archive"
+  [[ -n "$stage" ]] && echo "Настройки для переноса сохранены: $stage"
+  exec env TPROXY_BOOTSTRAP_DONE=1 TPROXY_NATIVE_SOURCE_DIR="$stage" bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
+}
+tproxy_bootstrap_repository "$@"
+
 # ----------------------------- константы ------------------------------------
 readonly REPO_URL="https://github.com/telegramdesktop/tproxy-server.git"
 readonly UPSTREAM_COMMIT="c8adb8b7c6b7fc46c12ae3acb68be9070c26a8e8"
@@ -40,7 +114,7 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.2.0"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -164,7 +238,7 @@ Usage:
   sudo ./tgweb-install.sh services restart
   sudo ./tgweb-install.sh site remove [--yes]
   sudo ./tgweb-install.sh web-server remove [--yes]
-  sudo ./tgweb-install.sh docker install [--source-dir PATH] [--web-server caddy|nginx]
+  sudo ./tgweb-install.sh docker install [--source-dir PATH] [--web-server caddy|nginx] [--hostname FQDN] [--email EMAIL]
   sudo ./tgweb-install.sh docker update|uninstall|purge [--yes] [--volumes]
   sudo ./tgweb-install.sh docker status|restart [SERVICE]|logs [SERVICE]|backup
 
@@ -2425,15 +2499,40 @@ run_install() {
 # ============================================================================
 #  DOCKER MANAGER
 # ============================================================================
-DOCKER_PROJECT_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)"
+DOCKER_PROJECT_DIR="$BASE_DIR"
+DOCKER_REPO_BRANCH="feature/docker-web-panel"
 DOCKER_PROJECT_NAME="telegram-web-proxy"
 DOCKER_STATE_FILE="$DOCKER_PROJECT_DIR/docker/private/.manager-state"
 
+docker_ensure_engine() {
+  require_root
+  command -v apt-get >/dev/null 2>&1 || die "Автоматическая установка Docker поддерживается на Ubuntu/Debian (apt-get)."
+  if ! command -v docker >/dev/null 2>&1; then
+    info "Устанавливаю Docker Engine из репозитория ОС..."
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
+  fi
+  if ! docker compose version >/dev/null 2>&1; then
+    info "Устанавливаю Docker Compose plugin..."
+    apt-get update
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin || die "Не удалось установить Docker Compose plugin."
+    fi
+  fi
+  command -v iptables >/dev/null 2>&1 || {
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y iptables
+  }
+  systemctl enable --now docker
+  docker info >/dev/null 2>&1 || die "Docker daemon не запустился или недоступен."
+  docker compose version
+}
+
 docker_require_project() {
   require_root
-  command -v docker >/dev/null 2>&1 || die "Docker не установлен."
+  command -v docker >/dev/null 2>&1 || die "Docker не установлен. Выбери установку Docker в главном меню."
   docker compose version >/dev/null 2>&1 || die "Docker Compose plugin недоступен."
-  [[ -f "$DOCKER_PROJECT_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml рядом со скриптом. Запусти tgweb-install.sh из корня репозитория."
+  [[ -f "$DOCKER_PROJECT_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml в $DOCKER_PROJECT_DIR."
   [[ -d "$DOCKER_PROJECT_DIR/docker" ]] || die "Не найден каталог docker/."
   docker info >/dev/null 2>&1 || die "Docker daemon не запущен или недоступен."
 }
@@ -2468,29 +2567,116 @@ docker_write_state() {
   mv -f "$tmp" "$DOCKER_STATE_FILE"
 }
 
+docker_wait_ready() {
+  local proxy="$1" deadline ids inspected line service state health required ready
+  local -A states=()
+  deadline=$((SECONDS + 300))
+  while (( SECONDS < deadline )); do
+    states=()
+    ids="$(docker ps -q --filter "label=com.docker.compose.project=$DOCKER_PROJECT_NAME" 2>/dev/null || true)"
+    if [[ -n "$ids" ]]; then
+      inspected="$(docker inspect $ids --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
+      while IFS='|' read -r service state health; do
+        [[ -n "$service" ]] && states["$service"]="$state|$health"
+      done <<< "$inspected"
+    fi
+    ready=1
+    for required in relay panel fail2ban "$proxy" mtproxy mtproxy-firewall; do
+      line="${states[$required]:-}"
+      if [[ "$line" != "running|healthy" && "$line" != "running|none" ]]; then ready=0; break; fi
+    done
+    (( ready == 1 )) && break
+    sleep 5
+  done
+  docker_compose --profile "$proxy" --profile mtproxy ps -a
+  for required in relay panel fail2ban "$proxy" mtproxy mtproxy-firewall; do
+    line="${states[$required]:-}"
+    [[ "$line" == "running|healthy" || "$line" == "running|none" ]] ||
+      die "Сервис $required не готов (state/health: ${line:-не найден}). Проверь: sudo $BASE_DIR/tgweb-install.sh docker logs $required"
+  done
+}
+
+docker_install_fresh_command() {
+  local proxy="$1" domain="$2" email="$3" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
+  if [[ -z "$domain" ]]; then read -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
+  [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || die "Некорректное доменное имя: $domain"
+  if [[ -z "$email" ]]; then read -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
+  [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || die "Некорректный email: $email"
+  if [[ "$proxy" == "nginx" && ( ! -s "$cert_dir/fullchain.pem" || ! -s "$cert_dir/privkey.pem" ) ]]; then
+    die "Для чистой установки с Nginx нужны docker/nginx/certs/fullchain.pem и privkey.pem. Для автоматического TLS выбери Caddy."
+  fi
+  python3 - "$DOCKER_PROJECT_DIR/.env.example" "$DOCKER_PROJECT_DIR/.env" "$domain" "$email" <<'PY'
+import pathlib
+import re
+import sys
+source, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+domain, email = sys.argv[3], sys.argv[4]
+text = source.read_text(encoding="utf-8")
+for key, value in {"DOMAIN": domain, "ACME_EMAIL": email}.items():
+    text, count = re.subn(rf"(?m)^{key}=.*$", f"{key}={value}", text)
+    if not count:
+        text += f"\n{key}={value}\n"
+target.write_text(text, encoding="utf-8")
+target.chmod(0o600)
+PY
+  install -d -m 0750 "$DOCKER_PROJECT_DIR/docker/config" "$DOCKER_PROJECT_DIR/docker/mtproxy" \
+    "$DOCKER_PROJECT_DIR/docker/profiles" "$DOCKER_PROJECT_DIR/docker/private" \
+    "$DOCKER_PROJECT_DIR/docker/private-credentials" "$DOCKER_PROJECT_DIR/docker/generated" \
+    "$DOCKER_PROJECT_DIR/docker/security/logs"
+  docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
+  info "Загружаю внешние образы..."
+  docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы."
+  info "Собираю локальные образы..."
+  docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  info "Запускаю Telegram Web Proxy..."
+  docker_compose --profile "$proxy" --profile mtproxy up -d || die "Не удалось запустить Docker-проект."
+  docker_write_state "$proxy"
+  docker_wait_ready "$proxy"
+  ok "Чистая Docker-установка завершена."
+  echo "Конфигурация: $DOCKER_PROJECT_DIR/.env"
+  echo "Учётные данные панели: $DOCKER_PROJECT_DIR/docker/private-credentials/panel-credentials.txt"
+  echo "Проверь подключение Web Proxy в клиенте Telegram."
+}
+
 docker_install_command() {
-  docker_require_project
-  [[ -f "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" ]] || die "Не найден migrate-docker-auto.py."
-  local source_dir="$BASE_DIR" proxy=""
+  require_root
+  local source_dir="${TPROXY_NATIVE_SOURCE_DIR:-$BASE_DIR}" proxy="" domain="" email="" choice
   while (($#)); do
     case "$1" in
       --source-dir) (($# >= 2)) || die "--source-dir требует путь"; source_dir="$2"; shift 2 ;;
       --web-server) (($# >= 2)) || die "--web-server требует caddy|nginx"; proxy="$2"; shift 2 ;;
+      --hostname) (($# >= 2)) || die "--hostname требует домен"; domain="$2"; shift 2 ;;
+      --email) (($# >= 2)) || die "--email требует адрес"; email="$2"; shift 2 ;;
       *) die "Неизвестный параметр docker install: $1" ;;
     esac
   done
-  [[ -d "$source_dir" ]] || die "Не найдена исходная native-установка: $source_dir"
-  if [[ -n "$proxy" ]]; then
-    [[ "$proxy" == caddy || "$proxy" == nginx ]] || die "--web-server: допустимо caddy или nginx"
-    python3 "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" --source-dir "$source_dir" --web-server "$proxy" || return $?
-  else
-    python3 "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" --source-dir "$source_dir" || return $?
+  docker_ensure_engine
+  [[ -f "$DOCKER_PROJECT_DIR/docker-compose.yml" && -f "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" ]] || die "Репозиторий не полностью развёрнут в $DOCKER_PROJECT_DIR."
+  if [[ -z "$proxy" ]]; then
+    if [[ -s "$source_dir/config/proxy/web-server" ]]; then
+      proxy="$(tr '[:upper:]' '[:lower:]' < "$source_dir/config/proxy/web-server")"
+    elif [[ "$NONINTERACTIVE" == "1" ]]; then
+      proxy=caddy
+    else
+      echo "Выбери reverse proxy:"
+      echo "  1) Caddy (рекомендуется, автоматический TLS)"
+      echo "  2) Nginx (требуются готовые TLS-сертификаты)"
+      read -r -p "Выбор [1-2, по умолчанию 1]: " choice || die "Ввод прерван."
+      case "${choice:-1}" in 1) proxy=caddy ;; 2) proxy=nginx ;; *) die "Установка отменена." ;; esac
+    fi
   fi
-  [[ -n "$proxy" ]] || proxy="$(cat "$source_dir/config/proxy/web-server" 2>/dev/null || true)"
-  if [[ "$proxy" == caddy || "$proxy" == nginx ]]; then docker_write_state "$proxy"; fi
-  ok "Docker-операция установки/переноса завершена. Нативные файлы сохранены для отката."
+  [[ "$proxy" == caddy || "$proxy" == nginx ]] || die "Допустимы только Caddy или Nginx."
+  if [[ -s "$source_dir/config/proxy/config.json" ]]; then
+    info "Найдена прежняя native-конфигурация. Запускаю безопасный перенос в Docker..."
+    [[ -z "$domain" ]] || die "При переносе домен берётся из сохранённой native-конфигурации; --hostname здесь не применяется."
+    python3 "$DOCKER_PROJECT_DIR/migrate-docker-auto.py" --source-dir "$source_dir" --web-server "$proxy" || return $?
+    docker_write_state "$proxy"
+    ok "Перенос завершён. Нативные файлы и службы сохранены для отката."
+  else
+    info "Старая native-конфигурация не найдена. Выполняю чистую Docker-установку."
+    docker_install_fresh_command "$proxy" "$domain" "$email"
+  fi
 }
-
 docker_update_command() {
   docker_require_project
   [[ -s "$DOCKER_PROJECT_DIR/.env" ]] || die "Не найден .env. Сначала выполни docker install."
@@ -4368,24 +4554,28 @@ show_tools_menu() {
 }
 show_menu() {
   local choice
-  ui_header "Telegram WEB-Proxy Manager v${SCRIPT_VERSION}"
-  ui_option 1 "⇧" "Установить tproxy-server"
-  ui_option 2 "↻" "Обновить существующую установку"
-  ui_option 3 "⌫" "Удаление"
-  ui_option 4 "▤" "Текущая конфигурация"
-  ui_option 5 "⚒" "Инструменты"
-  ui_option 6 "⏻" "Выход"
-  ui_option 7 "◈" "Docker — установка и обслуживание"
+  ui_header "Telegram Web Proxy — Docker Manager v${SCRIPT_VERSION}"
+  ui_option 1 "⇧" "Установить / перенести Web Proxy в Docker"
+  ui_option 2 "↻" "Обновить код и Docker-образы"
+  ui_option 3 "▤" "Состояние контейнеров"
+  ui_option 4 "⟳" "Перезапустить Docker-сервисы"
+  ui_option 5 "≡" "Последние логи"
+  ui_option 6 "▣" "Резервная копия проекта"
+  ui_option 7 "⌫" "Удалить контейнеры (сохранить данные)"
+  ui_option 8 "✖" "Очистить проект (образы; тома отдельно)"
+  ui_option 9 "⏻" "Выход"
   echo
-  read -r -p "Выбор [1-7]: " choice
+  read -r -p "Выбор [1-9]: " choice
   case "$choice" in
-    1) MODE=install ;;
-    2) MODE=update ;;
-    3) MODE=delete ;;
-    4) MODE=config ;;
-    5) MODE=tools ;;
-    6) exit 0 ;;
-    7) MODE=docker ;;
+    1) MODE=docker-install ;;
+    2) MODE=docker-update ;;
+    3) MODE=docker-status ;;
+    4) MODE=docker-restart ;;
+    5) MODE=docker-logs ;;
+    6) MODE=docker-backup ;;
+    7) MODE=docker-uninstall ;;
+    8) MODE=docker-purge ;;
+    9|"") exit 0 ;;
     *) warn "Неверный выбор." ;;
   esac
 }
@@ -4400,35 +4590,37 @@ main() {
       MODE=""
       show_menu
       case "$MODE" in
-        tools)
-          show_tools_menu
+        docker-install)
+          docker_install_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        docker)
-          docker_menu
+        docker-update)
+          docker_update_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        delete)
-          show_deletion_menu
+        docker-status)
+          docker_status_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        config)
-          require_root
-          run_config
-          read -r -p "Нажми Enter, чтобы вернуться в главное меню..." _
+        docker-restart)
+          docker_restart_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        install)
-          run_install
-          return 0
+        docker-logs)
+          docker_logs_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        update)
-          run_install
-          return 0
+        docker-backup)
+          docker_backup_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        uninstall)
-          run_uninstall
-          return 0
+        docker-uninstall)
+          docker_uninstall_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
-        purge)
-          run_purge
-          return 0
+        docker-purge)
+          docker_purge_command
+          read -r -p "Enter — вернуться в меню..." _ || true
           ;;
       esac
     done
