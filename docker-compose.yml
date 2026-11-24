@@ -154,7 +154,27 @@ services:
     command: ["sh", "-c", "chown -R 10001:10001 /data"]
     volumes:
       - panel-data:/data
+      - ./docker/security/logs:/security-logs
+    command: ["sh", "-c", "chown -R 10001:10001 /data /security-logs"]
     restart: "no"
+  fail2ban:
+    image: crazymax/fail2ban:1.1.0
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      TZ: ${TZ:-UTC}
+      F2B_LOG_TARGET: STDOUT
+      F2B_LOG_LEVEL: INFO
+      F2B_DB_PURGE_AGE: 7d
+    volumes:
+      - ./docker/security/fail2ban/jail.d:/etc/fail2ban/jail.d:ro
+      - ./docker/security/fail2ban/filter.d:/etc/fail2ban/filter.d:ro
+      - ./docker/security/fail2ban/action.d:/etc/fail2ban/action.d:ro
+      - ./docker/security/logs:/var/log/tproxy-panel:ro
+      - fail2ban-data:/data
+    depends_on:
+      panel: {condition: service_started}
   panel:
     user: "10001:10001"
     build:
@@ -169,6 +189,8 @@ services:
       TPROXY_CONFIG: /etc/tproxy-server/config.json
       TPROXY_PROFILES: /var/lib/tproxy-profiles/profiles.json
       MTPROXY_SECRET_FILE: /run/secrets/mtproxy_secret
+      PANEL_AUTH_LOG: /var/log/tproxy-panel/auth.log
+      PANEL_TRUST_PROXY: "true"
     depends_on:
       bootstrap: {condition: service_completed_successfully}
       panel-volume-init: {condition: service_completed_successfully}
@@ -176,7 +198,8 @@ services:
       - panel-data:/var/lib/tproxy-panel
       - ./docker/config/config.json:/etc/tproxy-server/config.json:ro
       - ./docker/profiles:/var/lib/tproxy-profiles:rw
-      - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:ro
+      - ./docker/mtproxy/secret:/run/secrets/mtproxy_secret:rw
+      - ./docker/security/logs:/var/log/tproxy-panel:rw
     networks: [proxy-internal]
     security_opt: [no-new-privileges:true]
     read_only: true
@@ -189,3 +212,4 @@ volumes:
   caddy-data:
   caddy-config:
   mtproxy-data:
+  fail2ban-data:
