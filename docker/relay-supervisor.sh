@@ -31,7 +31,7 @@ while [ "$stopping" -eq 0 ]; do
         continue
     fi
 
-    current_hash=$(sha256sum "$PROFILES" | awk '{print $1}')
+    current_hash=$(sha256sum "$CONFIG" "$PROFILES" | sha256sum | awk '{print $1}')
     last_hash=$current_hash
     rejected_hash=
 
@@ -41,12 +41,12 @@ while [ "$stopping" -eq 0 ]; do
 
     while kill -0 "$child" 2>/dev/null; do
         sleep 2
-        new_hash=$(sha256sum "$PROFILES" | awk '{print $1}')
+        new_hash=$(sha256sum "$CONFIG" "$PROFILES" | sha256sum | awk '{print $1}')
         if [ "$new_hash" = "$last_hash" ] || [ "$new_hash" = "$rejected_hash" ]; then
             continue
         fi
         if "$SERVER" -config "$CONFIG" -profiles-file "$PROFILES" -check; then
-            echo "relay-supervisor: valid profile update detected; restarting relay"
+            echo "relay-supervisor: valid config/profile update detected; restarting relay"
             stop_child
             restart=1
             break
