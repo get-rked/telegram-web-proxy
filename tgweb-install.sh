@@ -27,7 +27,16 @@ tproxy_bootstrap_repository() {
   local stamp backup_root archive clone_tmp old_tree
   if [[ -d "$TPROXY_DEPLOY_DIR/.git" && -s "$TPROXY_DEPLOY_DIR/tgweb-install.sh" && -s "$TPROXY_DEPLOY_DIR/docker-compose.yml" ]] \
     && [[ "$(git -C "$TPROXY_DEPLOY_DIR" remote get-url origin 2>/dev/null || true)" == "$TPROXY_DEPLOY_REPO" ]]; then
-    # При обычном запуске используем уже установленную версию без сетевой проверки обновлений.
+    # Если пользователь скачал свежий standalone-скрипт, обновляем только менеджер,
+    # не трогая Compose-файлы, конфигурацию, профили и данные Docker-проекта.
+    local downloaded_script installed_script
+    downloaded_script="$(readlink -f -- "$0")"
+    installed_script="$(readlink -f -- "$TPROXY_DEPLOY_DIR/tgweb-install.sh")"
+    if [[ "$downloaded_script" != "$installed_script" ]]; then
+      install -m 0755 -- "$downloaded_script" "$TPROXY_DEPLOY_DIR/.tgweb-install.sh.new"
+      mv -f -- "$TPROXY_DEPLOY_DIR/.tgweb-install.sh.new" "$TPROXY_DEPLOY_DIR/tgweb-install.sh"
+      printf 'Обновлён менеджер из скачанного скрипта. Данные и конфигурация проекта сохранены.\n'
+    fi
     exec env TPROXY_BOOTSTRAP_DONE=1 bash "$TPROXY_DEPLOY_DIR/tgweb-install.sh" "$@"
   fi
   printf '\n=== Первоначальное развёртывание Telegram Web Proxy (Docker) ===\n'
