@@ -2788,7 +2788,7 @@ list_backup_archives() {
 restore_command() {
   local selection="${1:-}" archive="" i size
   local -a archives=()
-  if [[ "$2" == "--yes" && $# -eq 2 ]]; then ASSUME_YES=1
+  if [[ "${2:-}" == "--yes" && $# -eq 2 ]]; then ASSUME_YES=1
   elif (( $# > 1 )); then die "restore принимает только номер архива и необязательный --yes"; fi
   mapfile -d '' -t archives < <(list_backup_archives)
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
