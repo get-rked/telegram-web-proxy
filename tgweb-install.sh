@@ -85,6 +85,16 @@ tproxy_bootstrap_repository() {
     echo "Не удалось развернуть репозиторий; выполнен возврат прежнего каталога." >&2
     exit 1
   fi
+  # Keep the previous native tree layout at its original absolute paths.
+  # Existing systemd units and rollback binaries therefore remain usable.
+  if [[ -n "$stage" ]]; then
+    local native_item
+    for native_item in bin config data src systemd qr backups; do
+      if [[ -e "$stage/$native_item" && ! -e "$TPROXY_DEPLOY_DIR/$native_item" ]]; then
+        cp -a "$stage/$native_item" "$TPROXY_DEPLOY_DIR/$native_item"
+      fi
+    done
+  fi
   rm -rf -- "$old_tree"
   chmod 0755 "$TPROXY_DEPLOY_DIR/tgweb-install.sh"
   echo "[4/4] Репозиторий установлен."
