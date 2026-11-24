@@ -10,146 +10,151 @@
 body{margin:0;background:radial-gradient(circle at 80% 0%,#172d48 0,transparent 34%),var(--bg);color:var(--text);font:14px Inter,system-ui,sans-serif}
 .shell{max-width:1250px;margin:auto;padding:28px}
 .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:30px}
-.brand{font-weight:900;letter-spacing:.17em;color:var(--blue)}
-.brand small{display:block;color:var(--muted);letter-spacing:0;margin-top:5px}
+.brand{font-weight:900;letter-spacing:.17em;color:var(--blue)}.brand small{display:block;color:var(--muted);letter-spacing:0;margin-top:5px}
 .hero{padding:30px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(120deg,#182b43,#101a29);margin-bottom:20px}
 .eyebrow{color:var(--mint);font-size:11px;font-weight:800;letter-spacing:.2em}
-.hero h1{font-size:clamp(25px,4vw,38px);margin:12px 0 7px}
-.sub,.meta{color:var(--muted)}
+.hero h1{font-size:clamp(25px,4vw,38px);margin:12px 0 7px}.sub,.meta{color:var(--muted)}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;min-width:0}
-.card h2{font-size:17px;margin:0 0 16px}
-.wide{grid-column:1/-1}
-.row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid #ffffff10}
-.row:last-child{border:0}
-.name{font-weight:750}
-.meta{font-size:12px;margin-top:5px}
-.actions,.toolbar,.formline{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-button,input{font:inherit}
-button,input{border:1px solid var(--line);border-radius:9px;padding:10px;background:#0b1523;color:var(--text)}
-button{cursor:pointer;background:#1b3552;border-color:#3b587a}
-button.primary{background:linear-gradient(110deg,#4c8cff,#63cdbd);border:0;color:#071321;font-weight:800}
-button.danger{border-color:#78444b;background:#3a202a;color:#ffc5c8}
-button:disabled{opacity:.5;cursor:wait}
-input{min-width:220px}
+.card h2{font-size:17px;margin:0 0 16px}.wide{grid-column:1/-1}
+.row{display:flex;gap:14px;align-items:center;justify-content:space-between;padding:15px 0;border-bottom:1px solid #ffffff10}.row:last-child{border:0}
+.profile{background:#0d1827;border:1px solid #26374d;border-radius:13px;padding:16px;margin-top:12px}
+.profile-head{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.name{font-weight:750;font-size:15px}.meta{font-size:12px;margin-top:6px}
+.actions,.toolbar,.formline{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button,input,select{font:inherit;border:1px solid var(--line);border-radius:9px;padding:10px;background:#0b1523;color:var(--text)}
+button{cursor:pointer;background:#1b3552;border-color:#3b587a}button.primary{background:linear-gradient(110deg,#4c8cff,#63cdbd);border:0;color:#071321;font-weight:800}
+button.danger{border-color:#78444b;background:#3a202a;color:#ffc5c8}button:disabled{opacity:.5;cursor:wait}
+input,select{min-width:180px}input[type=file]{max-width:100%}
 .output{white-space:pre-wrap;max-height:420px;overflow:auto;background:#09111d;border:1px solid var(--line);padding:15px;border-radius:12px;color:#b9c9dc;font:12px ui-monospace,monospace}
-.qr{max-width:220px;background:white;padding:10px;border-radius:12px}
+.qr{width:220px;max-width:100%;background:white;padding:10px;border-radius:12px}
 .logout{color:#b8c8dc;text-decoration:none;border:1px solid var(--line);padding:10px 14px;border-radius:10px}
 .foot{color:#6f829a;text-align:center;padding:24px 0;font-size:12px}
-@media(max-width:760px){.shell{padding:16px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}.hero{padding:22px}.row{align-items:flex-start;flex-direction:column}}
+dialog{width:min(560px,calc(100% - 28px));max-height:90vh;overflow:auto;background:#111d2d;color:var(--text);border:1px solid #3b587a;border-radius:18px;padding:24px}
+dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
+.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.dialog-head h2{margin:0}.field{margin:12px 0}.field label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
+.value{display:flex;gap:8px;align-items:center;min-width:0}.value code{display:block;overflow-wrap:anywhere;white-space:normal;background:#09111d;padding:10px;border-radius:8px;flex:1}
+.value button{flex-shrink:0}.link{color:#8dbaff;overflow-wrap:anywhere}.dialog-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+@media(max-width:760px){.shell{padding:16px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}.hero{padding:22px}.profile-head,.row{align-items:flex-start;flex-direction:column}.actions{width:100%}}
 </style>
 </head>
 <body>
 <main class="shell">
-<header class="top">
-<div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div>
-<a class="logout" href="#" onclick="logout()">Выйти ↗</a>
-</header>
-<section class="hero">
-<div class="eyebrow">CONTROL CENTER</div>
-<h1>Управление прокси</h1>
-<div class="sub">Профили, состояние инфраструктуры и резервные копии в одном месте</div>
-</section>
+<header class="top"><div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div><a class="logout" href="#" onclick="logout()">Выйти ↗</a></header>
+<section class="hero"><div class="eyebrow">CONTROL CENTER</div><h1>Управление прокси</h1><div class="sub">Профили, диагностика и резервирование — в отдельных разделах</div></section>
 <div class="grid">
-<section class="card">
-<h2>Система</h2><p>● Панель авторизована</p>
-<div class="meta">Внутренний сервис доступен только через локальный reverse proxy.</div>
-</section>
-<section class="card">
-<h2>Быстрые действия</h2>
-<div class="toolbar"><button class="primary" onclick="createBackup()">＋ Создать резервную копию</button><button onclick="loadAll()">↻ Обновить данные</button></div>
-<div class="meta">Все операции выполняются штатным установщиком и его валидаторами.</div>
-</section>
-<section class="card wide">
-<h2>Профили</h2>
-<div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">Создать профиль</button></div>
-<div id="profiles">Загрузка профилей…</div>
-</section>
-<section class="card wide">
-<h2>Импорт профиля</h2>
-<div class="formline"><input id="importArchive" type="file" accept=".tar.gz,.tgz"><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select><input id="importName" placeholder="Имя целевого профиля"><input id="importEntry" placeholder="Путь профиля в архиве (необязательно)"><button class="primary" onclick="importProfile()">Импортировать</button></div>
-<div class="meta">Поддерживаются архивы профилей и полные резервные копии. Если в архиве несколько профилей, укажите путь к нужному profile.json.</div>
-</section>
-
-<section class="card wide">
-<h2>Конфигурация</h2>
-<button onclick="loadConfig()">Показать конфигурацию (секреты скрыты)</button>
-<pre id="config" class="output">Нажмите «Показать конфигурацию».</pre>
-</section>
-<section class="card wide">
-<h2>Диагностика</h2>
-<button onclick="loadDiagnostics()">Запустить диагностику</button>
-<pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre>
-</section>
-<section class="card wide">
-<h2>Резервные копии</h2>
-<div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="loadBackups()">Обновить список</button></div>
+<section class="card"><h2>Система</h2><p>● Панель авторизована</p><div class="meta">Внутренний сервис доступен только через локальный reverse proxy.</div></section>
+<section class="card"><h2>Действия</h2><div class="toolbar"><button onclick="loadAll()">↻ Обновить данные</button></div><div class="meta">Изменения профилей применяются штатным установщиком.</div></section>
+<section class="card wide"><h2>Профили</h2>
+<div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">＋ Создать профиль</button></div>
+<div id="profiles">Загрузка профилей…</div></section>
+<section class="card wide"><h2>Диагностика</h2><button onclick="loadDiagnostics()">Запустить диагностику</button><pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre></section>
+<section class="card wide"><h2>Резервные копии и перенос профилей</h2>
+<div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="loadBackups()">Обновить список архивов</button></div>
+<div class="formline"><select id="exportProfile"><option value="">Выберите профиль для экспорта</option></select><button onclick="exportProfile()">Экспортировать профиль</button></div>
+<div class="meta">Экспорт создаёт архив выбранного профиля и сразу начинает его скачивание.</div>
+<div class="field"><label>Импорт профиля из архива</label><div class="formline"><input id="importArchive" type="file" accept=".tar.gz,.tgz"><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select><input id="importName" placeholder="Имя целевого профиля"><input id="importEntry" placeholder="Путь profile.json (если несколько)"><button class="primary" onclick="importProfile()">Импортировать</button></div></div>
+<div class="meta">Если в архиве несколько профилей, укажите путь к нужному profile.json.</div>
 <div id="backups">Загрузка архивов…</div>
-</section>
-<section class="card">
-<h2>QR-код подключения</h2>
-<img class="qr" src="api/qr" alt="QR-код прокси">
-<p class="meta">QR-код основного профиля</p>
 </section>
 </div>
 <div class="foot">TPROXY MANAGER · Secure administration</div>
 </main>
+
+<dialog id="profileDialog">
+<div class="dialog-head"><h2 id="configTitle">Конфигурация профиля</h2><button onclick="closeDialog('profileDialog')">✕</button></div>
+<div class="field"><label>Адрес сервера</label><div class="value"><code id="configServer"></code><button onclick="copyValue('configServer')">Копировать</button></div></div>
+<div class="field"><label>Секрет подключения</label><div class="value"><code id="configSecret"></code><button onclick="copyValue('configSecret')">Копировать</button></div></div>
+<div class="field"><label>Ссылка для Telegram</label><a id="configLink" class="link" target="_blank" rel="noopener"></a><div class="toolbar"><button onclick="copyLink()">Копировать ссылку</button></div></div>
+<div class="field"><label>QR-код подключения</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
+<div class="dialog-actions"><button onclick="closeDialog('profileDialog')">Закрыть</button></div>
+</dialog>
+
+<dialog id="editDialog">
+<div class="dialog-head"><h2 id="editTitle">Изменить профиль</h2><button onclick="closeDialog('editDialog')">✕</button></div>
+<input type="hidden" id="editName">
+<div class="field"><label for="editCarrier">Carrier mode</label><select id="editCarrier"><option value="https">https</option><option value="https-lanes">https-lanes</option><option value="websocket">websocket</option><option value="websocket-lanes">websocket-lanes</option></select></div>
+<div class="field"><label><input type="checkbox" id="rotateSecret" style="min-width:auto"> Перегенерировать секрет профиля</label><div class="meta">После применения старый секрет перестанет работать на клиентах.</div></div>
+<div class="dialog-actions"><button onclick="closeDialog('editDialog')">Отмена</button><button class="primary" onclick="saveProfile()">Сохранить изменения</button></div>
+</dialog>
+
 <script>
 let csrf='';
+let currentProfile='';
 const base=location.pathname.replace(/\/$/,'');
 async function api(path,opts={}){
  opts.credentials='same-origin';
  const headers={'X-CSRF-Token':csrf};if(!(opts.body instanceof FormData))headers['Content-Type']='application/json';opts.headers=Object.assign(headers,opts.headers||{});
- const response=await fetch(path,opts);
- csrf=response.headers.get('X-CSRF-Token')||csrf;
+ const response=await fetch(path,opts);csrf=response.headers.get('X-CSRF-Token')||csrf;
  if(response.status===401){location.href='login';throw Error('Сессия завершена')}
  const data=await response.json().catch(()=>({}));
- if(!response.ok)throw Error(data.error||'Ошибка запроса');
- return data;
+ if(!response.ok)throw Error(data.error||'Ошибка запроса');return data;
 }
 function esc(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function notify(error){alert(error.message||String(error))}
+function closeDialog(id){document.getElementById(id).close()}
+function copyText(text){navigator.clipboard.writeText(text).catch(()=>{const field=document.createElement('textarea');field.value=text;document.body.appendChild(field);field.select();document.execCommand('copy');field.remove()})}
+function copyValue(id){copyText(document.getElementById(id).textContent)}
+function copyLink(){copyText(document.getElementById('configLink').href)}
 async function loadProfiles(){
  try{
   const profiles=await api(base+'/api/profiles');
-  document.querySelector('#profiles').innerHTML=profiles.map(p=>'<div class="row"><div><div class="name">'+esc(p.name)+'</div><div class="meta">'+esc(p.carrier_mode)+' · '+esc(p.backend)+'</div></div><div class="actions"><button onclick="backupProfile(\''+esc(p.name)+'\')">Экспорт</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></div>').join('')||'Профили не найдены';
+  document.querySelector('#profiles').innerHTML=profiles.map(p=>'<article class="profile"><div class="profile-head"><div><div class="name">'+esc(p.name)+'</div><div class="meta">Carrier mode: '+esc(p.carrier_mode)+'</div><div class="meta">Секрет: '+esc(p.secret)+'</div></div></div><div class="actions"><button class="primary" onclick="showProfileConfig(\''+esc(p.name)+'\')">Конфигурация</button><button onclick="editProfile(\''+esc(p.name)+'\',\''+esc(p.carrier_mode)+'\')">Изменить</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></article>').join('')||'Профили не найдены';
+  const select=document.querySelector('#exportProfile');const selected=select.value;
+  select.innerHTML='<option value="">Выберите профиль для экспорта</option>'+profiles.map(p=>'<option value="'+esc(p.name)+'">'+esc(p.name)+'</option>').join('');
+  if(profiles.some(p=>p.name===selected))select.value=selected;
  }catch(error){notify(error)}
 }
 async function addProfile(){
+ try{const name=document.querySelector('#newName').value.trim();if(!name)throw Error('Укажите имя профиля');
+ await api(base+'/api/profiles',{method:'POST',body:JSON.stringify({Name:name})});document.querySelector('#newName').value='';await loadProfiles()}
+ catch(error){notify(error)}
+}
+async function showProfileConfig(name){
  try{
-  const name=document.querySelector('#newName').value.trim();
-  if(!name)throw Error('Укажите имя профиля');
-  await api(base+'/api/profiles',{method:'POST',body:JSON.stringify({Name:name})});
-  document.querySelector('#newName').value='';
-  await loadProfiles();
+  const data=await api(base+'/api/profiles/'+encodeURIComponent(name)+'/config');currentProfile=name;
+  document.querySelector('#configTitle').textContent='Конфигурация · '+name;
+  document.querySelector('#configServer').textContent=data.server;
+  document.querySelector('#configSecret').textContent=data.secret;
+  const link=document.querySelector('#configLink');link.href=data.link;link.textContent=data.link;
+  document.querySelector('#configQR').src=base+'/api/profiles/'+encodeURIComponent(name)+'/qr';
+  document.querySelector('#profileDialog').showModal();
  }catch(error){notify(error)}
 }
-async function backupProfile(name){
- try{await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'backup'})});await loadBackups()}
+function editProfile(name,mode){
+ document.querySelector('#editName').value=name;document.querySelector('#editTitle').textContent='Изменить · '+name;
+ document.querySelector('#editCarrier').value=mode;document.querySelector('#rotateSecret').checked=false;
+ document.querySelector('#editDialog').showModal();
+}
+async function saveProfile(){
+ const name=document.querySelector('#editName').value;
+ const carrier_mode=document.querySelector('#editCarrier').value;
+ const regenerate_secret=document.querySelector('#rotateSecret').checked;
+ if(regenerate_secret&&!confirm('Старый секрет перестанет работать. Продолжить?'))return;
+ try{
+  await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'update',CarrierMode:carrier_mode,RegenerateSecret:regenerate_secret})});
+  closeDialog('editDialog');await loadProfiles();alert('Профиль обновлён');
+ }catch(error){notify(error)}
+}
+async function exportProfile(){
+ const name=document.querySelector('#exportProfile').value;if(!name){notify(Error('Выберите профиль'));return}
+ try{const result=await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'export'})});const link=document.createElement('a');link.href=result.download_url;link.download='';document.body.appendChild(link);link.click();link.remove();await loadBackups()}
  catch(error){notify(error)}
 }
 async function importProfile(){
- const file=document.querySelector('#importArchive').files[0];
- if(!file){notify(Error('Выберите архив'));return}
- const target=document.querySelector('#importTarget').value;
- const name=document.querySelector('#importName').value.trim();
- const entry=document.querySelector('#importEntry').value.trim();
+ const file=document.querySelector('#importArchive').files[0];if(!file){notify(Error('Выберите архив'));return}
+ const target=document.querySelector('#importTarget').value,name=document.querySelector('#importName').value.trim(),entry=document.querySelector('#importEntry').value.trim();
  if(target==='new'&&!name){notify(Error('Укажите имя целевого профиля'));return}
  if(target==='default'&&!confirm('Будет заменён системный профиль default. Продолжить?'))return;
  const form=new FormData();form.append('archive',file);form.append('target',target);form.append('name',name);form.append('entry',entry);
- try{
-  await api(base+'/api/profiles/import',{method:'POST',body:form});
-  document.querySelector('#importArchive').value='';
-  await loadProfiles();await loadBackups();alert('Профиль импортирован');
- }catch(error){notify(error)}
+ try{await api(base+'/api/profiles/import',{method:'POST',body:form});document.querySelector('#importArchive').value='';await loadProfiles();await loadBackups();alert('Профиль импортирован')}
+ catch(error){notify(error)}
 }
 async function deleteProfile(name){
  if(!confirm('Удалить профиль '+name+'?'))return;
- try{await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'delete'})});await loadProfiles()}catch(error){notify(error)}
-}
-async function loadConfig(){
- try{const config=await api(base+'/api/config');document.querySelector('#config').textContent=JSON.stringify(config,null,2)}
- catch(error){document.querySelector('#config').textContent=error.message}
+ try{await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'delete'})});await loadProfiles()}
+ catch(error){notify(error)}
 }
 async function loadDiagnostics(){
  try{const result=await api(base+'/api/diagnostics');document.querySelector('#diagnostics').textContent=result.output||'Нет вывода'}
@@ -158,11 +163,11 @@ async function loadDiagnostics(){
 async function loadBackups(){
  try{
   const backups=await api(base+'/api/backups');
-  document.querySelector('#backups').innerHTML=backups.map(b=>{
+  document.querySelector('#backups').innerHTML='<h3>Архивы</h3>'+backups.map(b=>{
    const action=b.kind==='profile'?'<a href="'+base+'/api/profile-backups/'+encodeURIComponent(b.name)+'">Скачать</a>':'<button onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button>';
    const label=b.kind==='profile'?'Архив профиля':'Полная копия';
    return '<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">'+label+' · '+(b.size/1048576).toFixed(2)+' MB · '+new Date(b.modified).toLocaleString()+'</div></div>'+action+'</div>';
-  }).join('')||'Архивов пока нет';
+  }).join('')||'<div class="meta">Архивов пока нет</div>';
  }catch(error){notify(error)}
 }
 async function createBackup(){
@@ -175,9 +180,7 @@ async function restoreBackup(name){
  try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'restore',Name:name})});alert('Восстановление завершено. Панель перезапустится.');setTimeout(()=>location.reload(),5000)}
  catch(error){notify(error)}
 }
-async function logout(){
- try{await api(base+'/logout',{method:'POST',body:'{}'})}catch(error){location.href='login'}
-}
+async function logout(){try{await api(base+'/logout',{method:'POST',body:'{}'})}catch(error){location.href='login'}}
 async function loadAll(){await loadProfiles();await loadBackups()}
 loadAll();
 </script>
