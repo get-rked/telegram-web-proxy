@@ -77,7 +77,7 @@ def caddy_site_names(caddyfile_text):
         if not line:
             continue
         # Environment placeholders contain braces but are not Caddy block delimiters.
-        structural = re.sub(r"\\{\\$[^}]+\\}", "", line)
+        structural = re.sub(r"\{\$[^}]+\}", "", line)
         if depth == 0 and "{" in structural:
             address = structural.split("{", 1)[0].strip()
             # Parenthesized top-level blocks are named snippets, not site addresses.
@@ -107,14 +107,14 @@ def check_shared_proxy(source, proxy):
                         data = f.read_text(errors="ignore")
                     except (OSError, IsADirectoryError):
                         continue
-                    names.update(x.lower() for block in re.findall(r"\\bserver_name\\s+([^;]+);", data)
+                    names.update(x.lower() for block in re.findall(r"\bserver_name\s+([^;]+);", data)
                                  for x in block.split() if x != "_")
     else:
         f = Path("/etc/caddy/Caddyfile")
         names = set()
         if f.is_file():
             text = f.read_text(errors="ignore")
-            if re.search(r"(?m)^\\s*import\\s+", text):
+            if re.search(r"(?m)^\s*import\s+", text):
                 raise MigrationAbort(
                     "В Caddyfile найден import. Автоматическая проверка подключаемых конфигураций "
                     "не поддерживается; проверь их вручную перед остановкой Caddy."
