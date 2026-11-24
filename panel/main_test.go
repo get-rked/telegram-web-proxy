@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"log"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -164,4 +166,34 @@ func TestWriteProfilesUsesOwnerOnlyPermissions(t *testing.T) {
 	if err:=a.writeProfiles(doc);err!=nil{t.Fatal(err)}
 	info,err:=os.Stat(a.profiles);if err!=nil{t.Fatal(err)}
 	if got:=info.Mode().Perm();got!=0600{t.Fatalf("profiles mode=%04o, want 0600",got)}
+}
+
+func TestWriteProfilesSynchronizesAllMTProxySecrets(t *testing.T) {
+	a := testApp(t)
+	secretPath := filepath.Join(t.TempDir(), "mtproxy.secret")
+	if err := os.WriteFile(secretPath, []byte("00112233445566778899aabbccddeeff\n"), 0600); err != nil { t.Fatal(err) }
+	a.mtproxySecret = secretPath
+	doc, err := a.readProfiles()
+	if err != nil { t.Fatal(err) }
+	doc.Profiles = append(doc.Profiles, profile{Name:"mobile", Secret:"ddffeeddccbbaa998877665544332211", Backend:"127.0.0.1:2398", CarrierMode:"websocket"})
+	if err := a.writeProfiles(doc); err != nil { t.Fatal(err) }
+	got, err := os.ReadFile(secretPath)
+	if err != nil { t.Fatal(err) }
+	want := "00112233445566778899aabbccddeeff\nffeeddccbbaa998877665544332211\n"
+	if string(got) != want { t.Fatalf("secret file mismatch: %q", got) }
+}
+
+func TestFailedAuthenticationIsLoggedWithTrustedClientIP(t *testing.T) {
+	a := testApp(t)
+	var output bytes.Buffer
+	a.authLog = log.New(&output, "", 0)
+	a.trustProxy = true
+	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	request.RemoteAddr = "172.20.0.2:1234"
+	request.Header.Set("X-Real-IP", "203.0.113.9")
+	request.SetBasicAuth("admin", "wrong-password")
+	response := httptest.NewRecorder()
+	a.auth(a.index)(response, request)
+	if response.Code != http.StatusUnauthorized { t.Fatalf("status=%d, want 401", response.Code) }
+	if !strings.Contains(output.String(), "auth_failed ip=203.0.113.9") { t.Fatalf("unexpected auth log: %q", output.String()) }
 }
