@@ -2766,6 +2766,8 @@ PY
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init panel-volume-init || die "Не удалось загрузить внешние Docker-образы."
   info "Собираю локальные образы..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
+  info "Первоначальная подготовка данных Docker..."
+  docker_compose run --rm --no-deps bootstrap || die "Не удалось подготовить данные первоначальной установки."
   info "Исправляю права доступа к конфигурациям Docker..."
   docker_repair_bind_mount_permissions
   info "Запускаю Telegram Web Proxy..."
@@ -2889,9 +2891,7 @@ docker_update_runtime_command() {
   docker_compose --profile "$proxy" --profile mtproxy pull "$proxy" fail2ban mtproxy-volume-init || die "Не удалось загрузить внешние образы."
   info "Сборка обновлённых образов..."
   docker_compose --profile "$proxy" --profile mtproxy build --pull || die "Сборка Docker-образов завершилась ошибкой."
-  info "Миграция и проверка конфигураций Docker..."
-  docker_compose run --rm --no-deps bootstrap || die "Не удалось выполнить миграцию конфигураций Docker."
-  docker_repair_bind_mount_permissions
+  info "Проверка Compose-конфигурации..."
   docker_compose --profile "$proxy" --profile mtproxy config --quiet || die "Compose-конфигурация не прошла проверку."
   info "Применение обновления..."
   docker_compose --profile "$proxy" --profile mtproxy up -d --remove-orphans || die "Не удалось применить Docker-обновление."
