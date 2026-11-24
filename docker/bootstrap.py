@@ -237,8 +237,9 @@ def main():
     nginx_route = (
         f"location = {base_path} {{ return 308 {base_path}/; }}\\n"
         f"location ^~ {base_path}/ {{\\n"
+        f"    rewrite ^{base_path}/(.*)$ /$1 break;\\n"
         "    limit_req zone=panel_requests burst=20 nodelay;\\n"
-        "    proxy_pass http://$panel_upstream/;\\n"
+        "    proxy_pass http://$panel_upstream;\\n"
         "    proxy_http_version 1.1;\\n"
         "    proxy_set_header Host $host;\\n"
         "    proxy_set_header X-Real-IP $remote_addr;\\n"
