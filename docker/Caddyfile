@@ -19,7 +19,7 @@
     }
     format json
   }
-  import /etc/tproxy-config/panel-route.caddy
+  import /etc/caddy/panel-route.caddy
   handle {
     reverse_proxy 127.0.0.1:8080
   }
