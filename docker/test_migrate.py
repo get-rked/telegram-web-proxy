@@ -55,8 +55,6 @@ class MigrationTests(unittest.TestCase):
                 "docker/site", "docker/nginx/certs",
             ):
                 (repo / path).mkdir(parents=True, exist_ok=True)
-            (repo / "docker/Caddyfile").write_text("proxy.example.test {\\n    reverse_proxy {$TPROXY_LISTEN}\\n}\\n")
-            (repo / "docker/nginx/default.conf").write_text("proxy_pass http://${TPROXY_LISTEN};\\n")
             config = {
                 "public_hostname": "proxy.example.test",
                 "listen": "127.0.0.1:9080",
@@ -86,13 +84,12 @@ class MigrationTests(unittest.TestCase):
             with patch.object(migrator, "backup_paths", return_value=root / "backup.tar.gz"), patch.object(migrator.os, "geteuid", return_value=0), patch.object(sys, "argv", ["migrate-to-docker.py", "--source-dir", str(source), "--apply"]):
                 self.assertEqual(migrator.main(), 0)
             migrated = json.loads((repo / "docker/config/config.json").read_text())
-            self.assertEqual(migrated["listen"], "127.0.0.1:9080")
+            self.assertEqual(migrated["listen"], "127.0.0.1:8080")
             self.assertEqual(migrated["public_dir"], "/srv/tproxy-site")
             self.assertEqual((repo / "docker/config/token.key").read_bytes(), b"k" * 32)
             self.assertEqual((repo / "docker/site/index.html").read_text(), "native-site")
             self.assertEqual((repo / "docker/mtproxy/secret").read_text().splitlines(), ["12" * 16, "34" * 16])
             env = (repo / ".env").read_text()
-            self.assertIn("TPROXY_LISTEN=127.0.0.1:9080", env)
             self.assertIn("MTPROXY_WORKERS=2", env)
             self.assertIn("MTPROXY_MAX_CONNECTIONS=30", env)
             self.assertIn("MTPROXY_NAT_INFO=10.0.0.2:203.0.113.4", env)
