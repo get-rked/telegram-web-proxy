@@ -55,6 +55,7 @@ tproxy_bootstrap_repository() {
     tar -C "$stage" --strip-components=1 -xzf "$archive"
     if [[ ! -s "$stage/config/proxy/config.json" ]]; then
       echo "Старая конфигурация Web Proxy не найдена; будет предложена чистая установка."
+      rm -rf -- "$stage"
       stage=""
     fi
   else
@@ -2583,9 +2584,12 @@ docker_wait_ready() {
 docker_install_fresh_command() {
   local proxy="$1" domain="$2" email="$3" cert_dir="$DOCKER_PROJECT_DIR/docker/nginx/certs"
   if [[ -z "$domain" ]]; then read -r -p "Домен прокси (например proxy.example.com): " domain || die "Ввод прерван."; fi
-  [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || die "Некорректное доменное имя: $domain"
+  domain="${domain,,}"
+  validate_hostname "$domain" >/dev/null || die "Некорректное доменное имя: $domain"
   if [[ -z "$email" ]]; then read -r -p "Email для Let's Encrypt: " email || die "Ввод прерван."; fi
-  [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || die "Некорректный email: $email"
+  validate_email "$email" >/dev/null || die "Некорректный email: $email"
+  getent ahostsv4 "$domain" >/dev/null 2>&1 || die "Домен $domain не разрешается в DNS. Сначала настрой A-запись."
+
   if [[ "$proxy" == "nginx" && ( ! -s "$cert_dir/fullchain.pem" || ! -s "$cert_dir/privkey.pem" ) ]]; then
     die "Для чистой установки с Nginx нужны docker/nginx/certs/fullchain.pem и privkey.pem. Для автоматического TLS выбери Caddy."
   fi
