@@ -227,59 +227,50 @@ sudo /opt/telegram-web-proxy/tgweb-install.sh docker install --web-server caddy 
 
 При переносе native-конфигурации установщик сохраняет профильные настройки и переносит их в Docker. При чистой установке создаётся профиль `default`; управление дополнительными профилями через Docker-панель будет расширяться отдельно. Старые команды `profile`, `upstream`, `services`, `site` и `web-server` относятся к native-менеджеру и не предназначены для текущего Docker-режима.
 
-## Ссылка подключения и QR-код
-
-После установки или обновления скрипт выводит Telegram-ссылку и QR-код в терминале. Команда `config` повторно формирует ссылку и QR по текущей конфигурации.
-
-PNG сохраняется в:
-
-```text
-/opt/telegram-web-proxy/qr/proxy-qr.png
-```
-
-Файл создаётся с правами `0600`, каталог QR — с ограниченными правами. Секрет, ссылка и QR-код дают доступ к прокси: не публикуйте и не передавайте их посторонним.
-
 ## Файлы и каталоги
 
-Основной каталог приложения:
-
+Единый каталог проекта и установщика:
 ```text
 /opt/telegram-web-proxy/
-├── bin/       # бинарники и служебные скрипты
-├── config/
-│   ├── proxy/ # config.json, profiles.json, profiles/<имя>/profile.json
-│   └── mtproxy/
-├── data/
-│   └── website/ # decoy-сайт по умолчанию
-├── src/       # исходники tproxy-server и MTProxy
-├── systemd/   # шаблоны/копии unit-файлов
-├── qr/        # QR-код подключения
-└── backups/   # резервные копии по умолчанию
+├── tgweb-install.sh
+├── docker-compose.yml
+├── .env                         # домен, ACME email и параметры MTProxy
+├── docker/
+│   ├── config/                  # конфигурация relay и token.key
+│   ├── profiles/                # профили Web Proxy
+│   ├── mtproxy/                 # секреты и runtime-файлы MTProxy
+│   ├── private/                 # приватная авторизация панели
+│   ├── private-credentials/     # реквизиты панели
+│   ├── generated/               # сгенерированные маршруты панели
+│   ├── site/                    # публичный сайт
+│   ├── security/                # Fail2ban и журналы безопасности
+│   ├── Caddyfile
+│   └── nginx/
+├── panel/                       # исходники панели
+└── bin/, config/, data/, src/, systemd/, qr/, backups/
+                                # сохранённые файлы прежней native-установки
 ```
 
-Системные файлы и службы:
+Резервная копия исходной native-установки создаётся в `/var/backups/telegram-web-proxy/`, а её конфигурация для миграции — в `/var/lib/telegram-web-proxy/`. Docker-резервные копии файлов проекта находятся в `/var/backups/telegram-web-proxy-docker/`.
 
-| Путь / имя | Назначение |
-|---|---|
-| `/opt/telegram-web-proxy/config/proxy/config.json` | Настройки tproxy-server, домен, адреса и каталог сайта |
-| `/opt/telegram-web-proxy/config/proxy/profiles/` | Отдельный каталог настроек каждого профиля |
-| `/opt/telegram-web-proxy/config/proxy/profiles/<имя>/profile.json` | Имя, секрет, backend и Carrier mode выбранного профиля |
-| `/opt/telegram-web-proxy/config/proxy/profiles.json` | Сводный файл всех профилей для tproxy-server |
-| `/opt/telegram-web-proxy/config/proxy/acme-email` | Email Let's Encrypt |
-| `/opt/telegram-web-proxy/config/proxy/web-server` | Выбранный веб-сервер |
-| `/opt/telegram-web-proxy/config/mtproxy/mtproxy.env` | Параметры MTProxy |
-| `/opt/telegram-web-proxy/qr/proxy-qr.png` | QR-код подключения |
-| `/usr/local/bin/tproxy-server` | Совместимая ссылка на бинарник tproxy-server |
-| `/usr/local/bin/mtproxy` | Совместимая ссылка на бинарник MTProxy |
-| `/usr/local/bin/refresh-mtproxy-config` | Совместимая ссылка на служебный скрипт |
-| `/etc/caddy/Caddyfile` | Конфигурация Caddy |
-| `/etc/nginx/sites-available/tproxy-server` | Конфигурация Nginx |
-| `/etc/nginx/conf.d/tproxy-websocket-map.conf` | WebSocket map для Nginx |
-| `/etc/letsencrypt/` | Сертификаты и настройки Certbot при использовании Nginx |
-| `/etc/systemd/system/` | Установленные systemd units |
-| `/var/www/letsencrypt` | ACME webroot |
+Docker volumes:
+- `panel-data` — база и состояние панели;
+- `caddy-data`, `caddy-config` — состояние TLS и Caddy;
+- `mtproxy-data` — данные MTProxy;
+- `fail2ban-data` — состояние Fail2ban.
 
-Caddy и Nginx — альтернативные варианты: для Web Proxy одновременно используется выбранный веб-сервер. При переключении скрипт удаляет конфигурацию предыдущего веб-сервера, если она была зарегистрирована как текущая.
+## Ссылка подключения и QR-код
+
+В текущем Docker Manager автоматическое формирование Telegram-ссылки и QR-кода пока не реализовано. Для проверки Web Proxy используй домен, указанный при установке, и обязательно проверь фактическое подключение в Telegram-клиенте. HTTP-ответ сайта сам по себе не доказывает, что Web Proxy работает.
+
+## Безопасность и важные замечания
+
+- Не публикуй `.env`, `docker/private/`, `docker/private-credentials/`, `docker/mtproxy/secret`, `docker/config/` и резервные копии: в них могут находиться ключи и учётные данные.
+- Не открывай в интернет внутренние relay/admin-порты и backend-порты MTProxy.
+- `docker uninstall` удаляет контейнеры и сеть, сохраняя конфигурации и volumes.
+- `docker purge` без `--volumes` удаляет контейнеры и локальные образы, но сохраняет volumes. Флаг `--volumes` удаляет данные панели, TLS, MTProxy и Fail2ban.
+- При переносе native-службы останавливаются, но их unit-файлы и автозапуск сохраняются для отката. После успешной проверки Docker нужно отдельно решить вопрос с отключением автозапуска native-служб, чтобы они не пытались занять порты после перезагрузки.
+- Пользовательский сайт сохраняется при обновлении Docker Manager.
 
 ## Безопасность и важные замечания
 
