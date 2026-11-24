@@ -2872,8 +2872,7 @@ docker_logs_command() {
   fi
 }
 
-docker_# shellcheck disable=SC2120 # Retained for the legacy native rollback workflow.
-backup_command() {
+docker_backup_command() {
   docker_require_project
   local backup_root="/var/backups/telegram-web-proxy-docker" stamp archive
   install -d -o root -g root -m 0700 "$backup_root"
@@ -3252,6 +3251,7 @@ diagnostics_command() {
   fi
 }
 
+# shellcheck disable=SC2120 # Retained for the legacy native rollback workflow.
 backup_command() {
   (($# == 0)) || die "Путь сохранения резервной копии задавать нельзя. Архивы сохраняются в $BACKUP_DIR"
   install -d -m 0700 "$BACKUP_DIR"
