@@ -76,7 +76,7 @@ def check_shared_proxy(source, proxy):
         names = set()
         if f.is_file():
             text = f.read_text(errors="ignore")
-            if re.search(r"(?m)^\\s*import\\s+", text):
+            if re.search(r"(?m)^\s*import\s+", text):
                 raise MigrationAbort(
                     "В Caddyfile найден import. Автоматическая проверка подключаемых конфигураций "
                     "не поддерживается; проверь их вручную перед остановкой Caddy."
