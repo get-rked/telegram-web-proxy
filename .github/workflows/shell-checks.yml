@@ -91,8 +91,6 @@ jobs:
         run: docker build -f docker/Dockerfile.mtproxy-exporter -t tproxy-mtproxy-exporter:test .
       - name: Build MTProxy firewall image
         run: docker build -f docker/Dockerfile.firewall -t tproxy-firewall:test .
-      - name: Build MTProxy stats exporter image
-        run: docker build -f docker/Dockerfile.mtproxy-exporter -t tproxy-mtproxy-exporter:test .
 
   docker-compose:
     name: Compose configuration validation
