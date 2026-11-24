@@ -2937,12 +2937,33 @@ docker_update_command() {
   sync_archive="$sync_tmp/project.tar.gz"
   source_dir="$sync_tmp/source"
   archive_url="https://codeload.github.com/get-rked/telegram-web-proxy/tar.gz/refs/heads/$DOCKER_REPO_BRANCH"
+  github_archive_url="https://github.com/get-rked/telegram-web-proxy/archive/refs/heads/$DOCKER_REPO_BRANCH.tar.gz"
   mkdir -p "$source_dir"
-  if ! curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$archive_url" -o "$sync_archive" ||
+
+  # Try both supported GitHub archive endpoints. DNS/network failures are
+  # retried with bounded timeouts; the existing installation is untouched
+  # until a complete, valid archive has been downloaded and extracted.
+  local download_ok=0 download_url
+  for download_url in "$archive_url" "$github_archive_url"; do
+    info "Загружаю исходники: $download_url"
+    if curl --fail --silent --show-error --location \
+        --retry 3 --retry-all-errors --retry-delay 2 \
+        --connect-timeout 15 --max-time 180 \
+        --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        --output "$sync_archive" "$download_url" &&
+       tar -tzf "$sync_archive" >/dev/null 2>&1; then
+      download_ok=1
+      break
+    fi
+    rm -f -- "$sync_archive"
+    warn "Этот адрес архива недоступен; пробую резервный адрес GitHub."
+  done
+
+  if (( ! download_ok )) ||
      ! tar -xzf "$sync_archive" --strip-components=1 -C "$source_dir" ||
      [[ ! -s "$source_dir/docker-compose.yml" || ! -s "$source_dir/tgweb-install.sh" ]]; then
     rm -rf -- "$sync_tmp"
-    die "Не удалось загрузить актуальный архив проекта; существующая установка не изменена."
+    die "Не удалось получить корректный архив проекта ни через один адрес GitHub; существующая установка не изменена."
   fi
 
   # Refresh only the repository's known generic placeholder. A custom site
