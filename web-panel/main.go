@@ -46,6 +46,7 @@ type App struct {
 }
 
 var nameRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+var secretRE = regexp.MustCompile("^(dd)?[0-9a-f]{32}$")
 
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
@@ -365,7 +366,7 @@ func (a *App) readProfile(name string) (profileFile, proxyConfig, error) {
 	if err := json.Unmarshal(raw, &profile); err != nil {
 		return profile, config, err
 	}
-	if profile.Name != name || profile.Secret == "" || profile.CarrierMode == "" {
+	if profile.Name != name || !secretRE.MatchString(profile.Secret) || profile.CarrierMode == "" {
 		return profile, config, fmt.Errorf("invalid profile data")
 	}
 	raw, err = os.ReadFile(filepath.Join(a.configDir, "config.json"))
@@ -385,7 +386,11 @@ func proxyClientSecret(secret, basePath string) string {
 	if basePath == "" {
 		return secret
 	}
-	payload := append([]byte{'p'}, []byte(secret)...)
+	secretBytes, err := hex.DecodeString(secret)
+	if err != nil {
+		return ""
+	}
+	payload := append([]byte{'p'}, secretBytes...)
 	return base64.RawURLEncoding.EncodeToString(payload)
 }
 
