@@ -197,3 +197,19 @@ func TestFailedAuthenticationIsLoggedWithTrustedClientIP(t *testing.T) {
 	if response.Code != http.StatusUnauthorized { t.Fatalf("status=%d, want 401", response.Code) }
 	if !strings.Contains(output.String(), "auth_failed ip=203.0.113.9") { t.Fatalf("unexpected auth log: %q", output.String()) }
 }
+
+func TestAuthenticationThrottlesRepeatedFailures(t *testing.T) {
+	a := testApp(t)
+	request := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	request.RemoteAddr = "203.0.113.25:1234"
+	request.SetBasicAuth("admin", "wrong-password")
+	for i := 0; i < 10; i++ {
+		response := httptest.NewRecorder()
+		a.auth(a.index)(response, request)
+		if response.Code != http.StatusUnauthorized { t.Fatalf("attempt %d status=%d, want 401", i+1, response.Code) }
+	}
+	response := httptest.NewRecorder()
+	a.auth(a.index)(response, request)
+	if response.Code != http.StatusTooManyRequests { t.Fatalf("blocked attempt status=%d, want 429", response.Code) }
+	if response.Header().Get("Retry-After") != "900" { t.Fatalf("missing Retry-After: %q", response.Header().Get("Retry-After")) }
+}
