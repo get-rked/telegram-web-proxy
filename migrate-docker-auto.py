@@ -255,11 +255,24 @@ def main():
             raise MigrationAbort("Не создана цепочка DOCKER-USER: Fail2ban не сможет блокировать Docker-трафик.")
         domain = json.loads((source / "config/proxy/config.json").read_text()).get("public_hostname", "")
         if shutil.which("curl"):
-            code, _ = cmd(["curl", "-k", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
-                           "--max-time", "15", "https://{}/admin/".format(domain)], False)
-            if code not in ("200", "301", "302", "401", "403"):
-                raise MigrationAbort("Панель не отвечает корректно через HTTPS (HTTP {}).".format(code or "нет ответа"))
-            print("Панель: HTTP " + code)
+            auth_path = ROOT / "docker/private/panel-auth.json"
+            try:
+                panel_base_path = json.loads(auth_path.read_text()).get("base_path", "")
+            except (OSError, json.JSONDecodeError) as error:
+                raise MigrationAbort("Не удалось прочитать сгенерированный Base Path панели: {}".format(error))
+            if not isinstance(panel_base_path, str) or not panel_base_path.startswith("/panel-"):
+                raise MigrationAbort("Bootstrap не создал корректный приватный Base Path панели.")
+            url = "https://{}{}{}/".format(domain, panel_base_path, "" )
+            code = ""
+            for attempt in range(12):
+                code, _ = cmd(["curl", "-k", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                               "--max-time", "10", "--resolve", "{}:443:127.0.0.1".format(domain), url], False)
+                if code in ("200", "301", "302"):
+                    break
+                time.sleep(5)
+            if code not in ("200", "301", "302"):
+                raise MigrationAbort("Панель не отвечает по сгенерированному Base Path через HTTPS (HTTP {}).".format(code or "нет ответа"))
+            print("Панель: HTTP " + code + " ({})".format(url))
         print("\nDocker-миграция запущена. Проверь Web Proxy и MTProxy с внешнего устройства.")
         return 0
     except Exception as error:
