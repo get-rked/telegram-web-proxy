@@ -142,8 +142,8 @@ func TestProfileConfigReturnsDDSecretAndClientLink(t *testing.T) {
 	if response.Code != http.StatusOK { t.Fatalf("status=%d body=%s", response.Code, response.Body.String()) }
 	var result struct { Secret string `json:"secret"`; Link string `json:"link"`; Port int `json:"port"` }
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil { t.Fatal(err) }
-	if result.Secret != "dd00112233445566778899aabbccddeeff" { t.Fatalf("wrong client secret: %q", result.Secret) }
-	if result.Port != 443 || !strings.Contains(result.Link, "secret=dd") || !strings.Contains(result.Link, "server=proxy.example.com") { t.Fatalf("invalid proxy link: %+v", result) }
+	if result.Secret != "00112233445566778899aabbccddeeff" { t.Fatalf("wrong client secret: %q", result.Secret) }
+	if result.Port != 443 || !strings.Contains(result.Link, "https://t.me/webproxy?") || !strings.Contains(result.Link, "secret=00112233445566778899aabbccddeeff") || !strings.Contains(result.Link, "server=proxy.example.com") || strings.Contains(result.Link, "t.me/proxy?") { t.Fatalf("invalid Web Proxy link: %+v", result) }
 }
 
 func TestProfileQRReturnsPNG(t *testing.T) {

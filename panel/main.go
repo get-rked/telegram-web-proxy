@@ -419,9 +419,8 @@ func (a *application) profileConfig(w http.ResponseWriter, r *http.Request, name
 	}
 	values := url.Values{}
 	values.Set("server", cfg.PublicHostname)
-	values.Set("port", "443")
-	values.Set("secret", doc.Profiles[index].Secret)
-	link := "https://t.me/proxy?" + values.Encode()
+	values.Set("secret", strings.TrimPrefix(strings.ToLower(doc.Profiles[index].Secret), "dd"))
+	link := "https://t.me/webproxy?" + values.Encode()
 	w.Header().Set("Cache-Control", "no-store")
 	a.audit("profile.config.view:" + name)
 	jsonResponse(w, map[string]any{
@@ -445,9 +444,8 @@ func (a *application) profileQR(w http.ResponseWriter, r *http.Request, name str
 	}
 	values := url.Values{}
 	values.Set("server", cfg.PublicHostname)
-	values.Set("port", "443")
-	values.Set("secret", doc.Profiles[index].Secret)
-	qr, err := qrcode.New("https://t.me/proxy?"+values.Encode(), qrcode.Medium)
+	values.Set("secret", strings.TrimPrefix(strings.ToLower(doc.Profiles[index].Secret), "dd"))
+	qr, err := qrcode.New("https://t.me/webproxy?"+values.Encode(), qrcode.Medium)
 	if err != nil { http.Error(w, "could not create QR code", 500); return }
 	png, err := qr.PNG(320)
 	if err != nil { http.Error(w, "could not create QR code", 500); return }
