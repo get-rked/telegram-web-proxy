@@ -2487,7 +2487,7 @@ run_uninstall() {
   systemctl disable --now tproxy-panel.service 2>/dev/null || true
   rm -f /etc/systemd/system/tproxy-panel.service "$SYSTEMD_DIR/tproxy-panel.service"
   rm -f /etc/fail2ban/filter.d/tproxy-panel.conf /etc/fail2ban/jail.d/tproxy-panel.local
-  rm -f /etc/fail2ban/filter.d/tproxy-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf /etc/fail2ban/jail.d/tproxy-proxy.local /etc/logrotate.d/tproxy-proxy /etc/nginx/conf.d/tproxy-fail2ban-log.conf
+  rm -f /etc/fail2ban/filter.d/tproxy-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf /etc/fail2ban/jail.d/tproxy-proxy.local
   systemctl restart fail2ban.service 2>/dev/null || true
   remove_legacy_compat_links
   local installed_web_server
