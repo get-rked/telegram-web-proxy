@@ -899,6 +899,24 @@ func (a *App) backups(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, map[string]string{"status": "created", "message": output})
 		return
 	}
+	if body.Action == "delete" {
+		if !regexp.MustCompile("^tproxy-backup-[0-9]{8}-[0-9]{6}\\.tar\\.gz$").MatchString(body.Name) || filepath.Base(body.Name) != body.Name {
+			errOut(w, http.StatusBadRequest, "Некорректное имя архива")
+			return
+		}
+		path := filepath.Join(a.backupDir, body.Name)
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			errOut(w, http.StatusNotFound, "Архив не найден")
+			return
+		}
+		if err := os.Remove(path); err != nil {
+			errOut(w, http.StatusInternalServerError, "Не удалось удалить резервную копию")
+			return
+		}
+		jsonOut(w, map[string]string{"status": "deleted"})
+		return
+	}
 	if body.Action == "restore" {
 		if !regexp.MustCompile("^tproxy-backup-[0-9]{8}-[0-9]{6}\\.tar\\.gz$").MatchString(body.Name) {
 			errOut(w, http.StatusBadRequest, "Некорректное имя архива")
