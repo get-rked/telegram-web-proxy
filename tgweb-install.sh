@@ -4795,7 +4795,7 @@ diagnose_proxy_fail2ban() {
     if ! output="$(fail2ban-client status "$jail" 2>/dev/null)"; then
       if [[ "$jail" == "tproxy-nginx-scan" && "$selected_web_server" != "nginx" ]] ||
          [[ "$jail" == "tproxy-caddy-scan" && "$selected_web_server" != "caddy" ]]; then
-        printf '    %s %s: отключён (не выбранный веб-сервер)\\n' "$(status_mark info)" "$jail"
+        printf '    %s %s: отключён (не выбранный веб-сервер)\n' "$(status_mark info)" "$jail"
         continue
       fi
       printf '    %s %s: jail не загружен или выключен\\n' "$(status_mark fail)" "$jail"
