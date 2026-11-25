@@ -1849,11 +1849,13 @@ configure_proxy_fail2ban() {
   command -v fail2ban-client >/dev/null 2>&1 || die "Fail2ban не установлен"
   install -d -m 0755 "$filter_dir" "$jail_dir"
   # Trust only Cloudflare's published edge ranges. Direct origin peers remain untrusted.
-  local cf_cidrs cf_v4 cf_v6
+  local cf_cidrs cf_v4 cf_v6 cidr
+  local -a cf_cidr_array=()
   cf_v4="$(curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
   cf_v6="$(curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v6 2>/dev/null || true)"
   [[ -n "$cf_v4" && -n "$cf_v6" ]] || die "Не удалось получить полные доверенные диапазоны Cloudflare IPv4/IPv6"
   cf_cidrs="$(printf '%s\n%s\n' "$cf_v4" "$cf_v6" | awk 'NF' | sort -u | tr '\n' ' ')"
+  read -r -a cf_cidr_array <<< "$cf_cidrs"
   printf '%s\n' "$cf_cidrs" | tr ' ' '\n' | python3 -c 'import ipaddress,sys; [ipaddress.ip_network(x.strip(), strict=False) for x in sys.stdin if x.strip()]' \
     || die "Список диапазонов Cloudflare содержит некорректную запись"
   cat > "$filter_dir/tproxy-web-auth.conf" <<'EOF'
@@ -1875,7 +1877,7 @@ EOF
       echo "# Trust Cloudflare edges only; direct peers cannot spoof CF-Connecting-IP."
       echo "real_ip_header CF-Connecting-IP;"
       echo "real_ip_recursive on;"
-      for cidr in $cf_cidrs; do printf 'set_real_ip_from %s;\n' "$cidr"; done
+      for cidr in "${cf_cidr_array[@]}"; do printf 'set_real_ip_from %s;\n' "$cidr"; done
     } > /etc/nginx/conf.d/tproxy-cloudflare-realip.conf
     chmod 0644 /etc/nginx/conf.d/tproxy-cloudflare-realip.conf
     cat > /etc/nginx/conf.d/tproxy-fail2ban.conf <<'EOF'
@@ -1979,6 +1981,10 @@ PY
     ACME_EMAIL="$(cat "$PROXY_CONFIG_DIR/acme-email" 2>/dev/null || true)" \
       /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
       || die "Caddyfile не прошёл проверку после настройки Fail2ban"
+    if systemctl is-active --quiet caddy.service; then
+      systemctl reload caddy.service 2>/dev/null || systemctl restart caddy.service \
+        || die "Не удалось применить обновлённую конфигурацию Caddy"
+    fi
   else
     die "Неизвестный веб-сервер для настройки Fail2ban: $WEB_SERVER"
   fi
