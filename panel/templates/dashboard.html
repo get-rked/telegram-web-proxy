@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TPROXY · Панель управления</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1220;--panel:#111d2d;--line:#26374d;--muted:#8fa2ba;--text:#edf4ff;--blue:#73a9ff;--mint:#65d8c1}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 80% 0%,#172d48 0,transparent 34%),var(--bg);color:var(--text);font:14px Inter,system-ui,sans-serif}
+.shell{max-width:1250px;margin:auto;padding:28px}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:30px}
+.brand{font-weight:900;letter-spacing:.17em;color:var(--blue)}.brand small{display:block;color:var(--muted);letter-spacing:0;margin-top:5px}
+.hero{padding:30px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(120deg,#182b43,#101a29);margin-bottom:20px}
+.eyebrow{color:var(--mint);font-size:11px;font-weight:800;letter-spacing:.2em}
+.hero h1{font-size:clamp(25px,4vw,38px);margin:12px 0 7px}.sub,.meta{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;min-width:0}
+.card h2{font-size:17px;margin:0 0 16px}.wide{grid-column:1/-1}
+.row{display:flex;gap:14px;align-items:center;justify-content:space-between;padding:15px 0;border-bottom:1px solid #ffffff10}.row:last-child{border:0}
+.profile{background:#0d1827;border:1px solid #26374d;border-radius:13px;padding:16px;margin-top:12px}.profile-table{width:100%;border-collapse:collapse;margin-top:14px}.profile-table th,.profile-table td{text-align:left;padding:13px 10px;border-bottom:1px solid #ffffff12;vertical-align:middle}.profile-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.profile-table td .name{margin-bottom:5px}.table-wrap{overflow-x:auto}.runtime-note{color:var(--muted);font-size:11px;margin-top:4px}
+.profile-head{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.name{font-weight:750;font-size:15px}.meta{font-size:12px;margin-top:6px}
+.actions,.toolbar,.formline{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button,input,select{font:inherit;border:1px solid var(--line);border-radius:9px;padding:10px;background:#0b1523;color:var(--text)}
+select{appearance:none;-webkit-appearance:none;padding-right:38px;background-color:#0d1929;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238dbaff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+select:hover{border-color:#5278a5;background-color:#13243a}select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}select option{background:#111d2d;color:var(--text)}
+button{cursor:pointer;background:#1b3552;border-color:#3b587a}button.primary{background:linear-gradient(110deg,#4c8cff,#63cdbd);border:0;color:#071321;font-weight:800}
+.button-link{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border:1px solid #4776a8;border-radius:10px;background:linear-gradient(135deg,#203c5d,#172c45);color:#d9eaff;text-decoration:none;font-weight:700;transition:filter .15s,transform .15s}
+.button-link:hover{filter:brightness(1.2);transform:translateY(-1px)}
+button.danger{border-color:#78444b;background:#3a202a;color:#ffc5c8}button:disabled{opacity:.5;cursor:wait}
+input,select{min-width:180px}input[type=file]{max-width:100%}
+.output{white-space:pre;max-height:420px;max-width:100%;overflow:auto;box-sizing:border-box;background:#09111d;border:1px solid var(--line);padding:15px;border-radius:12px;color:#b9c9dc;font:12px/1.55 ui-monospace,monospace}
+ .qr-field{display:flex;flex-direction:column;align-items:center;text-align:center}
+.qr{width:220px;max-width:100%;background:white;padding:10px;border-radius:12px}
+.logout{color:#b8c8dc;text-decoration:none;border:1px solid var(--line);padding:10px 14px;border-radius:10px}
+.foot{color:#6f829a;text-align:center;padding:24px 0;font-size:12px}
+dialog{width:min(560px,calc(100% - 28px));max-height:94vh;overflow:auto;background:#111d2d;color:var(--text);border:1px solid #3b587a;border-radius:18px;padding:24px}
+dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
+.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.dialog-head h2{margin:0}.field{margin:12px 0}.field label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
+.value{display:flex;gap:8px;align-items:center;min-width:0}.value code{display:block;overflow-wrap:anywhere;white-space:normal;background:#09111d;padding:10px;border-radius:8px;flex:1}
+.value button{flex-shrink:0}.link{color:#8dbaff;overflow-wrap:anywhere}.dialog-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.toast{position:fixed;right:22px;bottom:22px;z-index:20;max-width:min(420px,calc(100vw - 44px));padding:14px 18px;border:1px solid #3b587a;border-radius:12px;background:#14243a;box-shadow:0 14px 40px #0008;opacity:0;transform:translateY(12px);pointer-events:none;transition:.2s}.toast.show{opacity:1;transform:translateY(0)}.toast.success{border-color:#397e70}.toast.error{border-color:#9b515b}.confirm-message{color:#b9c9dc;line-height:1.6;white-space:pre-wrap}
+#profileDialog{width:min(820px,calc(100% - 28px));max-height:94vh}
+.config-layout{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:22px;align-items:start}
+.config-details{min-width:0}
+#profileDialog .qr{width:210px}
+@media(max-width:620px){.config-layout{grid-template-columns:1fr}#profileDialog .qr{width:180px}}
+@media(max-width:760px){.shell{padding:16px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}.hero{padding:22px}.profile-head,.row{align-items:flex-start;flex-direction:column}.actions{width:100%}.profile-table th,.profile-table td{padding:10px 8px}.profile-table{min-width:740px}}
+</style>
+</head>
+<body>
+<main class="shell">
+<header class="top"><div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div><a class="logout" href="#" onclick="logout();return false">Выйти ↗</a></header>
+<section class="hero"><div class="eyebrow">CONTROL CENTER</div><h1>Управление прокси</h1><div class="sub">Профили, диагностика и резервирование — в отдельных разделах</div></section>
+<div class="grid">
+<section class="card wide"><h2>Профили</h2>
+<div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">＋ Создать профиль</button><button onclick="openDialog('importDialog')">Импорт профиля</button></div><div id="runtimeSettings" class="runtime-note">Workers и Max Connections: загрузка… (изменяются только через CLI)</div>
+<div id="profiles">Загрузка профилей…</div></section>
+<section class="card wide"><h2>Диагностика</h2><button onclick="loadDiagnostics()">Запустить диагностику</button><pre id="diagnostics" class="output">Нажмите «Запустить диагностику».</pre></section>
+<section class="card wide"><h2>Резервные копии</h2>
+<div class="toolbar"><button class="primary" onclick="createBackup()">Создать полную копию</button><button onclick="openDialog('backupImportDialog')">Импорт архива</button><button onclick="loadBackups()">Обновить список архивов</button></div>
+<div class="meta">Экспорт профиля доступен в строке соответствующего профиля. Импорт — рядом с кнопкой «Создать профиль».</div>
+<div id="backups">Загрузка архивов…</div>
+</section>
+</div>
+<div class="foot">TPROXY MANAGER · Secure administration</div>
+</main>
+
+<dialog id="importDialog">
+<div class="dialog-head"><h2>Импорт профиля</h2><button onclick="closeDialog('importDialog')">✕</button></div>
+<div class="field"><label>Архив профиля</label><input id="importArchive" type="file" accept=".tar.gz,.tgz"></div>
+<div class="field"><label>Куда импортировать</label><select id="importTarget"><option value="new">Создать или заменить профиль</option><option value="default">Заменить default</option></select></div>
+<div class="field"><label>Имя целевого профиля</label><input id="importName" placeholder="Имя целевого профиля"></div>
+<div class="field"><label>Путь profile.json (если в архиве несколько)</label><input id="importEntry" placeholder="profiles/ИМЯ/profile.json"></div>
+<div class="dialog-actions"><button onclick="closeDialog('importDialog')">Отмена</button><button class="primary" onclick="importProfile()">Импортировать</button></div></dialog>
+
+<dialog id="backupImportDialog">
+<div class="dialog-head"><h2>Импорт полной резервной копии</h2><button onclick="closeDialog('backupImportDialog')">✕</button></div>
+<div class="field"><label for="backupArchive">Архив полной резервной копии (.tar.gz)</label><input id="backupArchive" type="file" accept=".tar.gz,.tgz"></div>
+<div class="meta">Архив будет сохранён в общем каталоге резервных копий и появится в списке для восстановления.</div>
+<div class="dialog-actions"><button onclick="closeDialog('backupImportDialog')">Отмена</button><button class="primary" onclick="importBackupArchive()">Импортировать архив</button></div></dialog>
+<dialog id="profileDialog">
+<div class="dialog-head"><h2 id="configTitle">Конфигурация профиля</h2><button onclick="closeDialog('profileDialog')">✕</button></div>
+<div class="config-layout">
+<div class="config-details">
+<div class="field"><label>Адрес сервера</label><div class="value"><code id="configServer"></code><button onclick="copyValue('configServer')">Копировать</button></div></div>
+<div class="field"><label>Секрет подключения</label><div class="value"><code id="configSecret"></code><button onclick="copyValue('configSecret')">Копировать</button></div></div>
+<div class="field"><label>Публичная ссылка Telegram</label><a id="configLink" class="link" target="_blank" rel="noopener"></a><div class="toolbar"><button onclick="copyLink()">Копировать HTTPS-ссылку</button></div></div>
+<div class="field"><label>Прямая ссылка Telegram</label><a id="configDeepLink" class="link"></a><div class="toolbar"><button onclick="copyDeepLink()">Копировать tg:// ссылку</button></div></div>
+</div>
+<div class="field qr-field"><label>QR-код подключения (прямая ссылка Telegram)</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
+</div>
+<div class="dialog-actions"><button onclick="closeDialog('profileDialog')">Закрыть</button></div>
+</dialog>
+
+<dialog id="editDialog">
+<div class="dialog-head"><h2 id="editTitle">Изменить профиль</h2><button onclick="closeDialog('editDialog')">✕</button></div>
+<input type="hidden" id="editName">
+<div class="field"><label for="editCarrier">Carrier mode</label><select id="editCarrier"><option value="https">https</option><option value="https-lanes">https-lanes</option><option value="websocket">websocket</option><option value="websocket-lanes">websocket-lanes</option></select></div>
+<div class="field"><label for="editSecret">Секрет профиля (dd + 32 hex-символа)</label><div class="toolbar"><input id="editSecret" type="text" maxlength="34" minlength="34" autocomplete="off" spellcheck="false" oninput="validateEditSecret()" style="flex:1"><button type="button" onclick="generateEditSecret()">Сгенерировать</button></div><div id="secretValidation" class="meta">Секрет должен содержать ровно 34 символа: dd и 32 шестнадцатеричных символа.</div></div>
+<div class="dialog-actions"><button onclick="closeDialog('editDialog')">Отмена</button><button class="primary" onclick="saveProfile()">Сохранить изменения</button></div>
+</dialog>
+
+
+<dialog id="confirmDialog">
+<div class="dialog-head"><h2 id="confirmTitle">Подтверждение действия</h2></div>
+<div id="confirmMessage" class="confirm-message"></div>
+<div class="dialog-actions"><button onclick="resolveConfirmation(false)">Отмена</button><button id="confirmAccept" class="danger" onclick="resolveConfirmation(true)">Подтвердить</button></div>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+let confirmResolver=null;
+let toastTimer=null;
+let csrf='';
+let currentProfile='';
+const base=location.pathname.replace(/\/$/,'');
+
+const idleTimeoutMs=5*60*1000;
+const heartbeatIntervalMs=30*1000;
+let lastUserActivity=Date.now();
+let lastHeartbeat=0;
+let idleRedirected=false;
+function redirectToLogin(){
+ if(idleRedirected)return;
+ idleRedirected=true;
+ location.replace(base+'/login?expired=1');
+}
+async function sendActivityHeartbeat(){
+ const now=Date.now();
+ if(now-lastHeartbeat<heartbeatIntervalMs||!csrf)return;
+ lastHeartbeat=now;
+ try{
+  const response=await fetch(base+'/api/session/activity',{
+   method:'POST',credentials:'same-origin',
+   headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+   body:'{}',cache:'no-store'
+  });
+  csrf=response.headers.get('X-CSRF-Token')||csrf;
+  if(response.status===401){redirectToLogin();return;}
+  if(!response.ok&&response.status===403){redirectToLogin();}
+ }catch(error){
+  // A transient network failure is retried on the next user activity.
+ }
+}
+function markUserActivity(){
+ lastUserActivity=Date.now();
+ void sendActivityHeartbeat();
+}
+for(const eventName of ['pointerdown','pointermove','keydown','scroll','touchstart']){
+ document.addEventListener(eventName,markUserActivity,{passive:true});
+}
+document.addEventListener('visibilitychange',()=>{
+ if(!document.hidden){
+  if(Date.now()-lastUserActivity>=idleTimeoutMs)redirectToLogin();
+  else void sendActivityHeartbeat();
+ }
+});
+setInterval(()=>{
+ if(Date.now()-lastUserActivity>=idleTimeoutMs)redirectToLogin();
+},1000);
+
+async function api(path,opts={}){
+ opts.credentials='same-origin';
+ const headers={'X-CSRF-Token':csrf};if(!(opts.body instanceof FormData))headers['Content-Type']='application/json';opts.headers=Object.assign(headers,opts.headers||{});
+ const response=await fetch(path,opts);csrf=response.headers.get('X-CSRF-Token')||csrf;
+ if(response.status===401){redirectToLogin();throw Error('Сессия завершена')}
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok)throw Error(data.error||'Ошибка запроса');return data;
+}
+function esc(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function notify(error,kind='error'){
+ const toast=document.querySelector('#toast');toast.textContent=error.message||String(error);toast.className='toast show '+kind;
+ clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.className='toast',4200);
+}
+function askConfirm(message,title='Подтверждение действия',acceptLabel='Подтвердить'){
+ return new Promise(resolve=>{
+  confirmResolver=resolve;
+  document.querySelector('#confirmTitle').textContent=title;
+  document.querySelector('#confirmMessage').textContent=message;
+  document.querySelector('#confirmAccept').textContent=acceptLabel;
+  document.querySelector('#confirmDialog').showModal();
+ });
+}
+function resolveConfirmation(accepted){
+ const dialog=document.querySelector('#confirmDialog');if(dialog.open)dialog.close();
+ const resolve=confirmResolver;confirmResolver=null;if(resolve)resolve(accepted);
+}
+document.querySelector('#confirmDialog').addEventListener('cancel',()=>{if(confirmResolver)resolveConfirmation(false)});
+function closeDialog(id){document.getElementById(id).close()}
+function openDialog(id){document.getElementById(id).showModal()}
+function copyText(text){navigator.clipboard.writeText(text).catch(()=>{const field=document.createElement('textarea');field.value=text;document.body.appendChild(field);field.select();document.execCommand('copy');field.remove()})}
+function copyValue(id){copyText(document.getElementById(id).textContent)}
+function copyLink(){copyText(document.getElementById('configLink').href)}
+function copyDeepLink(){copyText(document.getElementById('configDeepLink').textContent)}
+async function loadProfiles(){
+ try{
+  const profiles=await api(base+'/api/profiles');
+  window.profileSecrets=Object.fromEntries(profiles.map(p=>[p.name,p.secret]));
+  const runtime=document.querySelector('#runtimeSettings');
+  if(profiles.length){runtime.textContent='Общие настройки MTProxy · Workers: '+(profiles[0].workers||'1')+' · Max Connections: '+(profiles[0].max_connections||'4096')+' · Изменение доступно только через CLI.'}
+  else{runtime.textContent='Общие настройки MTProxy отображаются после загрузки профилей.'}
+  document.querySelector('#profiles').innerHTML=profiles.length?'<div class="table-wrap"><table class="profile-table"><thead><tr><th>Профиль</th><th>Carrier mode</th><th>Секрет</th><th>Действия</th></tr></thead><tbody>'+profiles.map(p=>'<tr><td><div class="name">'+esc(p.name)+'</div></td><td>'+esc(p.carrier_mode)+'</td><td><code>'+esc(p.secret)+'</code></td><td><div class="actions"><button class="primary" onclick="showProfileConfig(\''+esc(p.name)+'\')">Конфигурация</button><button onclick="editProfile(\''+esc(p.name)+'\',\''+esc(p.carrier_mode)+'\')">Изменить</button><button onclick="exportProfile(\''+esc(p.name)+'\')">Экспорт</button>'+(p.name==='default'?'':'<button class="danger" onclick="deleteProfile(\''+esc(p.name)+'\')">Удалить</button>')+'</div></td></tr>').join('')+'</tbody></table></div>':'Профили не найдены';
+ }catch(error){notify(error)}
+}
+async function addProfile(){
+ try{const name=document.querySelector('#newName').value.trim();if(!name)throw Error('Укажите имя профиля');
+ await api(base+'/api/profiles',{method:'POST',body:JSON.stringify({Name:name})});document.querySelector('#newName').value='';await loadProfiles()}
+ catch(error){notify(error)}
+}
+async function showProfileConfig(name){
+ try{
+  const data=await api(base+'/api/profiles/'+encodeURIComponent(name)+'/config');currentProfile=name;
+  document.querySelector('#configTitle').textContent='Конфигурация · '+name;
+  document.querySelector('#configServer').textContent=data.server;
+  document.querySelector('#configSecret').textContent=data.client_secret;
+  const link=document.querySelector('#configLink');link.href=data.link;link.textContent=data.link;
+  const deepLink=document.querySelector('#configDeepLink');deepLink.href=data.tg_link;deepLink.textContent=data.tg_link;
+  document.querySelector('#configQR').src=base+'/api/profiles/'+encodeURIComponent(name)+'/qr';
+  document.querySelector('#profileDialog').showModal();
+ }catch(error){notify(error)}
+}
+function editProfile(name,mode){
+ document.querySelector('#editName').value=name;document.querySelector('#editTitle').textContent='Изменить · '+name;
+ document.querySelector('#editCarrier').value=mode;
+ const secret=window.profileSecrets&&window.profileSecrets[name];
+ document.querySelector('#editSecret').value=secret||'';
+ validateEditSecret();
+ document.querySelector('#editDialog').showModal();
+}
+async function saveProfile(){
+ const name=document.querySelector('#editName').value;
+ const carrier_mode=document.querySelector('#editCarrier').value;
+ const secret=document.querySelector('#editSecret').value;
+ if(!/^dd[0-9a-f]{32}$/.test(secret)){validateEditSecret();notify(Error('Проверьте формат секрета'));return}
+ if(secret!==window.profileSecrets?.[name]&&!await askConfirm('Старый секрет перестанет работать на клиентах. Продолжить?','Изменение секрета','Сохранить'))return;
+ try{
+  await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'update',CarrierMode:carrier_mode,Secret:secret})});
+  closeDialog('editDialog');await loadProfiles();notify('Настройки профиля обновлены','success');
+ }catch(error){notify(error)}
+}
+function validateEditSecret(){
+ const field=document.querySelector('#editSecret'),hint=document.querySelector('#secretValidation');
+ const valid=/^dd[0-9a-f]{32}$/.test(field.value);
+ field.setCustomValidity(valid?'':'Нужен префикс dd и ровно 32 символа 0-9 или a-f');
+ hint.textContent=valid?'Формат секрета корректен ('+field.value.length+'/34)':'Длина: '+field.value.length+'/34. Требуется dd и 32 символа 0-9 или a-f.';
+ hint.style.color=valid?'var(--success, #36a269)':'var(--muted, #a0a0a0)';
+ return valid;
+}
+function generateEditSecret(){
+ const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+ document.querySelector('#editSecret').value='dd'+Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ validateEditSecret();
+}
+async function exportProfile(name){
+ try{const result=await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'export'})});const link=document.createElement('a');link.href=result.download_url;link.download='';document.body.appendChild(link);link.click();link.remove();await loadBackups()}
+ catch(error){notify(error)}
+}
+async function importProfile(){
+ const file=document.querySelector('#importArchive').files[0];if(!file){notify(Error('Выберите архив'));return}
+ const target=document.querySelector('#importTarget').value,name=document.querySelector('#importName').value.trim(),entry=document.querySelector('#importEntry').value.trim();
+ if(target==='new'&&!name){notify(Error('Укажите имя целевого профиля'));return}
+ if(target==='default'&&!await askConfirm('Будет заменён системный профиль default. Продолжить?','Импорт профиля','Заменить default'))return;
+ const form=new FormData();form.append('archive',file);form.append('target',target);form.append('name',name);form.append('entry',entry);
+ try{await api(base+'/api/profiles/import',{method:'POST',body:form});document.querySelector('#importArchive').value='';closeDialog('importDialog');await loadProfiles();await loadBackups();notify('Профиль импортирован','success')}
+ catch(error){notify(error)}
+}
+async function deleteProfile(name){
+ if(!await askConfirm('Профиль «'+name+'» будет удалён. Это действие нельзя отменить.','Удаление профиля','Удалить профиль'))return;
+ try{await api(base+'/api/profiles/'+encodeURIComponent(name),{method:'POST',body:JSON.stringify({Action:'delete'})});await loadProfiles()}
+ catch(error){notify(error)}
+}
+async function loadDiagnostics(){
+ try{const result=await api(base+'/api/diagnostics');document.querySelector('#diagnostics').textContent=result.output||'Нет вывода'}
+ catch(error){document.querySelector('#diagnostics').textContent=error.message}
+}
+async function loadBackups(){
+ try{
+  const backups=await api(base+'/api/backups');
+  document.querySelector('#backups').innerHTML='<h3>Полные резервные копии</h3>'+backups.map(b=>{
+   const action='<div class="actions"><a class="button-link" href="'+base+'/api/backups/download/'+encodeURIComponent(b.name)+'">Экспорт</a><button class="primary" onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button><button class="danger" onclick="deleteBackup(\''+esc(b.name)+'\')">Удалить</button></div>';
+   return '<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">Создана: '+new Date(b.created).toLocaleString()+' · '+(b.size/1048576).toFixed(2)+' MB</div></div>'+action+'</div>';
+  }).join('')||'<div class="meta">Полных резервных копий пока нет</div>';
+ }catch(error){notify(error)}
+}
+async function importBackupArchive(){
+ const file=document.querySelector('#backupArchive').files[0];
+ if(!file){notify(Error('Выберите архив'));return}
+ if(file.size>1024*1024*1024){notify(Error('Размер архива не должен превышать 1 ГБ'));return}
+ const form=new FormData();form.append('archive',file);
+ try{
+  await api(base+'/api/backups/import',{method:'POST',body:form});
+  document.querySelector('#backupArchive').value='';closeDialog('backupImportDialog');
+  await loadBackups();notify('Архив импортирован','success');
+ }catch(error){notify(error)}
+}
+async function createBackup(){
+ if(!await askConfirm('Создать полную резервную копию конфигурации?','Создание резервной копии','Создать копию'))return;
+ try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'create'})});await loadBackups();notify('Резервная копия создана','success')}
+ catch(error){notify(error)}
+}
+async function deleteBackup(name){
+ if(!await askConfirm('Полная резервная копия «'+name+'» будет удалена без возможности восстановления. Продолжить?','Удаление резервной копии','Удалить'))return;
+ try{
+  await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'delete',Name:name})});
+  await loadBackups();notify('Резервная копия удалена','success');
+ }catch(error){notify(error)}
+}
+async function restoreBackup(name){
+ if(!await askConfirm('Восстановление заменит текущую конфигурацию. Панель и службы могут быть перезапущены. Продолжить?','Восстановление конфигурации','Восстановить'))return;
+ try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'restore',Name:name})});notify('Восстановление запущено. Панель перезапустится.','success');setTimeout(()=>location.reload(),5000)}
+ catch(error){notify(error)}
+}
+async function logout(){try{await api(base+'/logout',{method:'POST',body:'{}'})}catch(error){location.href='login'}}
+async function loadAll(){await loadProfiles();await loadBackups()}
+loadAll();
+</script>
+</body>
+</html>

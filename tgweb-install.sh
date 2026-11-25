@@ -40,7 +40,8 @@ readonly NGINX_MAP="/etc/nginx/conf.d/tproxy-websocket-map.conf"
 readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
-readonly SCRIPT_VERSION="1.0.2"
+readonly SCRIPT_VERSION="1.1.0"
+readonly PANEL_SOURCE_REF="feature/web-admin-panel"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
@@ -142,7 +143,9 @@ redact_sensitive_log() {
     -e 's/(authorization[=: ]+)(Bearer[[:space:]]+)?[^[:space:]&",;]+/\1[REDACTED]/Ig' \
     -e 's/((secret|token|password|bridge[_-]?token|api[_-]?key)[=: ]+)[^[:space:]&",;]+/\1[REDACTED]/Ig' \
     -e 's/([?&](secret|token|hash)=)[^&[:space:]"]+/\1[REDACTED]/Ig' \
-    -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g'
+    -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g' \
+    -e 's/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/[IP]/g' \
+    -e 's/\b([0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f:]+\b/[IPv6]/g'
 }
 
 usage() {
@@ -156,6 +159,7 @@ Usage:
   sudo ./tgweb-install.sh profile list
   sudo ./tgweb-install.sh profile add ИМЯ (--secret СЕКРЕТ | --generate) [--carrier-mode MODE]
   sudo ./tgweb-install.sh profile set-carrier ИМЯ MODE
+  sudo ./tgweb-install.sh profile update ИМЯ --carrier-mode MODE [--workers N] [--max-connections N] [--generate]
   sudo ./tgweb-install.sh profile delete ИМЯ --yes
   sudo ./tgweb-install.sh profile backup ИМЯ
   sudo ./tgweb-install.sh profile import ARCHIVE (--name ИМЯ | --replace-default) [--entry PATH] --yes
@@ -458,6 +462,10 @@ parse_install_args() {
   if [[ -n "$MAXCONN_ARG" ]]; then
     [[ "$MAXCONN_ARG" =~ ^[1-9][0-9]*$ ]] || die "--max-connections положительное"
   fi
+  if [[ "${MODE:-}" == "update" ]]; then
+    [[ -z "$SECRET_ARG" && "$CARRIER_MODE_SET" -eq 0 && "$SECRET_PREFIX_MODE_SET" -eq 0 ]] ||
+      die "Команда update изменяет только общие параметры. Секреты и Carrier mode настраиваются через profile CLI."
+  fi
 }
 
 parse_uninstall_args() {
@@ -498,6 +506,24 @@ caddyfile_routes_to_tproxy() {
   [[ -s /etc/caddy/Caddyfile ]] || return 1
   grep -Fq '{$TPROXY_HOSTNAME}' /etc/caddy/Caddyfile || return 1
   grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile
+}
+
+# Применяет проверенную конфигурацию Caddy без обращения к API остановленной службы.
+# При недоступном admin API использует systemd restart/start; stderr reload подавляется,
+# чтобы штатный fallback не выглядел как ошибка обновления.
+apply_caddy_config() {
+  local config="${1:-/etc/caddy/Caddyfile}"
+  if systemctl is-active --quiet caddy.service 2>/dev/null; then
+    if TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" \
+      /usr/local/bin/caddy reload --config "$config" --adapter caddyfile >/dev/null 2>&1; then
+      return 0
+    fi
+    warn "Admin API Caddy недоступен; применяю конфигурацию через перезапуск службы."
+    systemctl restart caddy.service
+  else
+    systemctl start caddy.service
+  fi
+  systemctl is-active --quiet caddy.service
 }
 
 # Проверка полной совместимости Caddy с текущими параметрами.
@@ -571,7 +597,7 @@ preflight_basics() {
   require_root
   local pkg svc state
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
-  local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service)
+  local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service fail2ban.service)
   ui_header "Предварительная проверка системы"
   echo "Проверка основных компонентов до ввода параметров установки."
   echo
@@ -759,7 +785,7 @@ PYTHON
 
 preflight_system() {
   require_root
-  local pkg svc version go_minor port
+  local pkg svc version go_minor port local_go_bin
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
   local -a missing_packages=()
   echo
@@ -767,18 +793,22 @@ preflight_system() {
   for pkg in "${required_packages[@]}"; do
     package_installed "$pkg" || missing_packages+=("$pkg")
   done
-  if command -v go >/dev/null 2>&1; then
-    version="$(go version 2>/dev/null || true)"
-    go_minor="$(go env GOVERSION 2>/dev/null | sed -E 's/^go1\.([0-9]+).*/\1/')"
-    if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 20 )); then
+  local_go_bin=""
+  if [[ -x "/opt/go${GO_FALLBACK_VERSION}/bin/go" ]]; then
+    local_go_bin="/opt/go${GO_FALLBACK_VERSION}/bin/go"
+  elif command -v go >/dev/null 2>&1; then
+    local_go_bin="$(command -v go)"
+  fi
+  if [[ -n "$local_go_bin" ]]; then
+    version="$("$local_go_bin" version 2>/dev/null || true)"
+    go_minor="$("$local_go_bin" env GOVERSION 2>/dev/null | sed -nE 's/^go1\.([0-9]+)(\..*)?$/\1/p')"
+    if [[ "$go_minor" =~ ^[0-9]+$ ]] && (( go_minor >= 24 )); then
       printf '  %-24s %s\n' "Go" "$(status_mark ok) $version"
     else
-      printf '  %-24s %s\n' "Go" "$(status_mark warn) версия ниже 1.20; потребуется Go $GO_FALLBACK_VERSION"
+      printf '  %-24s %s\n' "Go" "$(status_mark warn) обнаружена $version; требуется Go 1.24 или новее (установщик использует $GO_FALLBACK_VERSION)"
     fi
-  elif [[ -x "/opt/go${GO_FALLBACK_VERSION}/bin/go" ]]; then
-    printf '  %-24s %s\n' "Go" "$(status_mark ok) найден в /opt/go${GO_FALLBACK_VERSION}"
   else
-    printf '  %-24s %s\n' "Go" "$(status_mark warn) потребуется установить"
+    printf '  %-24s %s\n' "Go" "$(status_mark warn) потребуется установить Go $GO_FALLBACK_VERSION"
   fi
   if command -v caddy >/dev/null 2>&1; then
     version="$(caddy version 2>/dev/null | head -n1)"
@@ -930,39 +960,39 @@ get_public_ipv4() {
   return 1
 }
 
-ipv4_to_int() {
-  local a b c d
-  IFS=. read -r a b c d <<< "$1"
-  [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ && "$d" =~ ^[0-9]+$ ]] || return 1
-  (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 )) || return 1
-  printf '%u' "$(( (10#$a << 24) | (10#$b << 16) | (10#$c << 8) | 10#$d ))"
-}
-
-is_cloudflare_ipv4() {
-  local address="$1" ranges="$2" cidr network prefix ip_num net_num mask
-  ip_num="$(ipv4_to_int "$address")" || return 1
-  while IFS= read -r cidr; do
-    [[ "$cidr" == */* ]] || continue
-    network="${cidr%/*}"
-    prefix="${cidr#*/}"
-    [[ "$prefix" =~ ^[0-9]+$ ]] && (( prefix >= 0 && prefix <= 32 )) || continue
-    net_num="$(ipv4_to_int "$network")" || continue
-    if (( prefix == 0 )); then mask=0; else mask=$(( (0xffffffff << (32 - prefix)) & 0xffffffff )); fi
-    if (( (ip_num & mask) == (net_num & mask) )); then return 0; fi
-  done <<< "$ranges"
-  return 1
-}
-
 is_cloudflare_proxied_domain() {
-  local hostname="$1" ranges="" address count=0 total=0
+  local hostname="$1" ipv4_ranges ipv6_ranges
   local -a addresses=()
-  mapfile -t addresses < <(dig +short A "$hostname" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
-  ((${#addresses[@]})) || return 1
-  ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
-  [[ -n "$ranges" ]] || return 1
-  for address in "${addresses[@]}"; do ((total += 1)); if is_cloudflare_ipv4 "$address" "$ranges"; then ((count += 1)); fi; done
-  (( total > 0 && count == total ))
+  mapfile -t addresses < <(
+    { dig +short A "$hostname" 2>/dev/null; dig +short AAAA "$hostname" 2>/dev/null; } |
+      python3 -c 'import ipaddress,sys
+for raw in sys.stdin:
+    try:
+        print(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        pass' | sort -u
+  )
+  (("${#addresses[@]}")) || return 1
+  ipv4_ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
+  ipv6_ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v6 2>/dev/null || true)"
+  [[ -n "$ipv4_ranges" && -n "$ipv6_ranges" ]] || return 1
+  python3 - "$ipv4_ranges" "$ipv6_ranges" "${addresses[@]}" <<'PYTHON'
+import ipaddress, sys
+ranges = []
+for raw in (sys.argv[1], sys.argv[2]):
+    parsed = [ipaddress.ip_network(line.strip(), strict=True) for line in raw.splitlines() if line.strip()]
+    ranges.append(parsed)
+matched = False
+for raw in sys.argv[3:]:
+    address = ipaddress.ip_address(raw)
+    networks = ranges[0] if address.version == 4 else ranges[1]
+    if any(address in network for network in networks):
+        matched = True
+if not matched:
+    raise SystemExit(1)
+PYTHON
 }
+
 
 check_telegram_connectivity() {
   info "Проверяю доступность Telegram до установки компонентов…"
@@ -1225,12 +1255,26 @@ install_mtproxy_backend() {
 }
 
 ensure_go() {
+  local candidate minor version
+  # Prefer the installer-managed toolchain: PATH may still point to an old
+  # distro Go even though the required version is already present in /opt.
+  candidate="/opt/go${GO_FALLBACK_VERSION}/bin/go"
+  if [[ -x "$candidate" ]]; then
+    version="$("$candidate" version 2>/dev/null || true)"
+    minor="$("$candidate" env GOVERSION 2>/dev/null | sed -nE 's/^go1\.([0-9]+)(\..*)?$/\1/p')"
+    if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 24 )); then
+      GO_BIN="$candidate"
+      ok "Go: $version (управляемая версия)"
+      return 0
+    fi
+  fi
   if command -v go >/dev/null 2>&1; then
-    local minor
-    minor="$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')"
-    if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 20 )); then
-      GO_BIN="$(command -v go)"
-      ok "Go: $(go version)"
+    candidate="$(command -v go)"
+    version="$("$candidate" version 2>/dev/null || true)"
+    minor="$("$candidate" env GOVERSION 2>/dev/null | sed -nE 's/^go1\.([0-9]+)(\..*)?$/\1/p')"
+    if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 24 )); then
+      GO_BIN="$candidate"
+      ok "Go: $version"
       return 0
     fi
   fi
@@ -1445,6 +1489,12 @@ prepare_layout() {
   require_root
   remove_legacy_compat_links
   install -d -m 0755 "$BASE_DIR" "$BIN_DIR" "$CONFIG_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR" "$MTPROXY_DIR" "$SOURCE_DIR" "$SYSTEMD_DIR" "$QR_DIR" "$BACKUP_DIR"
+  local installer_source
+  installer_source="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  if [[ -n "$installer_source" && -f "$installer_source" && "$installer_source" != "$BASE_DIR/tgweb-install.sh" ]]; then
+    install -o root -g root -m 0750 "$installer_source" "$BASE_DIR/tgweb-install.sh"
+  fi
+  if [[ -f "$BASE_DIR/tgweb-install.sh" ]]; then chown root:root "$BASE_DIR/tgweb-install.sh"; chmod 0750 "$BASE_DIR/tgweb-install.sh"; fi
   # The legacy standalone manager is no longer used; all its functions live here.
   rm -f "$BIN_DIR/tproxy-advanced"
 }
@@ -1571,6 +1621,9 @@ EOF
 EOF
   fi
 
+  # Profile storage is immutable during an update. Only a fresh install
+  # initializes or migrates per-profile files.
+  if [[ "$MODE" != "update" ]]; then
   # Per-profile JSON files are authoritative. Read the selected profile,
   # apply the installer choices, and write back only that profile object.
   profile_storage_rebuild
@@ -1597,13 +1650,18 @@ EOF
   chmod 0640 "$profile_tmp"
   mv -f "$profile_tmp" "$profile_dir/$profile_name/profile.json"
 
-  # Rebuild the aggregate from validated per-profile objects. This prevents
-  # accidentally writing the whole {"profiles":[...]} wrapper into profile.json.
+  # Rebuild the aggregate from validated per-profile objects.
   profile_storage_rebuild
-  chown root:tproxy $PROXY_CONFIG_DIR/config.json $PROXY_CONFIG_DIR/profiles.json
+  fi
+  chown root:tproxy $PROXY_CONFIG_DIR/config.json
+  if [[ "$MODE" != "update" ]]; then chown root:tproxy $PROXY_CONFIG_DIR/profiles.json; fi
   chmod 0640 $PROXY_CONFIG_DIR/config.json
-  chmod 0400 $PROXY_CONFIG_DIR/profiles.json
-  ok "config.json и profiles.json записаны (порты $RELAY_PORT / $ADMIN_PORT)"
+  if [[ "$MODE" != "update" ]]; then chmod 0400 $PROXY_CONFIG_DIR/profiles.json; fi
+  if [[ "$MODE" == "update" ]]; then
+    ok "Обновлены только общие параметры config.json; профили не изменялись"
+  else
+    ok "config.json и profiles.json записаны (порты $RELAY_PORT / $ADMIN_PORT)"
+  fi
 }
 
 write_mtproxy_env() {
@@ -1639,15 +1697,21 @@ write_mtproxy_env() {
 
   mkdir -p $MTPROXY_CONFIG_DIR
   local mtproxy_secrets="" profile_secret
-  if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
-    while IFS= read -r profile_secret; do
-      [[ -n "$profile_secret" ]] || continue
-      profile_secret="${profile_secret#dd}"
-      if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
-      mtproxy_secrets+="$profile_secret"
-    done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
+  if [[ "$MODE" == "update" ]]; then
+    # Preserve the active secret list; profile storage is read-only during updates.
+    mtproxy_secrets="$(grep -m1 '^MTPROXY_SECRETS=' "$MTPROXY_CONFIG_DIR/mtproxy.env" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
+    [[ -n "$mtproxy_secrets" ]] || die "В mtproxy.env отсутствует MTPROXY_SECRETS; обновление отменено."
+  else
+    if [[ -s "$PROXY_CONFIG_DIR/profiles.json" ]] && command -v jq >/dev/null 2>&1; then
+      while IFS= read -r profile_secret; do
+        [[ -n "$profile_secret" ]] || continue
+        profile_secret="${profile_secret#dd}"
+        if [[ -n "$mtproxy_secrets" ]]; then mtproxy_secrets+=" -S "; fi
+        mtproxy_secrets+="$profile_secret"
+      done < <(jq -r '.profiles[].secret' "$PROXY_CONFIG_DIR/profiles.json")
+    fi
+    [[ -n "$mtproxy_secrets" ]] || mtproxy_secrets="$backend_secret"
   fi
-  [[ -n "$mtproxy_secrets" ]] || mtproxy_secrets="$backend_secret"
   cat > "$MTPROXY_CONFIG_DIR/mtproxy.env" <<EOF
 MTPROXY_SECRETS="$mtproxy_secrets"
 MTPROXY_WORKERS=${WORKERS_ARG:-1}
@@ -1709,6 +1773,10 @@ install_caddyfile() {
     sed -i -E "s#(reverse_proxy[[:space:]]+127\.0\.0\.1:)[0-9]+#\1${RELAY_PORT}#g" /etc/caddy/Caddyfile
     ok "Caddyfile установлен (reverse_proxy → 127.0.0.1:$RELAY_PORT)"
   fi
+
+  # Keep generated and pre-existing Caddyfiles consistently formatted.
+  /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null ||
+    die "Не удалось отформатировать Caddyfile."
 
   # Render the upstream unit with this installation's actual site directory.
   # The upstream template defaults to /srv/tproxy-site, while this installer
@@ -1827,6 +1895,9 @@ validate_configs() {
   rm -f -- "$validation_profiles"
 
   if [[ "$WEB_SERVER" == "caddy" ]]; then
+    info "Форматирую Caddyfile перед проверкой…"
+    /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null ||
+      die "Не удалось отформатировать Caddyfile."
     info "Валидация Caddyfile…"
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || die "caddy validate упал"
   else
@@ -2085,7 +2156,7 @@ run_config() {
   else printf '%s\n' "$report"; fi
   printf '\nСостояние служб:\n'
   local service state mark
-  for service in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
+  for service in mtproxy tproxy-firewall tproxy-server tproxy-panel fail2ban refresh-mtproxy-config.timer "$web_server"; do
     state="$(systemctl is-active "$service" 2>/dev/null || true)"
     if [[ "$state" == active ]]; then mark="$(status_mark ok)"
     elif [[ "$state" == inactive || "$state" == failed ]]; then mark="$(status_mark fail)"
@@ -2096,11 +2167,10 @@ run_config() {
 }
 
 load_existing_config() {
-  local cfg="$PROXY_CONFIG_DIR/config.json" profiles="$PROXY_CONFIG_DIR/profiles.json"
+  local cfg="$PROXY_CONFIG_DIR/config.json"
   local envf="$MTPROXY_CONFIG_DIR/mtproxy.env" dropin=/etc/systemd/system/caddy.service.d/tproxy.conf v
   [[ -r "$cfg" && -r "$envf" ]] || die "Не найдена полная установленная конфигурация; сначала выполни config"
   command -v jq >/dev/null 2>&1 || die "Для чтения настроек нужен jq"
-  profile_storage_rebuild
   v="$(jq -er '.public_hostname | select(type == "string" and length > 0)' "$cfg")" || die "Не удалось прочитать hostname"
   [[ -n "$HOSTNAME_ARG" ]] || HOSTNAME_ARG="$v"
   v="$(jq -r '.base_path // "none"' "$cfg")"; [[ -n "$BASE_PATH_ARG" ]] || BASE_PATH_ARG="$v"
@@ -2109,12 +2179,6 @@ load_existing_config() {
   v="$(jq -r '.public_dir // empty' "$cfg")"; [[ -n "$v" ]] && SITE_DIR="$v"
   SITE_UPSTREAM_ARG="$(jq -r '.public_upstream // empty' "$cfg")"
   if [[ "$WEB_SERVER_SET" -eq 0 ]]; then if [[ -r $PROXY_CONFIG_DIR/web-server ]]; then WEB_SERVER="$(< $PROXY_CONFIG_DIR/web-server)"; elif systemctl is-enabled --quiet nginx 2>/dev/null; then WEB_SERVER=nginx; else WEB_SERVER=caddy; fi; fi
-  v="$(jq -er '.profiles[0].secret | select(type == "string" and length > 0)' "$profiles")" || die "Не удалось прочитать секрет"
-  [[ -n "$SECRET_ARG" ]] || SECRET_ARG="$v"
-  if [[ "$CARRIER_MODE_SET" -eq 0 ]]; then CARRIER_MODE_ARG="$(jq -r '.profiles[0].carrier_mode // "https"' "$profiles")"; fi
-  if [[ "$SECRET_PREFIX_MODE_SET" -eq 0 ]]; then
-    if [[ "$SECRET_ARG" == dd* ]]; then SECRET_PREFIX_MODE="dd"; else SECRET_PREFIX_MODE="plain"; fi
-  fi
   v="$(sed -n 's/^MTPROXY_WORKERS=//p' "$envf" | head -n1)"; [[ -n "$WORKERS_ARG" ]] || WORKERS_ARG="${v:-1}"
   v="$(sed -n 's/^MTPROXY_MAX_CONNECTIONS=//p' "$envf" | head -n1)"; [[ -n "$MAXCONN_ARG" ]] || MAXCONN_ARG="${v:-4096}"
   if [[ -r $PROXY_CONFIG_DIR/acme-email ]]; then
@@ -2142,7 +2206,6 @@ load_existing_config() {
   chmod 0600 $PROXY_CONFIG_DIR/acme-email
   validate_port "$RELAY_PORT" >/dev/null || die "Некорректный текущий relay-порт"
   validate_port "$ADMIN_PORT" >/dev/null || die "Некорректный текущий admin-порт"
-  validate_secret "$SECRET_ARG" >/dev/null || die "Некорректный текущий секрет"
   validate_base_path "$BASE_PATH_ARG" >/dev/null || die "Некорректный текущий base_path"
 }
 
@@ -2200,8 +2263,7 @@ interactive_update_fill() {
   prompt_update_port RELAY_PORT "Relay-порт" "$RELAY_PORT"
   prompt_update_port ADMIN_PORT "Admin-порт" "$ADMIN_PORT"
   [[ "$RELAY_PORT" != "$ADMIN_PORT" ]] || die "relay- и admin-порты должны различаться"
-  prompt_update_secret
-  info "Carrier mode при обновлении не меняется. Для изменения выбери профиль в меню «Carrier mode и профили»."
+  info "Профили, секреты и Carrier mode при обновлении не изменяются."
 
   local input
   while :; do
@@ -2224,7 +2286,6 @@ interactive_update_fill() {
   echo "  Base path  : $BASE_PATH_ARG"
   echo "  Relay port : $RELAY_PORT"
   echo "  Admin port : $ADMIN_PORT"
-  echo "  Секрет     : сохранён / изменён (значение скрыто)"
   echo "  Workers    : $WORKERS_ARG"
   echo "  Max conns  : $MAXCONN_ARG"
   echo "  Каталог    : $SITE_DIR"
@@ -2236,9 +2297,9 @@ show_operation_overview() {
   if [[ "$MODE" == "update" ]]; then
     ui_header "Перед обновлением"
     cat <<'EOF'
-  Будут обновлены исходники и компоненты, пересобран tproxy-server,
-  обновлены конфигурации и перезапущены службы.
-  Текущие настройки будут предложены по умолчанию, каталог сайта сохранится.
+  Будут обновлены исходники и бинарники, применены только общие параметры
+  прокси и перезапущены службы. Хранилище профилей, секреты и Carrier mode
+  останутся без изменений.
   Перед изменениями будет создана rollback-копия бинарника и конфигураций.
   При неудачном health-check предыдущие файлы будут восстановлены автоматически.
 EOF
@@ -2285,6 +2346,7 @@ begin_update_transaction() {
     opt/telegram-web-proxy/config/mtproxy \
     opt/telegram-web-proxy/systemd \
     etc/systemd/system/tproxy-server.service \
+    etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/mtproxy.service \
     etc/systemd/system/tproxy-firewall.service \
     etc/systemd/system/refresh-mtproxy-config.service \
@@ -2412,11 +2474,22 @@ run_install() {
     restart_proxy_services
   fi
   wait_ready || die "relay не прошёл health-check"
+  install_admin_panel
   UPDATE_TRANSACTION_ACTIVE=0
   if [[ "$MODE" == "update" ]]; then
     ok "Обновление прошло health-check; rollback-копия сохранена: $UPDATE_ROLLBACK_ARCHIVE"
   fi
-  print_summary
+  if [[ "$MODE" == "update" ]]; then
+    echo
+    ok "Обновление завершено. Профили, секреты и Carrier mode сохранены без изменений."
+    echo "  Workers         : $WORKERS_ARG"
+    echo "  Max connections : $MAXCONN_ARG"
+    echo "  Relay port      : $RELAY_PORT"
+    echo "  Admin port      : $ADMIN_PORT"
+    echo "  Rollback        : $UPDATE_ROLLBACK_ARCHIVE"
+  else
+    print_summary
+  fi
 }
 
 # ============================================================================
@@ -2425,9 +2498,44 @@ run_install() {
 
 run_uninstall() {
   require_root
+  local panel_base=""
+  if [[ -x "$BIN_DIR/tproxy-panel" && -s "$DATA_DIR/panel/panel.db" ]]; then
+    panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" "$BIN_DIR/tproxy-panel" -print-basepath 2>/dev/null || true)"
+  fi
+  systemctl disable --now tproxy-panel.service 2>/dev/null || true
+  rm -f /etc/systemd/system/tproxy-panel.service "$SYSTEMD_DIR/tproxy-panel.service"
+  rm -f /etc/fail2ban/filter.d/tproxy-panel.conf /etc/fail2ban/jail.d/tproxy-panel.local
+  rm -f /etc/fail2ban/filter.d/tproxy-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf /etc/fail2ban/jail.d/tproxy-proxy.local
+  systemctl restart fail2ban.service 2>/dev/null || true
   remove_legacy_compat_links
   local installed_web_server
   installed_web_server="$(cat $PROXY_CONFIG_DIR/web-server 2>/dev/null || true)"
+  if [[ -n "$panel_base" ]]; then
+    case "$installed_web_server" in
+      caddy)
+        python3 - "$panel_base" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/caddy/Caddyfile")
+if path.exists():
+    text = path.read_text()
+    base = re.escape(sys.argv[1])
+    pattern = r"(?ms)^[ \t]*handle /" + base + r"/\* \{\n[ \t]*reverse_proxy 127\.0\.0\.1:18765 \{\n[ \t]*header_up X-Real-IP \{http\.request\.remote\.host\}\n[ \t]*\}\n[ \t]*\}\n?"
+    path.write_text(re.sub(pattern, "", text, count=1))
+PYTHON
+        systemctl reload caddy.service 2>/dev/null || true ;;
+      nginx)
+        python3 - "$panel_base" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+if path.exists():
+    text = path.read_text()
+    base = re.escape(sys.argv[1])
+    pattern = r"(?ms)^[ \t]*location \^~ /" + base + r"/ \{\n.*?^[ \t]*\}\n?"
+    path.write_text(re.sub(pattern, "", text, count=1))
+PYTHON
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx.service 2>/dev/null || true ;;
+    esac
+  fi
   # Совместимость со старыми установками без marker-файла.
   if [[ "$installed_web_server" != "caddy" && "$installed_web_server" != "nginx" ]]; then
     if systemctl is-active --quiet caddy.service || systemctl is-enabled --quiet caddy.service 2>/dev/null || \
@@ -2461,7 +2569,7 @@ run_uninstall() {
 
   nft delete table inet tproxy_backend 2>/dev/null || true
 
-  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
+  rm -rf "$REPO_DIR" "$MTPROXY_DIR" "$PROXY_CONFIG_DIR" "$MTPROXY_CONFIG_DIR" "$DATA_DIR/panel" "$BASE_DIR/tgweb-install.sh" "$BIN_DIR/tproxy-panel" "$BIN_DIR/tproxy-server" "$BIN_DIR/mtproxy-proxy" "$BIN_DIR/refresh-mtproxy-config" "$QR_DIR"
   info "Каталог сайта $SITE_DIR сохранён."
 
   userdel -r tproxy 2>/dev/null || true
@@ -2546,7 +2654,7 @@ diagnostics_command() {
 
   echo
   echo "1. Состояние служб"
-  for svc in tproxy-server mtproxy tproxy-firewall refresh-mtproxy-config.timer "$web_server"; do
+  for svc in tproxy-server mtproxy tproxy-firewall tproxy-panel fail2ban refresh-mtproxy-config.timer "$web_server"; do
     state="$(systemctl is-active "$svc" 2>/dev/null || true)"
     if [[ "$state" == active ]]; then
       printf '  %s %-30s %s\n' "$(status_mark ok)" "$svc" "$(status_word active)"
@@ -2557,7 +2665,11 @@ diagnostics_command() {
   done
 
   echo
-  echo "2. Конфигурационные файлы и права"
+  echo "2. Защита Fail2ban для прокси"
+  diagnose_proxy_fail2ban || { failed=1; }
+
+  echo
+  echo "3. Конфигурационные файлы и права"
   for file in "$PROXY_CONFIG_DIR/config.json" "$PROXY_CONFIG_DIR/profiles.json" "$MTPROXY_CONFIG_DIR/mtproxy.env"; do
     if [[ ! -f "$file" ]]; then
       printf '  %s %s — отсутствует\n' "$(status_mark fail)" "$file"; failed=1
@@ -2569,7 +2681,7 @@ diagnostics_command() {
   done
 
   echo
-  echo "3. Сетевая цепочка и прослушиваемые порты"
+  echo "4. Сетевая цепочка и прослушиваемые порты"
   local port label
   for port in 80 443 "${relay##*:}" "${admin##*:}" "$backend_port"; do
     [[ "$port" =~ ^[0-9]+$ ]] || continue
@@ -2593,7 +2705,7 @@ diagnostics_command() {
   fi
 
   echo
-  echo "4. Локальные endpoints и backend"
+  echo "5. Локальные endpoints и backend"
   if [[ -n "$admin" ]]; then
     for endpoint in healthz readyz; do
       if curl --fail --silent --max-time 4 "http://$admin/$endpoint" >/dev/null; then
@@ -2612,7 +2724,7 @@ diagnostics_command() {
   fi
 
   echo
-  echo "5. Веб-сервер, HTTPS и TLS"
+  echo "6. Веб-сервер, HTTPS и TLS"
   if [[ "$web_server" == nginx ]]; then
     if nginx -t >/dev/null 2>&1; then printf '  %s Конфигурация Nginx корректна\n' "$(status_mark ok)"; else printf '  %s Ошибка конфигурации Nginx (подробности: nginx -t)\n' "$(status_mark fail)"; failed=1; fi
     cert_path="/etc/letsencrypt/live/$host/fullchain.pem"
@@ -2695,14 +2807,14 @@ diagnostics_command() {
   fi
 
   echo
-  echo "6. Порты и последние ошибки"
+  echo "7. Порты и последние ошибки"
   echo
   echo "  Порты, относящиеся к прокси:"
   proxy_ports_table "$relay" "$admin" "$backend"
   echo
   echo "  Последние ошибки служб:"
   local log_json
-  log_json="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u "$web_server" -p err -n 12 --no-pager -o json 2>/dev/null || true)"
+  log_json="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u tproxy-panel -u fail2ban -u "$web_server" -p err -n 12 --no-pager -o json 2>/dev/null || true)"
   if [[ -n "$log_json" ]] && command -v jq >/dev/null 2>&1; then
     while IFS= read -r log_row; do
       [[ -n "$log_row" ]] || continue
@@ -2743,13 +2855,23 @@ backup_command() {
   local -a items=()
   local p
   for p in \
-    opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website \
+    opt/telegram-web-proxy/tgweb-install.sh opt/telegram-web-proxy/config opt/telegram-web-proxy/systemd opt/telegram-web-proxy/qr opt/telegram-web-proxy/data/website opt/telegram-web-proxy/data/panel \
     opt/telegram-web-proxy/bin opt/telegram-web-proxy/src \
     etc/caddy/Caddyfile etc/caddy/Caddyfile.d \
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
     etc/nginx/conf.d/tproxy-websocket-map.conf \
+    etc/nginx/conf.d/tproxy-fail2ban-log.conf \
     etc/letsencrypt \
+    etc/fail2ban/filter.d/tproxy-panel.conf \
+    etc/fail2ban/filter.d/tproxy-nginx-scan.conf \
+    etc/fail2ban/filter.d/tproxy-caddy-scan.conf \
+    etc/fail2ban/filter.d/tproxy-server-abuse.conf \
+    etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf \
+    etc/fail2ban/jail.d/tproxy-panel.local \
+    etc/fail2ban/jail.d/tproxy-proxy.local \
+    etc/logrotate.d/tproxy-proxy \
     etc/systemd/system/tproxy-server.service \
+    etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/mtproxy.service \
     etc/systemd/system/tproxy-firewall.service \
     etc/systemd/system/refresh-mtproxy-config.service \
@@ -2781,6 +2903,8 @@ list_backup_archives() {
 restore_command() {
   local selection="${1:-}" archive="" i size
   local -a archives=()
+  if [[ "${2:-}" == "--yes" && $# -eq 2 ]]; then ASSUME_YES=1
+  elif (( $# > 1 )); then die "restore принимает только номер архива и необязательный --yes"; fi
   mapfile -d '' -t archives < <(list_backup_archives)
   (("${#archives[@]}")) || die "Резервные копии не найдены в $BACKUP_DIR"
 
@@ -2816,7 +2940,7 @@ restore_command() {
     [[ "$normalized" != /* ]] || die "Небезопасный абсолютный путь в архиве: $entry"
     [[ ! "/$normalized/" =~ /\.\./ ]] || die "Небезопасный путь в архиве: $entry"
     case "$normalized" in
-      opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
+      opt/telegram-web-proxy/tgweb-install.sh|opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/fail2ban/filter.d/tproxy-panel.conf|etc/fail2ban/filter.d/tproxy-nginx-scan.conf|etc/fail2ban/filter.d/tproxy-caddy-scan.conf|etc/fail2ban/filter.d/tproxy-server-abuse.conf|etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf|etc/fail2ban/jail.d/tproxy-panel.local|etc/fail2ban/jail.d/tproxy-proxy.local|etc/logrotate.d/tproxy-proxy|etc/systemd/system/tproxy-server.service|etc/systemd/system/tproxy-panel.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
       *) die "В архиве обнаружен путь вне разрешённого списка: $entry" ;;
     esac
   done < <(tar -tzf "$archive")
@@ -2833,6 +2957,7 @@ restore_command() {
     tproxy-server.service
     tproxy-firewall.service
     refresh-mtproxy-config.timer
+    fail2ban.service
   )
   web_server="$(cat "$CONFIG_DIR/web-server" 2>/dev/null || true)"
   case "$web_server" in
@@ -4206,7 +4331,7 @@ main() {
 # CLI-интерфейс операций, ранее доступных только из меню.
 profile_cli() {
   need_root; need_files
-  local action="${1:-}" name="" mode="https" secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0
+  local action="${1:-}" name="" mode="https" secret="" current_secret="" prefix="plain" count backend file tmp canonical archive="" target="" entry="" yes=0 rotate=0 backup_tmp="" workers="" max_connections="" env_backup="" env_tmp=""
   shift || true
   case "$action" in
     list)
@@ -4250,6 +4375,77 @@ profile_cli() {
       "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check || die "Проверка конфигурации не пройдена."
       systemctl restart tproxy-server || die "Не удалось перезапустить tproxy-server."
       ok "Carrier mode профиля $name изменён." ;;
+    update)
+      (($# >= 1)) || die "profile update ИМЯ --carrier-mode MODE [--workers N] [--max-connections N] [--generate]"
+      name="$1"; shift
+      while (($#)); do case "$1" in
+        --carrier-mode) (($# >= 2)) || die "--carrier-mode требует значение"; mode="$2"; shift 2 ;;
+        --workers) (($# >= 2)) || die "--workers требует значение"; workers="$2"; shift 2 ;;
+        --max-connections) (($# >= 2)) || die "--max-connections требует значение"; max_connections="$2"; shift 2 ;;
+        --generate) rotate=1; shift ;;
+        --secret) (($# >= 2)) || die "--secret требует значение"; secret="$2"; shift 2 ;;
+        *) die "Неизвестный параметр profile update: $1" ;; esac; done
+      valid_name "$name" && valid_mode "$mode" || die "Недопустимое имя или Carrier mode."
+      [[ -z "$workers" || ( "$workers" =~ ^[1-9][0-9]*$ && ${#workers} -le 3 && "$workers" -le 256 ) ]] || die "Workers должен быть от 1 до 256."
+      [[ -z "$max_connections" || ( "$max_connections" =~ ^[1-9][0-9]*$ && ${#max_connections} -le 7 && "$max_connections" -le 1000000 ) ]] || die "Max Connections должен быть от 1 до 1000000."
+      file="$PROFILE_DIR/$name/profile.json"; [[ -s "$file" ]] || die "Профиль не найден."
+      current_secret="$(jq -r '.secret' "$file")"
+      valid_secret "$current_secret" || die "Секрет профиля некорректен."
+      if (( rotate )); then
+        while :; do
+          secret="dd$(openssl rand -hex 16)"
+          canonical="${secret#dd}"
+          if ! jq -e --arg n "$name" --arg s "$canonical" '.profiles[] | select(.name != $n and (.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null; then break; fi
+        done
+      elif [[ -n "$secret" ]]; then
+        [[ "$secret" =~ ^dd[0-9a-f]{32}$ ]] || die "Секрет должен иметь формат dd + 32 lowercase hex-символа."
+        canonical="${secret#dd}"
+        jq -e --arg n "$name" --arg s "$canonical" '.profiles[] | select(.name != $n and (.secret | ltrimstr("dd")) == $s)' "$PROFILES_FILE" >/dev/null &&
+          die "Этот секрет уже используется другим профилем."
+      else
+        secret="$current_secret"
+      fi
+      backup_tmp="$(mktemp)"
+      cp -a "$file" "$backup_tmp" || { rm -f "$backup_tmp"; die "Не удалось сохранить исходный профиль."; }
+      if [[ -n "$workers" || -n "$max_connections" ]]; then
+        [[ -s "$MT_ENV" ]] || { rm -f "$backup_tmp"; die "Не найден файл настроек MTProxy: $MT_ENV"; }
+        env_backup="$(mktemp)"
+        cp -a "$MT_ENV" "$env_backup" || { rm -f "$backup_tmp" "$env_backup"; die "Не удалось сохранить настройки MTProxy."; }
+        env_tmp="$(mktemp "$MT_ENV.XXXXXX")"
+        if ! awk -v w="$workers" -v c="$max_connections" '
+          BEGIN { seen_w=0; seen_c=0 }
+          /^MTPROXY_WORKERS=/ { if (w != "") { print "MTPROXY_WORKERS=" w; seen_w=1 } else print; next }
+          /^MTPROXY_MAX_CONNECTIONS=/ { if (c != "") { print "MTPROXY_MAX_CONNECTIONS=" c; seen_c=1 } else print; next }
+          { print }
+          END {
+            if (w != "" && !seen_w) print "MTPROXY_WORKERS=" w
+            if (c != "" && !seen_c) print "MTPROXY_MAX_CONNECTIONS=" c
+          }
+        ' "$MT_ENV" > "$env_tmp"; then
+          rm -f "$backup_tmp" "$env_backup" "$env_tmp"; die "Не удалось обновить параметры MTProxy."
+        fi
+        chown root:mtproxy "$env_tmp"; chmod 0640 "$env_tmp"; mv -f "$env_tmp" "$MT_ENV"
+      fi
+      tmp="$(mktemp "$file.XXXXXX")"
+      if ! jq --arg s "$secret" --arg m "$mode" '.secret=$s | .carrier_mode=$m' "$file" > "$tmp"; then
+        [[ -z "$env_backup" ]] || cp -a "$env_backup" "$MT_ENV"
+        rm -f "$tmp" "$backup_tmp" "$env_backup" "$env_tmp"; die "Не удалось обновить профиль."
+      fi
+      chown root:tproxy "$tmp"; chmod 0640 "$tmp"; mv -f "$tmp" "$file"
+      if ! profile_manifest_sync || ! write_mtproxy_secrets || ! patch_mtproxy_unit ||
+         ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check ||
+         ! systemctl restart mtproxy tproxy-server; then
+        cp -a "$backup_tmp" "$file"
+        [[ -z "$env_backup" ]] || cp -a "$env_backup" "$MT_ENV"
+        profile_manifest_sync || true
+        write_mtproxy_secrets || true
+        patch_mtproxy_unit || true
+        systemctl restart mtproxy tproxy-server 2>/dev/null || true
+        rm -f "$backup_tmp" "$env_backup" "$env_tmp"
+        die "Изменение профиля не прошло проверку; исходная конфигурация восстановлена."
+      fi
+      rm -f "$backup_tmp" "$env_backup" "$env_tmp"
+      ok "Профиль $name обновлён." ;;
     delete)
       [[ $# -eq 2 && "$2" == --yes ]] || die "profile delete ИМЯ --yes"
       name="$1"; valid_name "$name" || die "Недопустимое имя."
@@ -4322,7 +4518,7 @@ profile_cli() {
         rm -rf "$rollback"; die "Импорт не прошёл проверку; исходная конфигурация восстановлена."
       fi
       rm -rf "$rollback"; ok "Профиль импортирован: $target" ;;
-    *) die "profile {list|add|set-carrier|delete|backup|import} ..." ;;
+    *) die "profile {list|add|set-carrier|update|delete|backup|import} ..." ;;
   esac
 }
 
@@ -4348,6 +4544,550 @@ upstream_cli() {
   if ! "$BASE_DIR/bin/tproxy-server" -config "$CONFIG_FILE" -profiles-file "$PROFILES_FILE" -check; then cp -a "$backup" "$CONFIG_FILE"; die "Проверка не пройдена; конфигурация восстановлена."; fi
   systemctl restart tproxy-server || { cp -a "$backup" "$CONFIG_FILE"; systemctl restart tproxy-server || true; die "Перезапуск не удался; конфигурация восстановлена."; }
   ok "Настройка публичного сайта обновлена."
+}
+
+
+ 
+# Print actionable, redacted Fail2ban diagnostics before the update transaction rolls back.
+fail2ban_startup_diagnostics() {
+  echo "  --- systemctl status fail2ban ---" >&2
+  systemctl status fail2ban.service --no-pager -l 2>&1 | redact_sensitive_log | tail -n 35 >&2 || true
+  echo "  --- journal fail2ban (current boot) ---" >&2
+  journalctl -u fail2ban.service -b -n 60 --no-pager -o cat 2>&1 | redact_sensitive_log | tail -n 45 >&2 || true
+  echo "  --- fail2ban config test ---" >&2
+  fail2ban-client -t 2>&1 | redact_sensitive_log | tail -n 30 >&2 || true
+}
+
+wait_for_fail2ban_socket() {
+  local attempt
+  for attempt in {1..15}; do
+    if systemctl is-active --quiet fail2ban.service && fail2ban-client ping >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# Fail2ban proxy protection. SSH and recidive are intentionally not managed here.
+install_proxy_fail2ban() {
+  local jail_tmp="/etc/fail2ban/jail.d/tproxy-proxy.local"
+  local cloudflare_proxy=0
+  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
+  install -m 0644 "$repo_dir/panel/fail2ban-nginx-scan.conf" /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-caddy-scan.conf" /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-server-abuse.conf" /etc/fail2ban/filter.d/tproxy-server-abuse.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-mtproxy-abuse.conf" /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
+
+  # If the hostname is behind Cloudflare, trust only its published networks so
+  # Fail2ban sees the visitor address rather than banning a shared edge node.
+  if is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
+    cloudflare_proxy=1
+    local cf_ranges cf_tmp
+    cf_tmp="$(mktemp)"
+    if ! curl --fail --silent --show-error --location --max-time 15 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 > "$cf_tmp" ||
+       ! curl --fail --silent --show-error --location --max-time 15 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v6 >> "$cf_tmp"; then
+      rm -f "$cf_tmp"
+      die "Не удалось получить официальные сети Cloudflare; не включаю Fail2ban по адресу общего edge-узла."
+    fi
+    cf_ranges="$(python3 - "$cf_tmp" <<'PYTHON'
+import ipaddress, pathlib, sys
+nets = []
+v4 = v6 = 0
+for raw in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        network = ipaddress.ip_network(raw, strict=True)
+    except ValueError:
+        raise SystemExit("Некорректный CIDR в списке Cloudflare")
+    nets.append(str(network))
+    if network.version == 4:
+        v4 += 1
+    else:
+        v6 += 1
+if v4 < 10 or v6 < 5:
+    raise SystemExit("Список Cloudflare IPv4/IPv6 неполный")
+print(" ".join(nets))
+PYTHON
+)" || { rm -f "$cf_tmp"; die "Список сетей Cloudflare не прошёл проверку."; }
+    rm -f "$cf_tmp"
+    if [[ "$WEB_SERVER" == "nginx" ]]; then
+      python3 - "$HOSTNAME_ARG" "$cf_ranges" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+host, ranges = sys.argv[1], sys.argv[2].split()
+lines = path.read_text().splitlines(keepends=True)
+out, found = [], False
+i = 0
+while i < len(lines):
+    if not re.match(r"^\s*server\s*\{", lines[i]):
+        out.append(lines[i])
+        i += 1
+        continue
+    start, depth = i, 0
+    while i < len(lines):
+        depth += lines[i].count("{") - lines[i].count("}")
+        i += 1
+        if depth == 0:
+            break
+    block = lines[start:i]
+    if any("server_name " + host + ";" in line for line in block) and any(re.match(r"^\s*listen\s+443", line) for line in block):
+        found = True
+        if any(re.match(r"^\s*real_ip_header\s+", line) and "CF-Connecting-IP" not in line for line in block):
+            raise SystemExit("В Nginx уже задан другой real_ip_header; не перезаписываю его автоматически")
+        rebuilt = []
+        inserted = False
+        for line in block:
+            rebuilt.append(line)
+            if not inserted and re.match(r"^\s*listen\s+443", line):
+                if not any("real_ip_header CF-Connecting-IP;" in x for x in block):
+                    rebuilt.append("  real_ip_header CF-Connecting-IP;\n")
+                if not any("real_ip_recursive on;" in x for x in block):
+                    rebuilt.append("  real_ip_recursive on;\n")
+                for network in ranges:
+                    if not any("set_real_ip_from " + network + ";" in x for x in block):
+                        rebuilt.append("  set_real_ip_from " + network + ";\n")
+                inserted = True
+        block = rebuilt
+    out.extend(block)
+if not found:
+    raise SystemExit("Не найден TLS vhost Nginx для настройки Cloudflare real IP")
+path.write_text("".join(out))
+PYTHON
+
+    else
+      python3 - "$cf_ranges" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/caddy/Caddyfile")
+ranges = sys.argv[1].split()
+text = path.read_text()
+directive = "trusted_proxies static " + " ".join(ranges)
+lines = text.splitlines()
+start = next((i for i, line in enumerate(lines) if line.strip() == "{"), None)
+if start is None:
+    lines = ["{", "  servers {", "    " + directive, "    trusted_proxies_strict", "  }", "}", ""] + lines
+else:
+    depth, end = 0, None
+    for i in range(start, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if i > start and depth == 0:
+            end = i
+            break
+    if end is None:
+        raise SystemExit("Не удалось разобрать global options block в Caddyfile")
+    trusted = [i for i in range(start + 1, end) if re.match(r"\s*trusted_proxies\s+", lines[i])]
+    if trusted:
+        if "trusted_proxies static " not in lines[trusted[0]]:
+            raise SystemExit("В Caddy уже настроен нестандартный trusted_proxies; требуется ручное объединение")
+        lines[trusted[0]] = "    " + directive
+    else:
+        servers = next((i for i in range(start + 1, end) if lines[i].strip() == "servers {"), None)
+        if servers is None:
+            lines[end:end] = ["  servers {", "    " + directive, "    trusted_proxies_strict", "  }"]
+        else:
+            lines[servers + 1:servers + 1] = ["    " + directive, "    trusted_proxies_strict"]
+path.write_text("\n".join(lines) + "\n")
+PYTHON
+    fi
+    if [[ "$WEB_SERVER" == "nginx" ]]; then
+      nginx -t || die "Nginx real IP конфигурация Cloudflare не прошла проверку."
+    else
+      /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || die "Не удалось отформатировать Caddyfile Cloudflare."
+      TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || die "Caddy trusted_proxies конфигурация не прошла проверку."
+    fi
+  fi
+
+  if [[ "$WEB_SERVER" == "caddy" && "$cloudflare_proxy" -eq 0 ]]; then
+    sed -i 's/"client_ip"/"remote_ip"/' /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
+  fi
+
+  if [[ "$WEB_SERVER" == "nginx" ]]; then
+    install -m 0644 "$repo_dir/panel/nginx-fail2ban-log.conf" /etc/nginx/conf.d/tproxy-fail2ban-log.conf
+    install -d -m 0755 /var/log/nginx
+    touch /var/log/nginx/tproxy-access.log
+    chmod 0640 /var/log/nginx/tproxy-access.log
+    python3 - "$HOSTNAME_ARG" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+host = sys.argv[1]
+lines = path.read_text().splitlines(keepends=True)
+out, found = [], False
+i = 0
+while i < len(lines):
+    if not re.match(r"^\s*server\s*\{", lines[i]):
+        out.append(lines[i])
+        i += 1
+        continue
+    start, depth = i, 0
+    while i < len(lines):
+        depth += lines[i].count("{") - lines[i].count("}")
+        i += 1
+        if depth == 0:
+            break
+    block = lines[start:i]
+    if any("server_name " + host + ";" in line for line in block) and any(re.match(r"^\s*listen\s+443", line) for line in block):
+        found = True
+        rebuilt = []
+        inserted = False
+        has_existing = any(re.match(r"^\s*access_log\s+/var/log/nginx/tproxy-access\.log\s+", item) for item in block)
+        for line in block:
+            if re.match(r"^\s*access_log\s+off;", line):
+                continue
+            if re.match(r"^\s*access_log\s+/var/log/nginx/tproxy-access\.log\s+", line):
+                if not inserted:
+                    rebuilt.append("  access_log /var/log/nginx/tproxy-access.log tproxy_f2b;\n")
+                    inserted = True
+                continue
+            rebuilt.append(line)
+            if not inserted and not has_existing and re.match(r"^\s*listen\s+443", line):
+                rebuilt.append("  access_log /var/log/nginx/tproxy-access.log tproxy_f2b;\n")
+                inserted = True
+        block = rebuilt
+    out.extend(block)
+if not found:
+    raise SystemExit("Не найден TLS vhost Nginx для включения access log")
+path.write_text("".join(out))
+PYTHON
+
+    cat > /etc/logrotate.d/tproxy-proxy <<'EOF'
+/var/log/nginx/tproxy-access.log {
+    daily
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        [ ! -s /run/nginx.pid ] || kill -USR1 "$(cat /run/nginx.pid)"
+    endscript
+}
+EOF
+    chmod 0644 /etc/logrotate.d/tproxy-proxy
+    nginx -t || die "Nginx не прошёл проверку после включения журнала Fail2ban."
+    systemctl reload nginx.service || systemctl restart nginx.service || die "Не удалось применить журнал Nginx."
+  elif [[ "$WEB_SERVER" == "caddy" ]]; then
+    install -d -o caddy -g caddy -m 0750 /var/log/caddy
+    touch /var/log/caddy/tproxy-access.json
+    chown caddy:caddy /var/log/caddy/tproxy-access.json
+    chmod 0640 /var/log/caddy/tproxy-access.json
+    python3 - <<'PYTHON'
+import pathlib, re
+path = pathlib.Path("/etc/caddy/Caddyfile")
+text = path.read_text()
+if "/var/log/caddy/tproxy-access.json" not in text:
+    match = re.search(r"(?m)^(\s*\{\$TPROXY_HOSTNAME\}\s*\{\s*)$", text)
+    if not match:
+        raise SystemExit("Не найден блок {$TPROXY_HOSTNAME} в Caddyfile")
+    block = """\tlog {
+\t\toutput file /var/log/caddy/tproxy-access.json {
+\t\t\troll_size 20MiB
+\t\t\troll_keep 5
+\t\t\troll_keep_for 168h
+\t\t}
+\t\tformat filter {
+\t\t\trequest>uri regexp "\\\\?.*$" ""
+\t\t}
+\t}
+"""
+    text = text[:match.end()] + "\n" + block + text[match.end():]
+    path.write_text(text)
+elif "request>uri regexp" not in text:
+    # Upgrade an earlier access-log block without duplicating it.
+    text = text.replace("\t\tformat json", """\t\tformat filter {
+\t\t\trequest>uri regexp "\\\\?.*$" ""
+\t\t}""", 1)
+    path.write_text(text)
+PYTHON
+    /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || die "Не удалось отформатировать Caddyfile с access log."
+    TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || die "Caddyfile с access log не прошёл проверку."
+    apply_caddy_config /etc/caddy/Caddyfile || die "Не удалось применить access log Caddy через systemd."
+  fi
+
+  install -m 0644 "$repo_dir/panel/fail2ban-jail-proxy.conf" "$jail_tmp"
+  if [[ "$WEB_SERVER" == "nginx" ]]; then
+    sed -i '/^\[tproxy-nginx-scan\]/,/^\[/ s/^enabled = false/enabled = true/' "$jail_tmp"
+  elif [[ "$WEB_SERVER" == "caddy" ]]; then
+    sed -i '/^\[tproxy-caddy-scan\]/,/^\[/ s/^enabled = false/enabled = true/' "$jail_tmp"
+  fi
+
+  if ! fail2ban-client -t; then
+    fail2ban_startup_diagnostics
+    die "Конфигурация Fail2ban не прошла проверку; см. диагностические сообщения выше."
+  fi
+  systemctl enable fail2ban.service || {
+    fail2ban_startup_diagnostics
+    die "Не удалось включить fail2ban.service."
+  }
+  systemctl reset-failed fail2ban.service 2>/dev/null || true
+  if ! systemctl restart fail2ban.service; then
+    fail2ban_startup_diagnostics
+    die "Fail2ban завершился с ошибкой при запуске; подробности приведены выше."
+  fi
+  if ! wait_for_fail2ban_socket; then
+    fail2ban_startup_diagnostics
+    die "Fail2ban не создал управляющий сокет за 15 секунд; подробности приведены выше."
+  fi
+  fail2ban-client status >/dev/null || {
+    fail2ban_startup_diagnostics
+    die "Fail2ban запущен, но не отвечает на status; подробности приведены выше."
+  }
+}
+
+# Таблица Fail2ban: учитываем ширину Unicode, чтобы кириллица не сдвигала столбцы.
+render_fail2ban_table() {
+  python3 -c '
+import os, sys, unicodedata
+headers = ["Компонент", "Состояние", "События", "Блокировки", "Источник / примечание"]
+rows = [line.rstrip("\n").split("|", 4) for line in sys.stdin if line.strip()]
+def width(value):
+    return sum(0 if unicodedata.combining(ch) else (2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1) for ch in value)
+def pad(value, size):
+    return value + " " * max(0, size - width(value))
+widths = [max([width(headers[i])] + [width(row[i]) for row in rows]) for i in range(len(headers))]
+use_color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+def paint(value):
+    return "\033[1;34m" + value + "\033[0m" if use_color else value
+def border(left, middle, right):
+    print(paint("  " + left + middle.join("─" * (w + 2) for w in widths) + right))
+def line(values, blue=False):
+    result = "  │" + "│".join(" " + pad(v, widths[i]) + " " for i, v in enumerate(values)) + "│"
+    print(paint(result) if blue else result)
+border("┌", "┬", "┐")
+line(headers, True)
+border("├", "┼", "┤")
+for row in rows:
+    line(row)
+border("└", "┴", "┘")
+'
+}
+
+diagnose_proxy_fail2ban() {
+  local state jail output current total current_failed total_failed events source source_status
+  local source_available journal_rows failed=0 selected_web_server
+  local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
+  local -a table_rows=()
+  selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
+  if [[ "$selected_web_server" != "nginx" && "$selected_web_server" != "caddy" ]]; then
+    if systemctl is-active --quiet nginx.service 2>/dev/null || systemctl is-enabled --quiet nginx.service 2>/dev/null; then selected_web_server=nginx; else selected_web_server=caddy; fi
+  fi
+
+  printf '\n  Защита Fail2ban\n'
+
+
+
+
+  state="$(systemctl is-active fail2ban.service 2>/dev/null || true)"
+  if [[ "$state" == "active" ]]; then
+    table_rows+=("fail2ban.service|активна|—|—|systemd")
+  else
+    table_rows+=("fail2ban.service|${state:-unknown}|—|—|служба не работает")
+    failed=1
+    fail2ban_startup_diagnostics
+  fi
+
+  if ! command -v fail2ban-client >/dev/null 2>&1; then
+    table_rows+=("Конфигурация|ошибка|—|—|fail2ban-client не установлен")
+
+    printf "%s\n" "${table_rows[@]}" | render_fail2ban_table
+    return 1
+  fi
+  if fail2ban-client -t >/dev/null 2>&1; then
+    table_rows+=("Конфигурация|корректна|—|—|проверка синтаксиса пройдена")
+  else
+    table_rows+=("Конфигурация|ошибка|—|—|fail2ban-client -t")
+    failed=1
+  fi
+
+  for jail in "${jails[@]}"; do
+    case "$jail" in
+      tproxy-panel) source="журнал панели / AUTH_FAIL" ;;
+      tproxy-nginx-scan) source="Nginx access log" ;;
+      tproxy-caddy-scan) source="Caddy access log" ;;
+      tproxy-server-abuse) source="журнал tproxy-server / маркеры" ;;
+      tproxy-mtproxy-abuse) source="журнал MTProxy / маркеры" ;;
+    esac
+
+    if ! output="$(fail2ban-client status "$jail" 2>/dev/null)"; then
+      if [[ "$jail" == "tproxy-nginx-scan" && "$selected_web_server" != "nginx" ]] ||
+         [[ "$jail" == "tproxy-caddy-scan" && "$selected_web_server" != "caddy" ]]; then
+        table_rows+=("$jail|отключён|—|—|другой веб-сервер выбран")
+        continue
+      fi
+      table_rows+=("$jail|не загружен|—|—|проверьте конфигурацию")
+      failed=1
+      continue
+    fi
+
+    current="$(printf '%s\n' "$output" | sed -nE 's/.*Currently banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+    total="$(printf '%s\n' "$output" | sed -nE 's/.*Total banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+    current_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Currently failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+    total_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Total failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+
+    events=0
+    source_available=0
+    case "$jail" in
+      tproxy-nginx-scan)
+        if [[ -f /var/log/nginx/tproxy-access.log ]]; then
+          source_available=1
+          events="$(wc -l < /var/log/nginx/tproxy-access.log | tr -d '[:space:]')"
+        fi ;;
+      tproxy-caddy-scan)
+        if [[ -f /var/log/caddy/tproxy-access.json ]]; then
+          source_available=1
+          events="$(wc -l < /var/log/caddy/tproxy-access.json | tr -d '[:space:]')"
+        fi ;;
+      tproxy-panel)
+        journal_rows="$(journalctl -u tproxy-panel.service --since '30 days ago' -n 1 --no-pager -o cat 2>/dev/null | wc -l | tr -d '[:space:]')"
+        (( journal_rows > 0 )) && source_available=1
+        events="$(journalctl -u tproxy-panel.service --since '30 days ago' --no-pager -o cat 2>/dev/null | grep -c '\[AUTH_FAIL\]' || true)" ;;
+      tproxy-server-abuse)
+        journal_rows="$(journalctl -u tproxy-server.service --since '30 days ago' -n 1 --no-pager -o cat 2>/dev/null | wc -l | tr -d '[:space:]')"
+        (( journal_rows > 0 )) && source_available=1
+        events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager -o cat 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
+      tproxy-mtproxy-abuse)
+        journal_rows="$(journalctl -u mtproxy.service --since '30 days ago' -n 1 --no-pager -o cat 2>/dev/null | wc -l | tr -d '[:space:]')"
+        (( journal_rows > 0 )) && source_available=1
+        events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager -o cat 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
+    esac
+
+    if (( source_available )); then
+      if [[ "$events" =~ ^[0-9]+$ ]] && (( events > 0 )); then
+        source_status="$source: $events"
+      else
+        source_status="$source: нет событий"
+      fi
+    else
+      source_status="$source: нет источника"
+    fi
+    table_rows+=("$jail|активен|${current_failed:-0}/${total_failed:-0}|${current:-0}/${total:-0}|$source_status")
+  done
+
+  printf "%s\n" "${table_rows[@]}" | render_fail2ban_table
+  (( failed == 0 ))
+}
+
+
+
+
+install_admin_panel() {
+  require_root
+  local source_tmp repo_dir panel_base panel_url candidate
+  source_tmp="$(mktemp -d /tmp/tproxy-panel.XXXXXX)"
+  repo_dir="$source_tmp/repo"
+  if ! git clone --depth 1 --branch "$PANEL_SOURCE_REF" https://github.com/get-rked/telegram-web-proxy.git "$repo_dir" >/dev/null 2>&1; then
+    rm -rf "$source_tmp"
+    die "Не удалось получить исходный код административной панели."
+  fi
+  cd "$repo_dir/panel"
+  "$GO_BIN" mod tidy || { cd - >/dev/null; rm -rf "$source_tmp"; die "Не удалось подготовить зависимости административной панели."; }
+  if [[ "$SKIP_TESTS" -ne 1 ]]; then
+    "$GO_BIN" test ./... || { cd - >/dev/null; rm -rf "$source_tmp"; die "Тесты административной панели не пройдены."; }
+  fi
+  install -d -m 0700 "$DATA_DIR/panel"
+  candidate="$BIN_DIR/tproxy-panel.new.$BASHPID"
+  rm -f "$candidate"
+  if ! CGO_ENABLED=1 "$GO_BIN" build -trimpath -ldflags='-s -w' -o "$candidate" .; then
+    cd - >/dev/null
+    rm -rf "$source_tmp" "$candidate"
+    die "Не удалось собрать административную панель."
+  fi
+  chown root:root "$candidate"
+  chmod 0755 "$candidate"
+  mv -f "$candidate" "$BIN_DIR/tproxy-panel"
+  cd - >/dev/null
+
+  if ! dpkg -s fail2ban >/dev/null 2>&1 || ! dpkg -s python3-systemd >/dev/null 2>&1; then
+    apt-get update -qq || { rm -rf "$source_tmp"; die "Не удалось обновить список пакетов для Fail2ban."; }
+    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban python3-systemd || {
+      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban и его systemd backend."
+    }
+  fi
+  if ! /usr/bin/python3 -c 'import systemd.journal' >/dev/null 2>&1; then
+    rm -rf "$source_tmp"
+    die "Не установлен Python-модуль systemd.journal (пакет python3-systemd), необходимый для backend=systemd."
+  fi
+  install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d /etc/caddy /etc/nginx /etc/letsencrypt
+  install -m 0644 "$repo_dir/panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
+  install -m 0644 "$repo_dir/panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
+  install -m 0644 "$repo_dir/panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-jail.conf" /etc/fail2ban/jail.d/tproxy-panel.local
+  install_proxy_fail2ban
+
+  panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" PANEL_SCRIPT="$BASE_DIR/tgweb-install.sh" "$BIN_DIR/tproxy-panel" -print-basepath)"
+  [[ "$panel_base" =~ ^[A-Za-z0-9_-]{32}$ ]] || { rm -rf "$source_tmp"; die "Панель вернула некорректный basepath."; }
+
+  if [[ "$WEB_SERVER" == "caddy" ]]; then
+    python3 - "$panel_base" "$RELAY_PORT" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/caddy/Caddyfile")
+base, relay = sys.argv[1:3]
+text = path.read_text()
+if f"handle /{base}/*" not in text:
+    match = re.search(r"(?m)^[ \t]*reverse_proxy[ \t]+127\.0\.0\.1:" + re.escape(relay) + r"[ \t]*(?:\{[ \t]*)?$", text)
+    if not match:
+        raise SystemExit("Caddyfile relay route not found")
+    block = f"handle /{base}/* {{\n\t\treverse_proxy 127.0.0.1:18765 {{\n\t\t\theader_up X-Real-IP {{http.request.remote.host}}\n\t\t}}\n\t}}\n\n\t"
+    text = text[:match.start()] + block + text[match.start():]
+    path.write_text(text)
+PYTHON
+    # Normalize the file after editing so Caddy does not emit a formatting warning.
+    /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || {
+      rm -rf "$source_tmp"; die "Не удалось отформатировать Caddyfile."
+    }
+    TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || {
+      rm -rf "$source_tmp"; die "Проверка Caddyfile после добавления панели не пройдена."
+    }
+    apply_caddy_config /etc/caddy/Caddyfile || {
+      rm -rf "$source_tmp"; die "Не удалось запустить Caddy или применить его конфигурацию."
+    }
+  else
+    python3 - "$panel_base" <<'PYTHON'
+import pathlib, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+base = sys.argv[1]
+text = path.read_text()
+if f"location ^~ /{base}/" not in text:
+    tls = text.find("listen 443 ssl;")
+    if tls < 0:
+        raise SystemExit("TLS server block not found")
+    marker = text.find(" location / {", tls)
+    if marker < 0:
+        raise SystemExit("TLS proxy location not found")
+    block = f""" location ^~ /{base}/ {{
+  proxy_pass http://127.0.0.1:18765;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_read_timeout 90s;
+ }}
+"""
+    text = text[:marker] + block + text[marker:]
+    path.write_text(text)
+PYTHON
+    nginx -t || { rm -rf "$source_tmp"; die "Проверка Nginx после добавления панели не пройдена."; }
+    systemctl reload nginx.service || systemctl restart nginx.service || {
+      rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Nginx."
+    }
+  fi
+
+  systemctl daemon-reload
+  systemctl enable --now tproxy-panel.service || { rm -rf "$source_tmp"; die "Не удалось запустить tproxy-panel.service."; }
+  systemctl restart tproxy-panel.service || { rm -rf "$source_tmp"; die "Не удалось перезапустить административную панель."; }
+  fail2ban-client -t || { rm -rf "$source_tmp"; die "Конфигурация Fail2ban не прошла проверку."; }
+
+  chmod 0600 "$DATA_DIR/panel/panel.db" 2>/dev/null || true
+  [[ ! -f "$DATA_DIR/panel/panel-credentials.txt" ]] || chmod 0600 "$DATA_DIR/panel/panel-credentials.txt"
+  panel_url="https://$HOSTNAME_ARG/$panel_base/"
+  rm -rf "$source_tmp"
+  ok "Административная панель установлена и защищена Fail2ban."
+  info "URL панели: $panel_url"
+  info "Первичные логин и пароль (показаны один раз) сохранены в $DATA_DIR/panel/panel-credentials.txt"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
