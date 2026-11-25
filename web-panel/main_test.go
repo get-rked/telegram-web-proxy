@@ -469,3 +469,12 @@ func TestSessionMigrationAddsLastActivityToExistingDatabase(t *testing.T) {
 		t.Fatal("legacy database was not migrated with last_activity")
 	}
 }
+
+func TestStripANSISequences(t *testing.T) {
+	input := "  \x1b[1;34m┌─────┐\x1b[0m\n  plain text\n"
+	got := string(ansiEscapeRE.ReplaceAll([]byte(input), nil))
+	want := "  ┌─────┐\n  plain text\n"
+	if got != want {
+		t.Fatalf("ANSI sequences were not removed: %q", got)
+	}
+}
