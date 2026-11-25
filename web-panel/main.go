@@ -48,7 +48,7 @@ type App struct {
 }
 
 var nameRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-var ansiEscapeRE = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\\\))`)
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 var secretRE = regexp.MustCompile("^(dd)?[0-9a-f]{32}$")
 
 const sessionIdleTimeout = 5 * time.Minute
