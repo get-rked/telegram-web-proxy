@@ -4836,38 +4836,65 @@ PYTHON
   }
 }
 
+# Таблица Fail2ban: учитываем ширину Unicode, чтобы кириллица не сдвигала столбцы.
+render_fail2ban_table() {
+  python3 -c '
+import sys, unicodedata
+headers = ["Компонент", "Состояние", "События", "Блокировки", "Источник / примечание"]
+rows = [line.rstrip("\n").split("|", 4) for line in sys.stdin if line.strip()]
+def width(value):
+    return sum(0 if unicodedata.combining(ch) else (2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1) for ch in value)
+def pad(value, size):
+    return value + " " * max(0, size - width(value))
+widths = [max([width(headers[i])] + [width(row[i]) for row in rows]) for i in range(len(headers))]
+def border(left, middle, right):
+    print("  \033[1;34m" + left + middle.join("─" * (w + 2) for w in widths) + right + "\033[0m")
+def line(values, blue=False):
+    result = "  │" + "│".join(" " + pad(v, widths[i]) + " " for i, v in enumerate(values)) + "│"
+    print(("\033[1;34m" + result + "\033[0m") if blue else result)
+border("┌", "┬", "┐")
+line(headers, True)
+border("├", "┼", "┤")
+for row in rows:
+    line(row)
+border("└", "┴", "┘")
+'
+}
+
 diagnose_proxy_fail2ban() {
   local state jail output current total current_failed total_failed events source source_status
   local source_available journal_rows failed=0 selected_web_server
   local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
+  local -a table_rows=()
   selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   if [[ "$selected_web_server" != "nginx" && "$selected_web_server" != "caddy" ]]; then
     if systemctl is-active --quiet nginx.service 2>/dev/null || systemctl is-enabled --quiet nginx.service 2>/dev/null; then selected_web_server=nginx; else selected_web_server=caddy; fi
   fi
 
   printf '\n  Защита Fail2ban\n'
-  printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
-  printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Компонент" "Состояние" "События" "Блокировки" "Источник / примечание"
-  printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
+
+
+
 
   state="$(systemctl is-active fail2ban.service 2>/dev/null || true)"
   if [[ "$state" == "active" ]]; then
-    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "fail2ban.service" "активна" "—" "—" "systemd"
+    table_rows+=("fail2ban.service|активна|—|—|systemd")
   else
-    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "fail2ban.service" "${state:-unknown}" "—" "—" "служба не работает"
+    table_rows+=("fail2ban.service|${state:-unknown}|—|—|служба не работает")
     failed=1
     fail2ban_startup_diagnostics
   fi
 
   if ! command -v fail2ban-client >/dev/null 2>&1; then
-    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Конфигурация" "ошибка" "—" "—" "fail2ban-client не установлен"
-    printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
+    table_rows+=("Конфигурация|ошибка|—|—|fail2ban-client не установлен")
+
+    printf "%s\n" "${table_rows[@]}" | render_fail2ban_table
     return 1
   fi
   if fail2ban-client -t >/dev/null 2>&1; then
-    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Конфигурация" "корректна" "—" "—" "проверка синтаксиса пройдена"
+    table_rows+=("Конфигурация|корректна|—|—|проверка синтаксиса пройдена")
   else
-    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Конфигурация" "ошибка" "—" "—" "fail2ban-client -t"
+    table_rows+=("Конфигурация|ошибка|—|—|fail2ban-client -t")
     failed=1
   fi
 
@@ -4883,10 +4910,10 @@ diagnose_proxy_fail2ban() {
     if ! output="$(fail2ban-client status "$jail" 2>/dev/null)"; then
       if [[ "$jail" == "tproxy-nginx-scan" && "$selected_web_server" != "nginx" ]] ||
          [[ "$jail" == "tproxy-caddy-scan" && "$selected_web_server" != "caddy" ]]; then
-        printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "$jail" "отключён" "—" "—" "другой веб-сервер выбран"
+        table_rows+=("$jail|отключён|—|—|другой веб-сервер выбран")
         continue
       fi
-      printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "$jail" "не загружен" "—" "—" "проверьте конфигурацию"
+      table_rows+=("$jail|не загружен|—|—|проверьте конфигурацию")
       failed=1
       continue
     fi
@@ -4932,11 +4959,14 @@ diagnose_proxy_fail2ban() {
     else
       source_status="$source: нет источника"
     fi
-    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "$jail" "активен" "${current_failed:-0}/${total_failed:-0}" "${current:-0}/${total:-0}" "$source_status"
+    table_rows+=("$jail|активен|${current_failed:-0}/${total_failed:-0}|${current:-0}/${total:-0}|$source_status")
   done
-  printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
+
+  printf "%s\n" "${table_rows[@]}" | render_fail2ban_table
   (( failed == 0 ))
 }
+
+
 
 
 install_admin_panel() {
