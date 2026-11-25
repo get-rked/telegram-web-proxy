@@ -50,6 +50,9 @@ type App struct {
 var nameRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 var secretRE = regexp.MustCompile("^(dd)?[0-9a-f]{32}$")
 
+const sessionIdleTimeout = 5 * time.Minute
+const sessionAbsoluteTimeout = 12 * time.Hour
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -84,13 +87,30 @@ func (a *App) init() error {
 	statements := []string{
 		"CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt BLOB NOT NULL, password_hash BLOB NOT NULL)",
-		"CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL, last_activity INTEGER NOT NULL DEFAULT 0)",
 		"CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)",
+		"CREATE INDEX IF NOT EXISTS sessions_activity ON sessions(last_activity)",
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
 			return err
 		}
+	}
+
+	// Add the idle-activity column to databases created by older panel versions.
+	var hasLastActivity int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='last_activity'").Scan(&hasLastActivity); err != nil {
+		return err
+	}
+	if hasLastActivity == 0 {
+		if _, err := db.Exec("ALTER TABLE sessions ADD COLUMN last_activity INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	// Give pre-existing sessions a short migration grace period instead of
+	// invalidating every administrator session during an upgrade.
+	if _, err := db.Exec("UPDATE sessions SET last_activity=? WHERE last_activity=0", time.Now().Unix()); err != nil {
+		return err
 	}
 
 	var users int
@@ -197,14 +217,38 @@ func (a *App) badLogin(r *http.Request) {
 
 func (a *App) session(r *http.Request) (string, string, bool) {
 	cookie, err := r.Cookie("tproxy_panel")
-	if err != nil {
+	if err != nil || cookie.Value == "" {
 		return "", "", false
 	}
 	sum := sha256.Sum256([]byte(cookie.Value))
+	tokenHash := hex.EncodeToString(sum[:])
+	now := time.Now().Unix()
 	var username, csrf string
-	var expires int64
-	err = a.db.QueryRow("SELECT username,csrf,expires_at FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:])).Scan(&username, &csrf, &expires)
-	return username, csrf, err == nil && expires > time.Now().Unix()
+	var expires, lastActivity int64
+	err = a.db.QueryRow(
+		"SELECT username,csrf,expires_at,last_activity FROM sessions WHERE token_hash=?",
+		tokenHash,
+	).Scan(&username, &csrf, &expires, &lastActivity)
+	if err != nil {
+		return "", "", false
+	}
+	if expires <= now || lastActivity <= 0 || now-lastActivity >= int64(sessionIdleTimeout.Seconds()) {
+		_, _ = a.db.Exec("DELETE FROM sessions WHERE token_hash=?", tokenHash)
+		return "", "", false
+	}
+	// Update only if the session has not expired while this request was running.
+	result, err := a.db.Exec(
+		"UPDATE sessions SET last_activity=? WHERE token_hash=? AND expires_at>? AND last_activity>?",
+		now, tokenHash, now, now-int64(sessionIdleTimeout.Seconds()),
+	)
+	if err != nil {
+		return "", "", false
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		return "", "", false
+	}
+	return username, csrf, true
 }
 
 func (a *App) setCookie(w http.ResponseWriter, value string, expires time.Time) {
@@ -219,6 +263,8 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, csrf, ok := a.session(r)
 		if !ok {
+			a.setCookie(w, "", time.Unix(1, 0))
+			w.Header().Set("Cache-Control", "no-store")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -311,8 +357,9 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := sha256.Sum256([]byte(token))
-	expires := time.Now().Add(12 * time.Hour)
-	if _, err := a.db.Exec("INSERT INTO sessions(token_hash,username,csrf,expires_at) VALUES(?,?,?,?)", hex.EncodeToString(sum[:]), r.FormValue("username"), csrf, expires.Unix()); err != nil {
+	now := time.Now()
+	expires := now.Add(sessionAbsoluteTimeout)
+	if _, err := a.db.Exec("INSERT INTO sessions(token_hash,username,csrf,expires_at,last_activity) VALUES(?,?,?,?,?)", hex.EncodeToString(sum[:]), r.FormValue("username"), csrf, expires.Unix(), now.Unix()); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -331,6 +378,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := a.session(r); !ok {
+		a.setCookie(w, "", time.Unix(1, 0))
 		http.Redirect(w, r, "/"+a.base+"/login", http.StatusSeeOther)
 		return
 	}
@@ -972,7 +1020,17 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc(prefix+"/login", a.login)
 	mux.HandleFunc(prefix+"/logout", a.auth(a.logout))
 	mux.HandleFunc(prefix+"/", a.home)
+
+func (a *App) sessionActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 	mux.HandleFunc(prefix+"/api/profiles", a.auth(a.profiles))
+	mux.HandleFunc(prefix+"/api/session/activity", a.auth(a.sessionActivity))
 	mux.HandleFunc(prefix+"/api/profiles/import", a.auth(a.profileImport))
 	mux.HandleFunc(prefix+"/api/profiles/", a.auth(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/config") { a.profileConfig(w, r); return }
