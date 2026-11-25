@@ -307,3 +307,42 @@ func TestProfileActionUpdateIgnoresRuntimeSettings(t *testing.T) {
 		t.Fatalf("panel unexpectedly passed CLI-only runtime settings: %#v", args)
 	}
 }
+
+
+func TestDeleteFullBackupRemovesOnlyValidatedArchive(t *testing.T) {
+	dir := t.TempDir()
+	name := "tproxy-backup-20261125-120000.tar.gz"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("backup"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{base: "panel", backupDir: dir}
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/backups", strings.NewReader(`{"Action":"delete","Name":"`+name+`"}`))
+	response := httptest.NewRecorder()
+	a.backups(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("backup was not deleted: %v", err)
+	}
+}
+
+func TestDeleteFullBackupRejectsInvalidName(t *testing.T) {
+	dir := t.TempDir()
+	name := "important.txt"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{base: "panel", backupDir: dir}
+	req := httptest.NewRequest(http.MethodPost, "/panel/api/backups", strings.NewReader(`{"Action":"delete","Name":"`+name+`"}`))
+	response := httptest.NewRecorder()
+	a.backups(response, req)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status %d, want %d", response.Code, http.StatusBadRequest)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("unrelated file was affected: %v", err)
+	}
+}
