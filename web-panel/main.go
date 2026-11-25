@@ -48,6 +48,7 @@ type App struct {
 }
 
 var nameRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+var ansiEscapeRE = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\\\))`)
 var secretRE = regexp.MustCompile("^(dd)?[0-9a-f]{32}$")
 
 const sessionIdleTimeout = 5 * time.Minute
@@ -300,6 +301,9 @@ func (a *App) command(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "bash", cmdArgs...)
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "TERM=dumb")
 	output, err := cmd.CombinedOutput()
+	// A command may still emit ANSI sequences despite NO_COLOR/TERM=dumb.
+	// Strip them at the web-panel boundary so browsers only receive plain text.
+	output = ansiEscapeRE.ReplaceAll(output, nil)
 	if len(output) > 64*1024 {
 		output = output[len(output)-64*1024:]
 	}
