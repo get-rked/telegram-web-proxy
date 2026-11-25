@@ -143,7 +143,9 @@ redact_sensitive_log() {
     -e 's/(authorization[=: ]+)(Bearer[[:space:]]+)?[^[:space:]&",;]+/\1[REDACTED]/Ig' \
     -e 's/((secret|token|password|bridge[_-]?token|api[_-]?key)[=: ]+)[^[:space:]&",;]+/\1[REDACTED]/Ig' \
     -e 's/([?&](secret|token|hash)=)[^&[:space:]"]+/\1[REDACTED]/Ig' \
-    -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g'
+    -e 's#(https?://[^/[:space:]]+/)[^?[:space:]"]+#\1[REDACTED_PATH]#g' \
+    -e 's/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/[IP]/g' \
+    -e 's/\b([0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f:]+\b/[IPv6]/g'
 }
 
 usage() {
@@ -4543,7 +4545,8 @@ install_proxy_fail2ban() {
     cloudflare_proxy=1
     local cf_ranges cf_tmp
     cf_tmp="$(mktemp)"
-    if ! { curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v4; curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v6; } > "$cf_tmp"; then
+    if ! curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v4 > "$cf_tmp" ||
+       ! curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v6 >> "$cf_tmp"; then
       rm -f "$cf_tmp"
       die "Не удалось получить официальные сети Cloudflare; не включаю Fail2ban по адресу общего edge-узла."
     fi
