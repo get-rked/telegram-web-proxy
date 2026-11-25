@@ -32,6 +32,46 @@ jobs:
       - name: ShellCheck
         run: shellcheck --severity=warning --shell=bash tgweb-install.sh
 
+  fail2ban-filters:
+    name: Fail2ban filter regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Fail2ban tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fail2ban
+
+      - name: Extract installer filters and test Nginx/Caddy log formats
+        run: |
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          python3 - tgweb-install.sh "$tmpdir" <<'PY'
+          import pathlib, sys
+          source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          target = pathlib.Path(sys.argv[2])
+          for name in ("auth", "scan"):
+              marker = f'cat > "$filter_dir/tproxy-web-{name}.conf" <<\\'EOF\\'\\n'
+              start = source.index(marker) + len(marker)
+              end = source.index("\\nEOF", start)
+              (target / f"tproxy-web-{name}.conf").write_text(source[start:end] + "\\n", encoding="utf-8")
+          PY
+          printf '%s\\n' \
+            '203.0.113.7 401 GET' \
+            '{"request":{"client_ip":"2001:db8::8","method":"GET"},"status":403}' \
+            > "$tmpdir/auth.log"
+          printf '%s\\n' \
+            '203.0.113.9 404 GET' \
+            '{"request":{"client_ip":"2001:db8::10","method":"POST"},"status":400}' \
+            > "$tmpdir/scan.log"
+          fail2ban-regex "$tmpdir/auth.log" "$tmpdir/tproxy-web-auth.conf" > "$tmpdir/auth.result"
+          fail2ban-regex "$tmpdir/scan.log" "$tmpdir/tproxy-web-scan.conf" > "$tmpdir/scan.result"
+          grep -Eq '2 matched' "$tmpdir/auth.result"
+          grep -Eq '2 matched' "$tmpdir/scan.result"
+          echo "Both filters matched Nginx and Caddy fixtures."
+
   upstream-go:
     name: Pinned tproxy-server tests and build
     runs-on: ubuntu-latest
