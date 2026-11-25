@@ -4692,15 +4692,17 @@ while i < len(lines):
         found = True
         rebuilt = []
         inserted = False
+        has_existing = any(re.match(r"^\s*access_log\s+/var/log/nginx/tproxy-access\.log\s+", item) for item in block)
         for line in block:
             if re.match(r"^\s*access_log\s+off;", line):
                 continue
             if re.match(r"^\s*access_log\s+/var/log/nginx/tproxy-access\.log\s+", line):
-                rebuilt.append("  access_log /var/log/nginx/tproxy-access.log tproxy_f2b;\n")
-                inserted = True
+                if not inserted:
+                    rebuilt.append("  access_log /var/log/nginx/tproxy-access.log tproxy_f2b;\n")
+                    inserted = True
                 continue
             rebuilt.append(line)
-            if not inserted and re.match(r"^\s*listen\s+443", line):
+            if not inserted and not has_existing and re.match(r"^\s*listen\s+443", line):
                 rebuilt.append("  access_log /var/log/nginx/tproxy-access.log tproxy_f2b;\n")
                 inserted = True
         block = rebuilt
