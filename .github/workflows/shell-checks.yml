@@ -53,16 +53,16 @@ jobs:
           source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
           target = pathlib.Path(sys.argv[2])
           for name in ("auth", "scan"):
-              marker = f'cat > "$filter_dir/tproxy-web-{name}.conf" <<\\'EOF\\'\\n'
+              marker = f"cat > \"$filter_dir/tproxy-web-{name}.conf\" <<'EOF'\n"
               start = source.index(marker) + len(marker)
               end = source.index("\\nEOF", start)
               (target / f"tproxy-web-{name}.conf").write_text(source[start:end] + "\\n", encoding="utf-8")
           PY
-          printf '%s\\n' \
+          printf '%s\n' \
             '203.0.113.7 401 GET' \
             '{"request":{"client_ip":"2001:db8::8","method":"GET"},"status":403}' \
             > "$tmpdir/auth.log"
-          printf '%s\\n' \
+          printf '%s\n' \
             '203.0.113.9 404 GET' \
             '{"request":{"client_ip":"2001:db8::10","method":"POST"},"status":400}' \
             > "$tmpdir/scan.log"
