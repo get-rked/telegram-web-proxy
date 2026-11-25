@@ -4574,10 +4574,10 @@ install_proxy_fail2ban() {
   local jail_tmp="/etc/fail2ban/jail.d/tproxy-proxy.local"
   local cloudflare_proxy=0
   install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
-  install -m 0644 "$repo_dir/web-panel/fail2ban-nginx-scan.conf" /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
-  install -m 0644 "$repo_dir/web-panel/fail2ban-caddy-scan.conf" /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
-  install -m 0644 "$repo_dir/web-panel/fail2ban-server-abuse.conf" /etc/fail2ban/filter.d/tproxy-server-abuse.conf
-  install -m 0644 "$repo_dir/web-panel/fail2ban-mtproxy-abuse.conf" /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-nginx-scan.conf" /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-caddy-scan.conf" /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-server-abuse.conf" /etc/fail2ban/filter.d/tproxy-server-abuse.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-mtproxy-abuse.conf" /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
 
   # If the hostname is behind Cloudflare, trust only its published networks so
   # Fail2ban sees the visitor address rather than banning a shared edge node.
@@ -4704,7 +4704,7 @@ PYTHON
   fi
 
   if [[ "$WEB_SERVER" == "nginx" ]]; then
-    install -m 0644 "$repo_dir/web-panel/nginx-fail2ban-log.conf" /etc/nginx/conf.d/tproxy-fail2ban-log.conf
+    install -m 0644 "$repo_dir/panel/nginx-fail2ban-log.conf" /etc/nginx/conf.d/tproxy-fail2ban-log.conf
     install -d -m 0755 /var/log/nginx
     touch /var/log/nginx/tproxy-access.log
     chmod 0640 /var/log/nginx/tproxy-access.log
@@ -4806,7 +4806,7 @@ PYTHON
     apply_caddy_config /etc/caddy/Caddyfile || die "Не удалось применить access log Caddy через systemd."
   fi
 
-  install -m 0644 "$repo_dir/web-panel/fail2ban-jail-proxy.conf" "$jail_tmp"
+  install -m 0644 "$repo_dir/panel/fail2ban-jail-proxy.conf" "$jail_tmp"
   if [[ "$WEB_SERVER" == "nginx" ]]; then
     sed -i '/^\[tproxy-nginx-scan\]/,/^\[/ s/^enabled = false/enabled = true/' "$jail_tmp"
   elif [[ "$WEB_SERVER" == "caddy" ]]; then
@@ -4981,7 +4981,7 @@ install_admin_panel() {
     rm -rf "$source_tmp"
     die "Не удалось получить исходный код административной панели."
   fi
-  cd "$repo_dir/web-panel"
+  cd "$repo_dir/panel"
   "$GO_BIN" mod tidy || { cd - >/dev/null; rm -rf "$source_tmp"; die "Не удалось подготовить зависимости административной панели."; }
   if [[ "$SKIP_TESTS" -ne 1 ]]; then
     "$GO_BIN" test ./... || { cd - >/dev/null; rm -rf "$source_tmp"; die "Тесты административной панели не пройдены."; }
@@ -5010,10 +5010,10 @@ install_admin_panel() {
     die "Не установлен Python-модуль systemd.journal (пакет python3-systemd), необходимый для backend=systemd."
   fi
   install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d /etc/caddy /etc/nginx /etc/letsencrypt
-  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
-  install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
-  install -m 0644 "$repo_dir/web-panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
-  install -m 0644 "$repo_dir/web-panel/fail2ban-jail.conf" /etc/fail2ban/jail.d/tproxy-panel.local
+  install -m 0644 "$repo_dir/panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
+  install -m 0644 "$repo_dir/panel/tproxy-panel.service" /etc/systemd/system/tproxy-panel.service
+  install -m 0644 "$repo_dir/panel/fail2ban-filter.conf" /etc/fail2ban/filter.d/tproxy-panel.conf
+  install -m 0644 "$repo_dir/panel/fail2ban-jail.conf" /etc/fail2ban/jail.d/tproxy-panel.local
   install_proxy_fail2ban
 
   panel_base="$(PANEL_DB="$DATA_DIR/panel/panel.db" PANEL_SCRIPT="$BASE_DIR/tgweb-install.sh" "$BIN_DIR/tproxy-panel" -print-basepath)"
