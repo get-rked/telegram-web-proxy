@@ -964,11 +964,14 @@ ranges = []
 for raw in (sys.argv[1], sys.argv[2]):
     parsed = [ipaddress.ip_network(line.strip(), strict=True) for line in raw.splitlines() if line.strip()]
     ranges.append(parsed)
+matched = False
 for raw in sys.argv[3:]:
     address = ipaddress.ip_address(raw)
     networks = ranges[0] if address.version == 4 else ranges[1]
-    if not any(address in network for network in networks):
-        raise SystemExit(1)
+    if any(address in network for network in networks):
+        matched = True
+if not matched:
+    raise SystemExit(1)
 PYTHON
 }
 
