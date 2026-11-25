@@ -4760,7 +4760,7 @@ PYTHON
 }
 
 diagnose_proxy_fail2ban() {
-  local state jail output current total current_failed total_failed events source failed=0 selected_web_server
+  local state jail output current total current_failed total_failed events source source_available journal_rows failed=0 selected_web_server
   local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
   selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   echo "  Служба fail2ban.service:"
@@ -4804,18 +4804,40 @@ diagnose_proxy_fail2ban() {
     current_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Currently failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     total_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Total failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     events=0
+    source_available=0
     case "$jail" in
-      tproxy-nginx-scan) [[ ! -f /var/log/nginx/tproxy-access.log ]] || events="$(wc -l < /var/log/nginx/tproxy-access.log | tr -d '[:space:]')" ;;
-      tproxy-caddy-scan) [[ ! -f /var/log/caddy/tproxy-access.json ]] || events="$(wc -l < /var/log/caddy/tproxy-access.json | tr -d '[:space:]')" ;;
-      tproxy-panel) events="$(journalctl -u tproxy-panel.service --since '30 days ago' --no-pager 2>/dev/null | grep -c '\[AUTH_FAIL\]' || true)" ;;
-      tproxy-server-abuse) events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
-      tproxy-mtproxy-abuse) events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
+      tproxy-nginx-scan)
+        if [[ -f /var/log/nginx/tproxy-access.log ]]; then
+          source_available=1
+          events="$(wc -l < /var/log/nginx/tproxy-access.log | tr -d '[:space:]')"
+        fi ;;
+      tproxy-caddy-scan)
+        if [[ -f /var/log/caddy/tproxy-access.json ]]; then
+          source_available=1
+          events="$(wc -l < /var/log/caddy/tproxy-access.json | tr -d '[:space:]')"
+        fi ;;
+      tproxy-panel)
+        journal_rows="$(journalctl -u tproxy-panel.service --since '30 days ago' -n 1 --no-pager 2>/dev/null | wc -l | tr -d '[:space:]')"
+        (( journal_rows > 0 )) && source_available=1
+        events="$(journalctl -u tproxy-panel.service --since '30 days ago' --no-pager 2>/dev/null | grep -c '\[AUTH_FAIL\]' || true)" ;;
+      tproxy-server-abuse)
+        journal_rows="$(journalctl -u tproxy-server.service --since '30 days ago' -n 1 --no-pager 2>/dev/null | wc -l | tr -d '[:space:]')"
+        (( journal_rows > 0 )) && source_available=1
+        events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
+      tproxy-mtproxy-abuse)
+        journal_rows="$(journalctl -u mtproxy.service --since '30 days ago' -n 1 --no-pager 2>/dev/null | wc -l | tr -d '[:space:]')"
+        (( journal_rows > 0 )) && source_available=1
+        events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
     esac
     printf '    %s %-24s активен; неудачных событий: %s / %s; блокировок: %s / %s\n' "$(status_mark ok)" "$jail" "${current_failed:-0}" "${total_failed:-0}" "${current:-0}" "${total:-0}"
-    if [[ "$events" =~ ^[0-9]+$ ]] && (( events > 0 )); then
-      printf '      %s Источник журнала: %s (строк: %s)\n' "$(status_mark ok)" "$source" "$events"
+    if (( source_available )); then
+      if [[ "$events" =~ ^[0-9]+$ ]] && (( events > 0 )); then
+        printf '      %s Источник: %s (записей/маркеров: %s)\n' "$(status_mark ok)" "$source" "$events"
+      else
+        printf '      %s Источник доступен, событий для блокировки нет: %s\n' "$(status_mark warn)" "$source"
+      fi
     else
-      printf '      %s нет источника событий за последние 30 дней: %s\n' "$(status_mark warn)" "$source"
+      printf '      %s нет источника событий: %s\n' "$(status_mark warn)" "$source"
     fi
   done
   (( failed == 0 ))
