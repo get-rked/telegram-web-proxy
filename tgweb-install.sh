@@ -4832,6 +4832,7 @@ diagnose_proxy_fail2ban() {
   else
     printf '    %s fail2ban.service: %s\n' "$(status_mark fail)" "${state:-unknown}"
     failed=1
+    fail2ban_startup_diagnostics
   fi
   if ! command -v fail2ban-client >/dev/null 2>&1; then
     printf '    %s fail2ban-client не установлен\n' "$(status_mark fail)"
