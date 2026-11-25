@@ -2794,7 +2794,7 @@ diagnostics_command() {
   echo
   echo "  Последние ошибки служб:"
   local log_json
-  log_json="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u "$web_server" -p err -n 12 --no-pager -o json 2>/dev/null || true)"
+  log_json="$(journalctl -u tproxy-server -u mtproxy -u tproxy-firewall -u tproxy-panel -u fail2ban -u "$web_server" -p err -n 12 --no-pager -o json 2>/dev/null || true)"
   if [[ -n "$log_json" ]] && command -v jq >/dev/null 2>&1; then
     while IFS= read -r log_row; do
       [[ -n "$log_row" ]] || continue
@@ -2841,6 +2841,14 @@ backup_command() {
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
     etc/nginx/conf.d/tproxy-websocket-map.conf \
     etc/letsencrypt \
+    etc/fail2ban/filter.d/tproxy-panel.conf \
+    etc/fail2ban/filter.d/tproxy-nginx-scan.conf \
+    etc/fail2ban/filter.d/tproxy-caddy-scan.conf \
+    etc/fail2ban/filter.d/tproxy-server-abuse.conf \
+    etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf \
+    etc/fail2ban/jail.d/tproxy-panel.local \
+    etc/fail2ban/jail.d/tproxy-proxy.local \
+    etc/logrotate.d/tproxy-proxy \
     etc/systemd/system/tproxy-server.service \
     etc/systemd/system/tproxy-panel.service \
     etc/systemd/system/mtproxy.service \
@@ -2911,7 +2919,7 @@ restore_command() {
     [[ "$normalized" != /* ]] || die "Небезопасный абсолютный путь в архиве: $entry"
     [[ ! "/$normalized/" =~ /\.\./ ]] || die "Небезопасный путь в архиве: $entry"
     case "$normalized" in
-      opt/telegram-web-proxy/tgweb-install.sh|opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/systemd/system/tproxy-server.service|etc/systemd/system/tproxy-panel.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
+      opt/telegram-web-proxy/tgweb-install.sh|opt/telegram-web-proxy/config|opt/telegram-web-proxy/config/*|opt/telegram-web-proxy/systemd|opt/telegram-web-proxy/systemd/*|opt/telegram-web-proxy/qr|opt/telegram-web-proxy/qr/*|opt/telegram-web-proxy/data|opt/telegram-web-proxy/data/*|opt/telegram-web-proxy/bin|opt/telegram-web-proxy/bin/*|opt/telegram-web-proxy/src|opt/telegram-web-proxy/src/*|etc/caddy|etc/caddy/*|etc/nginx|etc/nginx/*|etc/letsencrypt|etc/letsencrypt/*|etc/fail2ban/filter.d/tproxy-panel.conf|etc/fail2ban/filter.d/tproxy-nginx-scan.conf|etc/fail2ban/filter.d/tproxy-caddy-scan.conf|etc/fail2ban/filter.d/tproxy-server-abuse.conf|etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf|etc/fail2ban/jail.d/tproxy-panel.local|etc/fail2ban/jail.d/tproxy-proxy.local|etc/logrotate.d/tproxy-proxy|etc/systemd/system/tproxy-server.service|etc/systemd/system/tproxy-panel.service|etc/systemd/system/mtproxy.service|etc/systemd/system/tproxy-firewall.service|etc/systemd/system/refresh-mtproxy-config.service|etc/systemd/system/refresh-mtproxy-config.timer|etc/systemd/system/caddy.service|etc/systemd/system/caddy.service.d/*) ;;
       *) die "В архиве обнаружен путь вне разрешённого списка: $entry" ;;
     esac
   done < <(tar -tzf "$archive")
@@ -2928,6 +2936,7 @@ restore_command() {
     tproxy-server.service
     tproxy-firewall.service
     refresh-mtproxy-config.timer
+    fail2ban.service
   )
   web_server="$(cat "$CONFIG_DIR/web-server" 2>/dev/null || true)"
   case "$web_server" in
