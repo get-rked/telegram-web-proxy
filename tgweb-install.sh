@@ -1848,23 +1848,35 @@ configure_proxy_fail2ban() {
   fi
   command -v fail2ban-client >/dev/null 2>&1 || die "Fail2ban не установлен"
   install -d -m 0755 "$filter_dir" "$jail_dir"
+  # Trust only Cloudflare's published edge ranges. Direct origin peers remain untrusted.
+  local cf_cidrs
+  cf_cidrs="$( { curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v4
+    curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v6; } 2>/dev/null | awk 'NF' | sort -u | tr '\n' ' ')"
+  [[ -n "$cf_cidrs" ]] || die "Не удалось получить доверенные диапазоны Cloudflare"
+  printf '%s\n' "$cf_cidrs" | tr ' ' '\n' | python3 -c 'import ipaddress,sys; [ipaddress.ip_network(x.strip(), strict=False) for x in sys.stdin if x.strip()]' \
+    || die "Список диапазонов Cloudflare содержит некорректную запись"
   cat > "$filter_dir/tproxy-web-auth.conf" <<'EOF'
 [Definition]
 failregex = ^<HOST> (?:401|403) [A-Z]+$
-            ^.*"remote_ip":"<HOST>".*"status":(?:401|403)(?:[,}]).*$
-            ^.*"remote_addr":"<HOST>".*"status":(?:401|403)(?:[,}]).*$
-ignoreregex =
+            ^.*"client_ip":"<HOST>".*"status":(?:401|403)(?:[,}]).*$
+            ignoreregex =
 EOF
   cat > "$filter_dir/tproxy-web-scan.conf" <<'EOF'
 [Definition]
 failregex = ^<HOST> (?:400|404|405|444) [A-Z]+$
-            ^.*"remote_ip":"<HOST>".*"status":(?:400|404|405|444)(?:[,}]).*$
-            ^.*"remote_addr":"<HOST>".*"status":(?:400|404|405|444)(?:[,}]).*$
-ignoreregex =
+            ^.*"client_ip":"<HOST>".*"status":(?:400|404|405|444)(?:[,}]).*$
+            ignoreregex =
 EOF
   chmod 0644 "$filter_dir/tproxy-web-auth.conf" "$filter_dir/tproxy-web-scan.conf"
   if [[ "$WEB_SERVER" == "nginx" ]]; then
     install -d -m 0755 /var/log/nginx /etc/nginx/conf.d
+    {
+      echo "# Trust Cloudflare edges only; direct peers cannot spoof CF-Connecting-IP."
+      echo "real_ip_header CF-Connecting-IP;"
+      echo "real_ip_recursive on;"
+      for cidr in $cf_cidrs; do printf 'set_real_ip_from %s;\n' "$cidr"; done
+    } > /etc/nginx/conf.d/tproxy-cloudflare-realip.conf
+    chmod 0644 /etc/nginx/conf.d/tproxy-cloudflare-realip.conf
     cat > /etc/nginx/conf.d/tproxy-fail2ban.conf <<'EOF'
 map $status $tproxy_fail2ban_loggable {
     default 0;
@@ -1906,6 +1918,25 @@ PY
     systemctl reload nginx.service 2>/dev/null || systemctl restart nginx.service
   elif [[ "$WEB_SERVER" == "caddy" ]]; then
     install -d -o caddy -g caddy -m 0750 /var/log/caddy
+    if ! grep -Fq "trusted_proxies static" /etc/caddy/Caddyfile; then
+      tmp="$(mktemp)"
+      if ! python3 - "$cf_cidrs" /etc/caddy/Caddyfile "$tmp" <<'PY'
+import sys
+ranges, src, dst = sys.argv[1:]
+text = open(src, encoding="utf-8").read()
+needle = "servers {"
+pos = text.find(needle)
+if pos < 0:
+    raise SystemExit("Caddy global servers block not found")
+end = pos + len(needle)
+insert = "\n        trusted_proxies static " + ranges.strip() + "\n        client_ip_headers CF-Connecting-IP"
+text = text[:end] + insert + text[end:]
+open(dst, "w", encoding="utf-8").write(text)
+PY
+      then rm -f "$tmp"; die "Не удалось настроить доверенные Cloudflare CIDR в Caddy"; fi
+      install -m 0644 "$tmp" /etc/caddy/Caddyfile
+      rm -f "$tmp"
+    fi
     if [[ -s /etc/caddy/Caddyfile ]] && ! grep -Fq "tproxy-fail2ban.json" /etc/caddy/Caddyfile; then
       tmp="$(mktemp)"
       awk '
@@ -1921,6 +1952,7 @@ PY
           print "            wrap json"
           print "            fields {"
           print "                request>uri delete"
+          print "                request>remote_ip delete"
           print "                request>headers delete"
           print "                request>host delete"
           print "                request>proto delete"
