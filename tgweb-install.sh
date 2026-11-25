@@ -1899,6 +1899,9 @@ PY
       rm -f "$tmp"
     fi
     active_log=/var/log/nginx/tproxy-fail2ban.log
+    touch "$active_log"
+    chown root:adm "$active_log" 2>/dev/null || chown root:root "$active_log"
+    chmod 0640 "$active_log"
     nginx -t >/dev/null 2>&1 || die "Nginx не прошёл проверку после настройки Fail2ban"
     systemctl reload nginx.service 2>/dev/null || systemctl restart nginx.service
   elif [[ "$WEB_SERVER" == "caddy" ]]; then
@@ -1935,6 +1938,9 @@ PY
       rm -f "$tmp"
     fi
     active_log=/var/log/caddy/tproxy-fail2ban.json
+    touch "$active_log"
+    chown caddy:caddy "$active_log"
+    chmod 0640 "$active_log"
     TPROXY_HOSTNAME="$(jq -r '.public_hostname // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null)" \
     TPROXY_SITE_ROOT="$(jq -r '.public_dir // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null)" \
     ACME_EMAIL="$(cat "$PROXY_CONFIG_DIR/acme-email" 2>/dev/null || true)" \
