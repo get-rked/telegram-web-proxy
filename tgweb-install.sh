@@ -942,29 +942,6 @@ get_public_ipv4() {
   return 1
 }
 
-ipv4_to_int() {
-  local a b c d
-  IFS=. read -r a b c d <<< "$1"
-  [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ && "$d" =~ ^[0-9]+$ ]] || return 1
-  (( 10#$a <= 255 && 10#$b <= 255 && 10#$c <= 255 && 10#$d <= 255 )) || return 1
-  printf '%u' "$(( (10#$a << 24) | (10#$b << 16) | (10#$c << 8) | 10#$d ))"
-}
-
-is_cloudflare_ipv4() {
-  local address="$1" ranges="$2" cidr network prefix ip_num net_num mask
-  ip_num="$(ipv4_to_int "$address")" || return 1
-  while IFS= read -r cidr; do
-    [[ "$cidr" == */* ]] || continue
-    network="${cidr%/*}"
-    prefix="${cidr#*/}"
-    [[ "$prefix" =~ ^[0-9]+$ ]] && (( prefix >= 0 && prefix <= 32 )) || continue
-    net_num="$(ipv4_to_int "$network")" || continue
-    if (( prefix == 0 )); then mask=0; else mask=$(( (0xffffffff << (32 - prefix)) & 0xffffffff )); fi
-    if (( (ip_num & mask) == (net_num & mask) )); then return 0; fi
-  done <<< "$ranges"
-  return 1
-}
-
 is_cloudflare_proxied_domain() {
   local hostname="$1" ipv4_ranges ipv6_ranges
   local -a addresses=()
