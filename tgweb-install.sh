@@ -1875,6 +1875,9 @@ validate_configs() {
   rm -f -- "$validation_profiles"
 
   if [[ "$WEB_SERVER" == "caddy" ]]; then
+    info "Форматирую Caddyfile перед проверкой…"
+    /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null ||
+      die "Не удалось отформатировать Caddyfile."
     info "Валидация Caddyfile…"
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || die "caddy validate упал"
   else
