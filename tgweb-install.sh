@@ -1849,10 +1849,11 @@ configure_proxy_fail2ban() {
   command -v fail2ban-client >/dev/null 2>&1 || die "Fail2ban не установлен"
   install -d -m 0755 "$filter_dir" "$jail_dir"
   # Trust only Cloudflare's published edge ranges. Direct origin peers remain untrusted.
-  local cf_cidrs
-  cf_cidrs="$( { curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v4
-    curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v6; } 2>/dev/null | awk 'NF' | sort -u | tr '\n' ' ')"
-  [[ -n "$cf_cidrs" ]] || die "Не удалось получить доверенные диапазоны Cloudflare"
+  local cf_cidrs cf_v4 cf_v6
+  cf_v4="$(curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
+  cf_v6="$(curl --fail --silent --show-error --location --max-time 10 https://www.cloudflare.com/ips-v6 2>/dev/null || true)"
+  [[ -n "$cf_v4" && -n "$cf_v6" ]] || die "Не удалось получить полные доверенные диапазоны Cloudflare IPv4/IPv6"
+  cf_cidrs="$(printf '%s\n%s\n' "$cf_v4" "$cf_v6" | awk 'NF' | sort -u | tr '\n' ' ')"
   printf '%s\n' "$cf_cidrs" | tr ' ' '\n' | python3 -c 'import ipaddress,sys; [ipaddress.ip_network(x.strip(), strict=False) for x in sys.stdin if x.strip()]' \
     || die "Список диапазонов Cloudflare содержит некорректную запись"
   cat > "$filter_dir/tproxy-web-auth.conf" <<'EOF'
@@ -2927,6 +2928,17 @@ diagnostics_command() {
         failed=1
       fi
     fi
+    if [[ "$web_server" == nginx && -s /etc/nginx/conf.d/tproxy-cloudflare-realip.conf ]]; then
+      printf '  %s Nginx: CF-Connecting-IP принимается только от доверенных Cloudflare CIDR\n' "$(status_mark ok)"
+    elif [[ "$web_server" == caddy ]] && grep -Fq 'trusted_proxies static' /etc/caddy/Caddyfile 2>/dev/null; then
+      printf '  %s Caddy: клиентский IP определяется только через доверенные Cloudflare CIDR\n' "$(status_mark ok)"
+    else
+      printf '  %s Настройка доверенных прокси не найдена\n' "$(status_mark fail)"
+      failed=1
+    fi
+    printf '  %s Admin API tproxy-server: доступен только через loopback; отдельный jail не нужен\n' "$(status_mark info)"
+    printf '  %s MTProxy: raw TCP без HTTP-аутентификации; HTTP-фильтры к нему не применяются\n' "$(status_mark info)"
+    printf '  %s tproxy-firewall: сетевые правила обслуживаются nftables, без дублирующего jail\n' "$(status_mark info)"
     printf '  %s SSH и recidive: существующие jail не изменялись\n' "$(status_mark info)"
   else
     printf '  %s fail2ban-client не найден\n' "$(status_mark fail)"
