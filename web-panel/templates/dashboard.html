@@ -35,12 +35,17 @@ input,select{min-width:180px}input[type=file]{max-width:100%}
 .qr{width:220px;max-width:100%;background:white;padding:10px;border-radius:12px}
 .logout{color:#b8c8dc;text-decoration:none;border:1px solid var(--line);padding:10px 14px;border-radius:10px}
 .foot{color:#6f829a;text-align:center;padding:24px 0;font-size:12px}
-dialog{width:min(560px,calc(100% - 28px));max-height:90vh;overflow:auto;background:#111d2d;color:var(--text);border:1px solid #3b587a;border-radius:18px;padding:24px}
+dialog{width:min(560px,calc(100% - 28px));max-height:94vh;overflow:auto;background:#111d2d;color:var(--text);border:1px solid #3b587a;border-radius:18px;padding:24px}
 dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 .dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .dialog-head h2{margin:0}.field{margin:12px 0}.field label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
 .value{display:flex;gap:8px;align-items:center;min-width:0}.value code{display:block;overflow-wrap:anywhere;white-space:normal;background:#09111d;padding:10px;border-radius:8px;flex:1}
 .value button{flex-shrink:0}.link{color:#8dbaff;overflow-wrap:anywhere}.dialog-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.toast{position:fixed;right:22px;bottom:22px;z-index:20;max-width:min(420px,calc(100vw - 44px));padding:14px 18px;border:1px solid #3b587a;border-radius:12px;background:#14243a;box-shadow:0 14px 40px #0008;opacity:0;transform:translateY(12px);pointer-events:none;transition:.2s}.toast.show{opacity:1;transform:translateY(0)}.toast.success{border-color:#397e70}.toast.error{border-color:#9b515b}.confirm-message{color:#b9c9dc;line-height:1.6;white-space:pre-wrap}
+#profileDialog{width:min(820px,calc(100% - 28px));max-height:94vh}
+.config-layout{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:22px;align-items:start}
+.config-details{min-width:0}
+#profileDialog .qr{width:210px}
+@media(max-width:620px){.config-layout{grid-template-columns:1fr}#profileDialog .qr{width:180px}}
 @media(max-width:760px){.shell{padding:16px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}.hero{padding:22px}.profile-head,.row{align-items:flex-start;flex-direction:column}.actions{width:100%}.profile-table th,.profile-table td{padding:10px 8px}.profile-table{min-width:740px}}
 </style>
 </head>
@@ -79,11 +84,15 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <div class="dialog-actions"><button onclick="closeDialog('backupImportDialog')">Отмена</button><button class="primary" onclick="importBackupArchive()">Импортировать архив</button></div></dialog>
 <dialog id="profileDialog">
 <div class="dialog-head"><h2 id="configTitle">Конфигурация профиля</h2><button onclick="closeDialog('profileDialog')">✕</button></div>
+<div class="config-layout">
+<div class="config-details">
 <div class="field"><label>Адрес сервера</label><div class="value"><code id="configServer"></code><button onclick="copyValue('configServer')">Копировать</button></div></div>
 <div class="field"><label>Секрет подключения</label><div class="value"><code id="configSecret"></code><button onclick="copyValue('configSecret')">Копировать</button></div></div>
 <div class="field"><label>Публичная ссылка Telegram</label><a id="configLink" class="link" target="_blank" rel="noopener"></a><div class="toolbar"><button onclick="copyLink()">Копировать HTTPS-ссылку</button></div></div>
 <div class="field"><label>Прямая ссылка Telegram</label><a id="configDeepLink" class="link"></a><div class="toolbar"><button onclick="copyDeepLink()">Копировать tg:// ссылку</button></div></div>
+</div>
 <div class="field qr-field"><label>QR-код подключения (прямая ссылка Telegram)</label><img id="configQR" class="qr" alt="QR-код профиля"></div>
+</div>
 <div class="dialog-actions"><button onclick="closeDialog('profileDialog')">Закрыть</button></div>
 </dialog>
 
@@ -227,7 +236,7 @@ async function loadBackups(){
  try{
   const backups=await api(base+'/api/backups');
   document.querySelector('#backups').innerHTML='<h3>Полные резервные копии</h3>'+backups.map(b=>{
-   const action='<div class="actions"><a class="button-link" href="'+base+'/api/backups/download/'+encodeURIComponent(b.name)+'">Экспорт</a><button class="primary" onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button></div>';
+   const action='<div class="actions"><a class="button-link" href="'+base+'/api/backups/download/'+encodeURIComponent(b.name)+'">Экспорт</a><button class="primary" onclick="restoreBackup(\''+esc(b.name)+'\')">Восстановить</button><button class="danger" onclick="deleteBackup(\''+esc(b.name)+'\')">Удалить</button></div>';
    return '<div class="row"><div><div class="name">'+esc(b.name)+'</div><div class="meta">Создана: '+new Date(b.created).toLocaleString()+' · '+(b.size/1048576).toFixed(2)+' MB</div></div>'+action+'</div>';
   }).join('')||'<div class="meta">Полных резервных копий пока нет</div>';
  }catch(error){notify(error)}
@@ -247,6 +256,13 @@ async function createBackup(){
  if(!await askConfirm('Создать полную резервную копию конфигурации?','Создание резервной копии','Создать копию'))return;
  try{await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'create'})});await loadBackups();notify('Резервная копия создана','success')}
  catch(error){notify(error)}
+}
+async function deleteBackup(name){
+ if(!await askConfirm('Полная резервная копия «'+name+'» будет удалена без возможности восстановления. Продолжить?','Удаление резервной копии','Удалить'))return;
+ try{
+  await api(base+'/api/backups',{method:'POST',body:JSON.stringify({Action:'delete',Name:name})});
+  await loadBackups();notify('Резервная копия удалена','success');
+ }catch(error){notify(error)}
 }
 async function restoreBackup(name){
  if(!await askConfirm('Восстановление заменит текущую конфигурацию. Панель и службы могут быть перезапущены. Продолжить?','Восстановление конфигурации','Восстановить'))return;
