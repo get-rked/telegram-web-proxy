@@ -4764,7 +4764,7 @@ diagnose_proxy_fail2ban() {
   local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
   selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   if [[ "$selected_web_server" != "nginx" && "$selected_web_server" != "caddy" ]]; then
-    if systemctl is-enabled --quiet nginx.service 2>/dev/null; then selected_web_server=nginx; else selected_web_server=caddy; fi
+    if systemctl is-active --quiet nginx.service 2>/dev/null || systemctl is-enabled --quiet nginx.service 2>/dev/null; then selected_web_server=nginx; else selected_web_server=caddy; fi
   fi
   echo "  Служба fail2ban.service:"
   state="$(systemctl is-active fail2ban.service 2>/dev/null || true)"
