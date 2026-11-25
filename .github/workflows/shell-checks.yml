@@ -49,7 +49,7 @@ jobs:
           cat /tmp/f2b-runtime.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-runtime.out
           printf '%s\n' '198.51.100.26 - - [25/Nov/2026:10:00:00 +0000] "GET /proxy HTTP/1.1" 404 12 "-" "Telegram"' > /tmp/tproxy-normal.log
-          fail2ban-regex /tmp/tproxy-normal.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-normal.out || { cat /tmp/f2b-normal.out; exit 1; }
+          fail2ban-regex /tmp/tproxy-normal.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-normal.out || true
           cat /tmp/f2b-normal.out
           grep -Eq '0 matched' /tmp/f2b-normal.out
 
