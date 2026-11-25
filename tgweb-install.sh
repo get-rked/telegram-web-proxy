@@ -4847,11 +4847,14 @@ def width(value):
 def pad(value, size):
     return value + " " * max(0, size - width(value))
 widths = [max([width(headers[i])] + [width(row[i]) for row in rows]) for i in range(len(headers))]
+use_color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+def paint(value):
+    return "\\033[1;34m" + value + "\\033[0m" if use_color else value
 def border(left, middle, right):
-    print("  \033[1;34m" + left + middle.join("─" * (w + 2) for w in widths) + right + "\033[0m")
+    print(paint("  " + left + middle.join("─" * (w + 2) for w in widths) + right))
 def line(values, blue=False):
     result = "  │" + "│".join(" " + pad(v, widths[i]) + " " for i, v in enumerate(values)) + "│"
-    print(("\033[1;34m" + result + "\033[0m") if blue else result)
+    print(paint(result) if blue else result)
 border("┌", "┬", "┐")
 line(headers, True)
 border("├", "┼", "┤")
