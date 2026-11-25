@@ -1016,13 +1016,6 @@ func (a *App) qr(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, file)
 }
 
-func (a *App) routes() http.Handler {
-	mux := http.NewServeMux()
-	prefix := "/" + a.base
-	mux.HandleFunc(prefix+"/login", a.login)
-	mux.HandleFunc(prefix+"/logout", a.auth(a.logout))
-	mux.HandleFunc(prefix+"/", a.home)
-
 func (a *App) sessionActivity(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1031,6 +1024,12 @@ func (a *App) sessionActivity(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *App) routes() http.Handler {
+	mux := http.NewServeMux()
+	prefix := "/" + a.base
+	mux.HandleFunc(prefix+"/login", a.login)
+	mux.HandleFunc(prefix+"/logout", a.auth(a.logout))
+	mux.HandleFunc(prefix+"/", a.home)
 	mux.HandleFunc(prefix+"/api/profiles", a.auth(a.profiles))
 	mux.HandleFunc(prefix+"/api/session/activity", a.auth(a.sessionActivity))
 	mux.HandleFunc(prefix+"/api/profiles/import", a.auth(a.profileImport))
