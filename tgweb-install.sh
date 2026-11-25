@@ -4528,6 +4528,107 @@ install_proxy_fail2ban() {
   install -m 0644 "$repo_dir/web-panel/fail2ban-server-abuse.conf" /etc/fail2ban/filter.d/tproxy-server-abuse.conf
   install -m 0644 "$repo_dir/web-panel/fail2ban-mtproxy-abuse.conf" /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
 
+  # If the hostname is behind Cloudflare, trust only its published networks so
+  # Fail2ban sees the visitor address rather than banning a shared edge node.
+  if is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
+    local cf_ranges cf_tmp
+    cf_tmp="$(mktemp)"
+    if ! { curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v4; curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v6; } > "$cf_tmp"; then
+      rm -f "$cf_tmp"
+      die "Не удалось получить официальные сети Cloudflare; не включаю Fail2ban по адресу общего edge-узла."
+    fi
+    cf_ranges="$(python3 - "$cf_tmp" <<'PYTHON'
+import ipaddress, pathlib, sys
+nets = []
+for raw in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        nets.append(str(ipaddress.ip_network(raw, strict=True)))
+    except ValueError:
+        raise SystemExit("Некорректный CIDR в списке Cloudflare")
+if len(nets) < 10:
+    raise SystemExit("Список Cloudflare неполный")
+print(" ".join(nets))
+PYTHON
+)" || { rm -f "$cf_tmp"; die "Список сетей Cloudflare не прошёл проверку."; }
+    rm -f "$cf_tmp"
+    if [[ "$WEB_SERVER" == "nginx" ]]; then
+      python3 - "$HOSTNAME_ARG" "$cf_ranges" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
+host, ranges = sys.argv[1], sys.argv[2].split()
+text = path.read_text()
+if "real_ip_header" in text and not re.search(r"(?m)^\\s*real_ip_header\\s+CF-Connecting-IP;", text):
+    raise SystemExit("В Nginx уже задан другой real_ip_header; не перезаписываю его автоматически")
+lines = text.splitlines(keepends=True)
+out, depth, target, done = [], 0, False, False
+for line in lines:
+    if re.match(r"^\\s*server\\s*\\{", line):
+        target, depth = False, 0
+    if "server_name " + host + ";" in line:
+        target = True
+    if target and not done and re.match(r"^\\s*listen\\s+443", line):
+        out.append(line)
+        if "real_ip_header CF-Connecting-IP;" not in text:
+            out.append("  real_ip_header CF-Connecting-IP;\\n")
+            out.append("  real_ip_recursive on;\\n")
+            for network in ranges:
+                if "set_real_ip_from " + network + ";" not in text:
+                    out.append("  set_real_ip_from " + network + ";\\n")
+        done = True
+        continue
+    out.append(line)
+    depth += line.count("{") - line.count("}")
+    if target and depth <= 0:
+        target = False
+if not done:
+    raise SystemExit("Не найден TLS vhost Nginx для настройки Cloudflare real IP")
+path.write_text("".join(out))
+PYTHON
+    else
+      python3 - "$cf_ranges" <<'PYTHON'
+import pathlib, re, sys
+path = pathlib.Path("/etc/caddy/Caddyfile")
+ranges = sys.argv[1].split()
+text = path.read_text()
+directive = "trusted_proxies static " + " ".join(ranges)
+lines = text.splitlines()
+start = next((i for i, line in enumerate(lines) if line.strip() == "{"), None)
+if start is None:
+    lines = ["{", "  servers {", "    " + directive, "    trusted_proxies_strict", "  }", "}", ""] + lines
+else:
+    depth, end = 0, None
+    for i in range(start, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if i > start and depth == 0:
+            end = i
+            break
+    if end is None:
+        raise SystemExit("Не удалось разобрать global options block в Caddyfile")
+    trusted = [i for i in range(start + 1, end) if re.match(r"\\s*trusted_proxies\\s+", lines[i])]
+    if trusted:
+        if "trusted_proxies static " not in lines[trusted[0]]:
+            raise SystemExit("В Caddy уже настроен нестандартный trusted_proxies; требуется ручное объединение")
+        lines[trusted[0]] = "    " + directive
+    else:
+        servers = next((i for i in range(start + 1, end) if lines[i].strip() == "servers {"), None)
+        if servers is None:
+            lines[end:end] = ["  servers {", "    " + directive, "    trusted_proxies_strict", "  }"]
+        else:
+            lines[servers + 1:servers + 1] = ["    " + directive, "    trusted_proxies_strict"]
+path.write_text("\\n".join(lines) + "\\n")
+PYTHON
+    fi
+    if [[ "$WEB_SERVER" == "nginx" ]]; then
+      nginx -t || die "Nginx real IP конфигурация Cloudflare не прошла проверку."
+    else
+      /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || die "Не удалось отформатировать Caddyfile Cloudflare."
+      TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || die "Caddy trusted_proxies конфигурация не прошла проверку."
+    fi
+  fi
+
   if [[ "$WEB_SERVER" == "nginx" ]]; then
     nginx_enabled=true
     install -d -m 0755 /var/log/nginx
