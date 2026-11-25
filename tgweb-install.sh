@@ -2487,7 +2487,7 @@ run_uninstall() {
   systemctl disable --now tproxy-panel.service 2>/dev/null || true
   rm -f /etc/systemd/system/tproxy-panel.service "$SYSTEMD_DIR/tproxy-panel.service"
   rm -f /etc/fail2ban/filter.d/tproxy-panel.conf /etc/fail2ban/jail.d/tproxy-panel.local
-  rm -f /etc/fail2ban/filter.d/tproxy-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf /etc/fail2ban/jail.d/tproxy-proxy.local /etc/logrotate.d/tproxy-proxy
+  rm -f /etc/fail2ban/filter.d/tproxy-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf /etc/fail2ban/jail.d/tproxy-proxy.local /etc/logrotate.d/tproxy-proxy /etc/nginx/conf.d/tproxy-fail2ban-log.conf
   systemctl restart fail2ban.service 2>/dev/null || true
   remove_legacy_compat_links
   local installed_web_server
@@ -2842,6 +2842,7 @@ backup_command() {
     etc/caddy/Caddyfile etc/caddy/Caddyfile.d \
     etc/nginx/sites-available/tproxy-server etc/nginx/sites-enabled/tproxy-server \
     etc/nginx/conf.d/tproxy-websocket-map.conf \
+    etc/nginx/conf.d/tproxy-fail2ban-log.conf \
     etc/letsencrypt \
     etc/fail2ban/filter.d/tproxy-panel.conf \
     etc/fail2ban/filter.d/tproxy-nginx-scan.conf \
@@ -4664,6 +4665,7 @@ PYTHON
   fi
 
   if [[ "$WEB_SERVER" == "nginx" ]]; then
+    install -m 0644 "$repo_dir/web-panel/nginx-fail2ban-log.conf" /etc/nginx/conf.d/tproxy-fail2ban-log.conf
     install -d -m 0755 /var/log/nginx
     touch /var/log/nginx/tproxy-access.log
     chmod 0640 /var/log/nginx/tproxy-access.log
@@ -4696,7 +4698,7 @@ while i < len(lines):
             rebuilt.append(line)
             if not inserted and re.match(r"^\s*listen\s+443", line):
                 if not any("/var/log/nginx/tproxy-access.log" in x for x in block):
-                    rebuilt.append("  access_log /var/log/nginx/tproxy-access.log combined;\n")
+                    rebuilt.append("  access_log /var/log/nginx/tproxy-access.log tproxy_f2b;\n")
                 inserted = True
         block = rebuilt
     out.extend(block)
@@ -4741,7 +4743,9 @@ if "/var/log/caddy/tproxy-access.json" not in text:
 \t\t\troll_keep 5
 \t\t\troll_keep_for 168h
 \t\t}
-\t\tformat json
+\t\tformat filter {
+\t\t\trequest>uri regexp "\\\\?.*$" ""
+\t\t}
 \t}
 """
     text = text[:match.end()] + "\n" + block + text[match.end():]
