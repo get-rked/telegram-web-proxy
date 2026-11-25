@@ -508,6 +508,24 @@ caddyfile_routes_to_tproxy() {
   grep -Fq "reverse_proxy 127.0.0.1:$RELAY_PORT" /etc/caddy/Caddyfile
 }
 
+# Применяет проверенную конфигурацию Caddy без обращения к API остановленной службы.
+# При недоступном admin API использует systemd restart/start; stderr reload подавляется,
+# чтобы штатный fallback не выглядел как ошибка обновления.
+apply_caddy_config() {
+  local config="${1:-/etc/caddy/Caddyfile}"
+  if systemctl is-active --quiet caddy.service 2>/dev/null; then
+    if TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" \
+      /usr/local/bin/caddy reload --config "$config" --adapter caddyfile >/dev/null 2>&1; then
+      return 0
+    fi
+    warn "Admin API Caddy недоступен; применяю конфигурацию через перезапуск службы."
+    systemctl restart caddy.service
+  else
+    systemctl start caddy.service
+  fi
+  systemctl is-active --quiet caddy.service
+}
+
 # Проверка полной совместимости Caddy с текущими параметрами.
 caddy_config_compatible() {
   [[ -s /etc/caddy/Caddyfile && -x /usr/local/bin/caddy ]] || return 1
@@ -4785,7 +4803,7 @@ elif "request>uri regexp" not in text:
 PYTHON
     /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || die "Не удалось отформатировать Caddyfile с access log."
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || die "Caddyfile с access log не прошёл проверку."
-    TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || systemctl restart caddy.service || die "Не удалось применить access log Caddy."
+    apply_caddy_config /etc/caddy/Caddyfile || die "Не удалось применить access log Caddy через systemd."
   fi
 
   install -m 0644 "$repo_dir/web-panel/fail2ban-jail-proxy.conf" "$jail_tmp"
@@ -4819,53 +4837,65 @@ PYTHON
 }
 
 diagnose_proxy_fail2ban() {
-  local state jail output current total current_failed total_failed events source source_available journal_rows failed=0 selected_web_server
+  local state jail output current total current_failed total_failed events source source_status
+  local source_available journal_rows failed=0 selected_web_server
   local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
   selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   if [[ "$selected_web_server" != "nginx" && "$selected_web_server" != "caddy" ]]; then
     if systemctl is-active --quiet nginx.service 2>/dev/null || systemctl is-enabled --quiet nginx.service 2>/dev/null; then selected_web_server=nginx; else selected_web_server=caddy; fi
   fi
-  echo "  Служба fail2ban.service:"
+
+  printf '\n  Защита Fail2ban\n'
+  printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
+  printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Компонент" "Состояние" "События" "Блокировки" "Источник / примечание"
+  printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
+
   state="$(systemctl is-active fail2ban.service 2>/dev/null || true)"
   if [[ "$state" == "active" ]]; then
-    printf '    %s fail2ban.service: active\n' "$(status_mark ok)"
+    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "fail2ban.service" "активна" "—" "—" "systemd"
   else
-    printf '    %s fail2ban.service: %s\n' "$(status_mark fail)" "${state:-unknown}"
+    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "fail2ban.service" "${state:-unknown}" "—" "—" "служба не работает"
     failed=1
     fail2ban_startup_diagnostics
   fi
+
   if ! command -v fail2ban-client >/dev/null 2>&1; then
-    printf '    %s fail2ban-client не установлен\n' "$(status_mark fail)"
+    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Конфигурация" "ошибка" "—" "—" "fail2ban-client не установлен"
+    printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
     return 1
   fi
   if fail2ban-client -t >/dev/null 2>&1; then
-    printf '    %s Конфигурация Fail2ban синтаксически корректна\n' "$(status_mark ok)"
+    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Конфигурация" "корректна" "—" "—" "проверка синтаксиса пройдена"
   else
-    printf '    %s Ошибка конфигурации Fail2ban (подробности: fail2ban-client -t)\n' "$(status_mark fail)"
+    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "Конфигурация" "ошибка" "—" "—" "fail2ban-client -t"
     failed=1
   fi
+
   for jail in "${jails[@]}"; do
     case "$jail" in
-      tproxy-panel) source="journalctl: tproxy-panel.service / AUTH_FAIL" ;;
-      tproxy-nginx-scan) source="/var/log/nginx/tproxy-access.log" ;;
-      tproxy-caddy-scan) source="/var/log/caddy/tproxy-access.json" ;;
-      tproxy-server-abuse) source="journalctl: tproxy-server.service / security markers" ;;
-      tproxy-mtproxy-abuse) source="journalctl: mtproxy.service / security markers" ;;
+      tproxy-panel) source="журнал панели / AUTH_FAIL" ;;
+      tproxy-nginx-scan) source="Nginx access log" ;;
+      tproxy-caddy-scan) source="Caddy access log" ;;
+      tproxy-server-abuse) source="журнал tproxy-server / маркеры" ;;
+      tproxy-mtproxy-abuse) source="журнал MTProxy / маркеры" ;;
     esac
+
     if ! output="$(fail2ban-client status "$jail" 2>/dev/null)"; then
       if [[ "$jail" == "tproxy-nginx-scan" && "$selected_web_server" != "nginx" ]] ||
          [[ "$jail" == "tproxy-caddy-scan" && "$selected_web_server" != "caddy" ]]; then
-        printf '    %s %s: отключён (не выбранный веб-сервер)\n' "$(status_mark info)" "$jail"
+        printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "$jail" "отключён" "—" "—" "другой веб-сервер выбран"
         continue
       fi
-      printf '    %s %s: jail не загружен или выключен\\n' "$(status_mark fail)" "$jail"
+      printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "$jail" "не загружен" "—" "—" "проверьте конфигурацию"
       failed=1
       continue
     fi
+
     current="$(printf '%s\n' "$output" | sed -nE 's/.*Currently banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     total="$(printf '%s\n' "$output" | sed -nE 's/.*Total banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     current_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Currently failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     total_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Total failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+
     events=0
     source_available=0
     case "$jail" in
@@ -4880,29 +4910,31 @@ diagnose_proxy_fail2ban() {
           events="$(wc -l < /var/log/caddy/tproxy-access.json | tr -d '[:space:]')"
         fi ;;
       tproxy-panel)
-        journal_rows="$(journalctl -u tproxy-panel.service --since '30 days ago' -n 1 --no-pager 2>/dev/null | wc -l | tr -d '[:space:]')"
+        journal_rows="$(journalctl -u tproxy-panel.service --since '30 days ago' -n 1 --no-pager -o cat 2>/dev/null | wc -l | tr -d '[:space:]')"
         (( journal_rows > 0 )) && source_available=1
-        events="$(journalctl -u tproxy-panel.service --since '30 days ago' --no-pager 2>/dev/null | grep -c '\[AUTH_FAIL\]' || true)" ;;
+        events="$(journalctl -u tproxy-panel.service --since '30 days ago' --no-pager -o cat 2>/dev/null | grep -c '\[AUTH_FAIL\]' || true)" ;;
       tproxy-server-abuse)
-        journal_rows="$(journalctl -u tproxy-server.service --since '30 days ago' -n 1 --no-pager 2>/dev/null | wc -l | tr -d '[:space:]')"
+        journal_rows="$(journalctl -u tproxy-server.service --since '30 days ago' -n 1 --no-pager -o cat 2>/dev/null | wc -l | tr -d '[:space:]')"
         (( journal_rows > 0 )) && source_available=1
-        events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
+        events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager -o cat 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
       tproxy-mtproxy-abuse)
-        journal_rows="$(journalctl -u mtproxy.service --since '30 days ago' -n 1 --no-pager 2>/dev/null | wc -l | tr -d '[:space:]')"
+        journal_rows="$(journalctl -u mtproxy.service --since '30 days ago' -n 1 --no-pager -o cat 2>/dev/null | wc -l | tr -d '[:space:]')"
         (( journal_rows > 0 )) && source_available=1
-        events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
+        events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager -o cat 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
     esac
-    printf '    %s %-24s активен; неудачных событий: %s / %s; блокировок: %s / %s\n' "$(status_mark ok)" "$jail" "${current_failed:-0}" "${total_failed:-0}" "${current:-0}" "${total:-0}"
+
     if (( source_available )); then
       if [[ "$events" =~ ^[0-9]+$ ]] && (( events > 0 )); then
-        printf '      %s Источник: %s (записей/маркеров: %s)\n' "$(status_mark ok)" "$source" "$events"
+        source_status="$source: $events"
       else
-        printf '      %s Источник доступен, событий для блокировки нет: %s\n' "$(status_mark warn)" "$source"
+        source_status="$source: нет событий"
       fi
     else
-      printf '      %s нет источника событий: %s\n' "$(status_mark warn)" "$source"
+      source_status="$source: нет источника"
     fi
+    printf '  | %-23s | %-12s | %-11s | %-11s | %-38s |\n' "$jail" "активен" "${current_failed:-0}/${total_failed:-0}" "${current:-0}/${total:-0}" "$source_status"
   done
+  printf '  +-------------------------+--------------+-------------+-------------+----------------------------------------+\n'
   (( failed == 0 ))
 }
 
@@ -4975,12 +5007,9 @@ PYTHON
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || {
       rm -rf "$source_tmp"; die "Проверка Caddyfile после добавления панели не пройдена."
     }
-    # This unit may not define ExecReload; use Caddy's native admin API reload.
-    if ! TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
-      systemctl restart caddy.service || {
-        rm -rf "$source_tmp"; die "Не удалось применить маршрут административной панели в Caddy."
-      }
-    fi
+    apply_caddy_config /etc/caddy/Caddyfile || {
+      rm -rf "$source_tmp"; die "Не удалось запустить Caddy или применить его конфигурацию."
+    }
   else
     python3 - "$panel_base" <<'PYTHON'
 import pathlib, sys
