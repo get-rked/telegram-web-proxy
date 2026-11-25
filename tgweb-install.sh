@@ -4802,8 +4802,8 @@ diagnose_proxy_fail2ban() {
     total="$(printf '%s\n' "$output" | sed -nE 's/.*Total banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     events=0
     case "$jail" in
-      tproxy-nginx-scan) [[ ! -f /var/log/nginx/tproxy-access.log ]] || events="$(wc -l < /var/log/nginx/tproxy-access.log)" ;;
-      tproxy-caddy-scan) [[ ! -f /var/log/caddy/tproxy-access.json ]] || events="$(wc -l < /var/log/caddy/tproxy-access.json)" ;;
+      tproxy-nginx-scan) [[ ! -f /var/log/nginx/tproxy-access.log ]] || events="$(wc -l < /var/log/nginx/tproxy-access.log | tr -d '[:space:]')" ;;
+      tproxy-caddy-scan) [[ ! -f /var/log/caddy/tproxy-access.json ]] || events="$(wc -l < /var/log/caddy/tproxy-access.json | tr -d '[:space:]')" ;;
       tproxy-panel) events="$(journalctl -u tproxy-panel.service --since '30 days ago' --no-pager 2>/dev/null | grep -c '\[AUTH_FAIL\]' || true)" ;;
       tproxy-server-abuse) events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
       tproxy-mtproxy-abuse) events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
