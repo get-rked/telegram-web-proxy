@@ -4839,7 +4839,7 @@ PYTHON
 # Таблица Fail2ban: учитываем ширину Unicode, чтобы кириллица не сдвигала столбцы.
 render_fail2ban_table() {
   python3 -c '
-import sys, unicodedata
+import os, sys, unicodedata
 headers = ["Компонент", "Состояние", "События", "Блокировки", "Источник / примечание"]
 rows = [line.rstrip("\n").split("|", 4) for line in sys.stdin if line.strip()]
 def width(value):
