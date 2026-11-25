@@ -89,7 +89,6 @@ func (a *App) init() error {
 		"CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, salt BLOB NOT NULL, password_hash BLOB NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL, last_activity INTEGER NOT NULL DEFAULT 0)",
 		"CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)",
-		"CREATE INDEX IF NOT EXISTS sessions_activity ON sessions(last_activity)",
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
@@ -110,6 +109,9 @@ func (a *App) init() error {
 	// Give pre-existing sessions a short migration grace period instead of
 	// invalidating every administrator session during an upgrade.
 	if _, err := db.Exec("UPDATE sessions SET last_activity=? WHERE last_activity=0", time.Now().Unix()); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS sessions_activity ON sessions(last_activity)"); err != nil {
 		return err
 	}
 
@@ -164,7 +166,7 @@ func (a *App) init() error {
 		}
 	}
 
-	_, _ = db.Exec("DELETE FROM sessions WHERE expires_at < ?", time.Now().Unix())
+	_, _ = db.Exec("DELETE FROM sessions WHERE expires_at <= ? OR last_activity <= ?", time.Now().Unix(), time.Now().Add(-sessionIdleTimeout).Unix())
 	return os.Chmod(path, 0600)
 }
 
