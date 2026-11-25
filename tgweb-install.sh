@@ -4530,6 +4530,27 @@ upstream_cli() {
 
 
  
+# Print actionable, redacted Fail2ban diagnostics before the update transaction rolls back.
+fail2ban_startup_diagnostics() {
+  echo "  --- systemctl status fail2ban ---" >&2
+  systemctl status fail2ban.service --no-pager -l 2>&1 | redact_sensitive_log | tail -n 35 >&2 || true
+  echo "  --- journal fail2ban (current boot) ---" >&2
+  journalctl -u fail2ban.service -b -n 60 --no-pager -o cat 2>&1 | redact_sensitive_log | tail -n 45 >&2 || true
+  echo "  --- fail2ban config test ---" >&2
+  fail2ban-client -t 2>&1 | redact_sensitive_log | tail -n 30 >&2 || true
+}
+
+wait_for_fail2ban_socket() {
+  local attempt
+  for attempt in {1..15}; do
+    if systemctl is-active --quiet fail2ban.service && fail2ban-client ping >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # Fail2ban proxy protection. SSH and recidive are intentionally not managed here.
 install_proxy_fail2ban() {
   local jail_tmp="/etc/fail2ban/jail.d/tproxy-proxy.local"
@@ -4774,10 +4795,27 @@ PYTHON
     sed -i '/^\[tproxy-caddy-scan\]/,/^\[/ s/^enabled = false/enabled = true/' "$jail_tmp"
   fi
 
-  fail2ban-client -t || die "Конфигурация Fail2ban для прокси не прошла проверку."
-  systemctl enable --now fail2ban.service || die "Не удалось включить fail2ban.service."
-  systemctl restart fail2ban.service || die "Не удалось перезапустить Fail2ban после настройки прокси."
-  fail2ban-client status >/dev/null || die "Fail2ban не отвечает после применения конфигурации."
+  if ! fail2ban-client -t; then
+    fail2ban_startup_diagnostics
+    die "Конфигурация Fail2ban не прошла проверку; см. диагностические сообщения выше."
+  fi
+  systemctl enable fail2ban.service || {
+    fail2ban_startup_diagnostics
+    die "Не удалось включить fail2ban.service."
+  }
+  systemctl reset-failed fail2ban.service 2>/dev/null || true
+  if ! systemctl restart fail2ban.service; then
+    fail2ban_startup_diagnostics
+    die "Fail2ban завершился с ошибкой при запуске; подробности приведены выше."
+  fi
+  if ! wait_for_fail2ban_socket; then
+    fail2ban_startup_diagnostics
+    die "Fail2ban не создал управляющий сокет за 15 секунд; подробности приведены выше."
+  fi
+  fail2ban-client status >/dev/null || {
+    fail2ban_startup_diagnostics
+    die "Fail2ban запущен, но не отвечает на status; подробности приведены выше."
+  }
 }
 
 diagnose_proxy_fail2ban() {
@@ -4895,11 +4933,15 @@ install_admin_panel() {
   mv -f "$candidate" "$BIN_DIR/tproxy-panel"
   cd - >/dev/null
 
-  if ! dpkg -s fail2ban >/dev/null 2>&1; then
+  if ! dpkg -s fail2ban >/dev/null 2>&1 || ! dpkg -s python3-systemd >/dev/null 2>&1; then
     apt-get update -qq || { rm -rf "$source_tmp"; die "Не удалось обновить список пакетов для Fail2ban."; }
-    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban || {
-      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban python3-systemd || {
+      rm -rf "$source_tmp"; die "Не удалось установить Fail2ban и его systemd backend."
     }
+  fi
+  if ! /usr/bin/python3 -c 'import systemd.journal' >/dev/null 2>&1; then
+    rm -rf "$source_tmp"
+    die "Не установлен Python-модуль systemd.journal (пакет python3-systemd), необходимый для backend=systemd."
   fi
   install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d /etc/caddy /etc/nginx /etc/letsencrypt
   install -m 0644 "$repo_dir/web-panel/tproxy-panel.service" "$SYSTEMD_DIR/tproxy-panel.service"
