@@ -4559,34 +4559,45 @@ PYTHON
 import pathlib, re, sys
 path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
 host, ranges = sys.argv[1], sys.argv[2].split()
-text = path.read_text()
-if "real_ip_header" in text and not re.search(r"(?m)^\s*real_ip_header\s+CF-Connecting-IP;", text):
-    raise SystemExit("В Nginx уже задан другой real_ip_header; не перезаписываю его автоматически")
-lines = text.splitlines(keepends=True)
-out, depth, target, done = [], 0, False, False
-for line in lines:
-    if re.match(r"^\s*server\s*\{", line):
-        target, depth = False, 0
-    if "server_name " + host + ";" in line:
-        target = True
-    if target and not done and re.match(r"^\s*listen\s+443", line):
-        out.append(line)
-        if "real_ip_header CF-Connecting-IP;" not in text:
-            out.append("  real_ip_header CF-Connecting-IP;\n")
-            out.append("  real_ip_recursive on;\n")
-            for network in ranges:
-                if "set_real_ip_from " + network + ";" not in text:
-                    out.append("  set_real_ip_from " + network + ";\n")
-        done = True
+lines = path.read_text().splitlines(keepends=True)
+out, found = [], False
+i = 0
+while i < len(lines):
+    if not re.match(r"^\s*server\s*\{", lines[i]):
+        out.append(lines[i])
+        i += 1
         continue
-    out.append(line)
-    depth += line.count("{") - line.count("}")
-    if target and depth <= 0:
-        target = False
-if not done:
+    start, depth = i, 0
+    while i < len(lines):
+        depth += lines[i].count("{") - lines[i].count("}")
+        i += 1
+        if depth == 0:
+            break
+    block = lines[start:i]
+    if any("server_name " + host + ";" in line for line in block) and any(re.match(r"^\s*listen\s+443", line) for line in block):
+        found = True
+        if any(re.match(r"^\s*real_ip_header\s+", line) and "CF-Connecting-IP" not in line for line in block):
+            raise SystemExit("В Nginx уже задан другой real_ip_header; не перезаписываю его автоматически")
+        rebuilt = []
+        inserted = False
+        for line in block:
+            rebuilt.append(line)
+            if not inserted and re.match(r"^\s*listen\s+443", line):
+                if not any("real_ip_header CF-Connecting-IP;" in x for x in block):
+                    rebuilt.append("  real_ip_header CF-Connecting-IP;\n")
+                if not any("real_ip_recursive on;" in x for x in block):
+                    rebuilt.append("  real_ip_recursive on;\n")
+                for network in ranges:
+                    if not any("set_real_ip_from " + network + ";" in x for x in block):
+                        rebuilt.append("  set_real_ip_from " + network + ";\n")
+                inserted = True
+        block = rebuilt
+    out.extend(block)
+if not found:
     raise SystemExit("Не найден TLS vhost Nginx для настройки Cloudflare real IP")
 path.write_text("".join(out))
 PYTHON
+
     else
       python3 - "$cf_ranges" <<'PYTHON'
 import pathlib, re, sys
@@ -4638,28 +4649,40 @@ PYTHON
 import pathlib, re, sys
 path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
 host = sys.argv[1]
-text = path.read_text()
-if "access_log /var/log/nginx/tproxy-access.log combined;" not in text:
-    lines = text.splitlines(keepends=True)
-    out, depth, in_target, inserted = [], 0, False, False
-    for line in lines:
-        if re.match(r"^\s*server\s*\{", line):
-            in_target, depth = False, 0
-        if "server_name " + host + ";" in line:
-            in_target = True
-        if in_target and not inserted and re.match(r"^\s*listen\s+443", line):
-            out.append(line)
-            out.append("  access_log /var/log/nginx/tproxy-access.log combined;\n")
-            inserted = True
-            continue
-        out.append(line)
-        depth += line.count("{") - line.count("}")
-        if in_target and depth <= 0:
-            in_target = False
-    if not inserted:
-        raise SystemExit("Не найден TLS vhost Nginx для включения access log")
-    path.write_text("".join(out))
+lines = path.read_text().splitlines(keepends=True)
+out, found = [], False
+i = 0
+while i < len(lines):
+    if not re.match(r"^\s*server\s*\{", lines[i]):
+        out.append(lines[i])
+        i += 1
+        continue
+    start, depth = i, 0
+    while i < len(lines):
+        depth += lines[i].count("{") - lines[i].count("}")
+        i += 1
+        if depth == 0:
+            break
+    block = lines[start:i]
+    if any("server_name " + host + ";" in line for line in block) and any(re.match(r"^\s*listen\s+443", line) for line in block):
+        found = True
+        rebuilt = []
+        inserted = False
+        for line in block:
+            if re.match(r"^\s*access_log\s+off;", line):
+                continue
+            rebuilt.append(line)
+            if not inserted and re.match(r"^\s*listen\s+443", line):
+                if not any("/var/log/nginx/tproxy-access.log" in x for x in block):
+                    rebuilt.append("  access_log /var/log/nginx/tproxy-access.log combined;\n")
+                inserted = True
+        block = rebuilt
+    out.extend(block)
+if not found:
+    raise SystemExit("Не найден TLS vhost Nginx для включения access log")
+path.write_text("".join(out))
 PYTHON
+
     cat > /etc/logrotate.d/tproxy-proxy <<'EOF'
 /var/log/nginx/tproxy-access.log {
     daily
