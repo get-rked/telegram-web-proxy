@@ -116,11 +116,56 @@ let toastTimer=null;
 let csrf='';
 let currentProfile='';
 const base=location.pathname.replace(/\/$/,'');
+
+const idleTimeoutMs=5*60*1000;
+const heartbeatIntervalMs=30*1000;
+let lastUserActivity=Date.now();
+let lastHeartbeat=0;
+let idleRedirected=false;
+function redirectToLogin(){
+ if(idleRedirected)return;
+ idleRedirected=true;
+ location.replace(base+'/login?expired=1');
+}
+async function sendActivityHeartbeat(){
+ const now=Date.now();
+ if(now-lastHeartbeat<heartbeatIntervalMs||!csrf)return;
+ lastHeartbeat=now;
+ try{
+  const response=await fetch(base+'/api/session/activity',{
+   method:'POST',credentials:'same-origin',
+   headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+   body:'{}',cache:'no-store'
+  });
+  csrf=response.headers.get('X-CSRF-Token')||csrf;
+  if(response.status===401){redirectToLogin();return;}
+  if(!response.ok&&response.status===403){redirectToLogin();}
+ }catch(error){
+  // A transient network failure is retried on the next user activity.
+ }
+}
+function markUserActivity(){
+ lastUserActivity=Date.now();
+ void sendActivityHeartbeat();
+}
+for(const eventName of ['pointerdown','keydown','scroll','touchstart']){
+ document.addEventListener(eventName,markUserActivity,{passive:true});
+}
+document.addEventListener('visibilitychange',()=>{
+ if(!document.hidden){
+  if(Date.now()-lastUserActivity>=idleTimeoutMs)redirectToLogin();
+  else void sendActivityHeartbeat();
+ }
+});
+setInterval(()=>{
+ if(Date.now()-lastUserActivity>=idleTimeoutMs)redirectToLogin();
+},1000);
+
 async function api(path,opts={}){
  opts.credentials='same-origin';
  const headers={'X-CSRF-Token':csrf};if(!(opts.body instanceof FormData))headers['Content-Type']='application/json';opts.headers=Object.assign(headers,opts.headers||{});
  const response=await fetch(path,opts);csrf=response.headers.get('X-CSRF-Token')||csrf;
- if(response.status===401){location.href='login';throw Error('Сессия завершена')}
+ if(response.status===401){redirectToLogin();throw Error('Сессия завершена')}
  const data=await response.json().catch(()=>({}));
  if(!response.ok)throw Error(data.error||'Ошибка запроса');return data;
 }
