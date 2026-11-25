@@ -52,6 +52,9 @@ jobs:
           fail2ban-regex /tmp/tproxy-normal.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-normal.out || true
           cat /tmp/f2b-normal.out
           grep -Eq '0 matched' /tmp/f2b-normal.out
+          printf '%s\n' 'mtproxy: invalid secret from 198.51.100.27; connection closed' > /tmp/tproxy-telegram.log
+          fail2ban-regex /tmp/tproxy-telegram.log web-panel/fail2ban-mtproxy-abuse.conf > /tmp/f2b-telegram.out || true
+          grep -Eq '0 matched' /tmp/f2b-telegram.out
 
   upstream-go:
     name: Pinned tproxy-server tests and build
