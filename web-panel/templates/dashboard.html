@@ -54,8 +54,6 @@ dialog::backdrop{background:#020711c9;backdrop-filter:blur(4px)}
 <header class="top"><div class="brand">TPROXY <small>ADMIN CONSOLE · SECURE ACCESS</small></div><a class="logout" href="#" onclick="logout();return false">Выйти ↗</a></header>
 <section class="hero"><div class="eyebrow">CONTROL CENTER</div><h1>Управление прокси</h1><div class="sub">Профили, диагностика и резервирование — в отдельных разделах</div></section>
 <div class="grid">
-<section class="card"><h2>Система</h2><p>● Панель авторизована</p><div class="meta">Внутренний сервис доступен только через локальный reverse proxy.</div></section>
-<section class="card"><h2>Действия</h2><div class="toolbar"><button onclick="loadAll()">↻ Обновить данные</button></div><div class="meta">Изменения профилей применяются штатным установщиком.</div></section>
 <section class="card wide"><h2>Профили</h2>
 <div class="formline"><input id="newName" placeholder="Имя нового профиля" maxlength="64"><button class="primary" onclick="addProfile()">＋ Создать профиль</button><button onclick="openDialog('importDialog')">Импорт профиля</button></div><div id="runtimeSettings" class="runtime-note">Workers и Max Connections: загрузка… (изменяются только через CLI)</div>
 <div id="profiles">Загрузка профилей…</div></section>
