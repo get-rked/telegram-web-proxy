@@ -37,32 +37,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes fail2ban python3-systemd
           /usr/bin/python3 -c 'import systemd.journal'
-          sudo install -m 0644 web-panel/fail2ban-filter.conf /etc/fail2ban/filter.d/tproxy-panel.conf
-          sudo install -m 0644 web-panel/fail2ban-jail.conf /etc/fail2ban/jail.d/tproxy-panel.local
-          sudo install -m 0644 web-panel/fail2ban-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
-          sudo install -m 0644 web-panel/fail2ban-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
-          sudo install -m 0644 web-panel/fail2ban-server-abuse.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf
-          sudo install -m 0644 web-panel/fail2ban-mtproxy-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
-          sudo install -m 0644 web-panel/fail2ban-jail-proxy.conf /etc/fail2ban/jail.d/tproxy-proxy.local
+          sudo install -m 0644 panel/fail2ban-filter.conf /etc/fail2ban/filter.d/tproxy-panel.conf
+          sudo install -m 0644 panel/fail2ban-jail.conf /etc/fail2ban/jail.d/tproxy-panel.local
+          sudo install -m 0644 panel/fail2ban-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
+          sudo install -m 0644 panel/fail2ban-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
+          sudo install -m 0644 panel/fail2ban-server-abuse.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf
+          sudo install -m 0644 panel/fail2ban-mtproxy-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
+          sudo install -m 0644 panel/fail2ban-jail-proxy.conf /etc/fail2ban/jail.d/tproxy-proxy.local
           sudo fail2ban-client -t
           printf '%s\n' '198.51.100.23 - - [25/Nov/2026:10:00:00 +0000] "GET /.env HTTP/1.1" 404 12' > /tmp/tproxy-nginx.log
-          fail2ban-regex /tmp/tproxy-nginx.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-nginx.out || { cat /tmp/f2b-nginx.out; exit 1; }
+          fail2ban-regex /tmp/tproxy-nginx.log panel/fail2ban-nginx-scan.conf > /tmp/f2b-nginx.out || { cat /tmp/f2b-nginx.out; exit 1; }
           cat /tmp/f2b-nginx.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-nginx.out
           printf '%s\n' '{"request":{"remote_ip":"198.51.100.24","client_ip":"198.51.100.24","uri":"/.git/config"},"status":404}' > /tmp/tproxy-caddy.log
-          fail2ban-regex /tmp/tproxy-caddy.log web-panel/fail2ban-caddy-scan.conf > /tmp/f2b-caddy.out || { cat /tmp/f2b-caddy.out; exit 1; }
+          fail2ban-regex /tmp/tproxy-caddy.log panel/fail2ban-caddy-scan.conf > /tmp/f2b-caddy.out || { cat /tmp/f2b-caddy.out; exit 1; }
           cat /tmp/f2b-caddy.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-caddy.out
           printf '%s\n' '2026/11/25 [SECURITY] suspicious request remote=198.51.100.25' > /tmp/tproxy-runtime.log
-          fail2ban-regex /tmp/tproxy-runtime.log web-panel/fail2ban-server-abuse.conf > /tmp/f2b-runtime.out || { cat /tmp/f2b-runtime.out; exit 1; }
+          fail2ban-regex /tmp/tproxy-runtime.log panel/fail2ban-server-abuse.conf > /tmp/f2b-runtime.out || { cat /tmp/f2b-runtime.out; exit 1; }
           cat /tmp/f2b-runtime.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-runtime.out
           printf '%s\n' '198.51.100.26 - - [25/Nov/2026:10:00:00 +0000] "GET /proxy HTTP/1.1" 404 12' > /tmp/tproxy-normal.log
-          fail2ban-regex /tmp/tproxy-normal.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-normal.out || true
+          fail2ban-regex /tmp/tproxy-normal.log panel/fail2ban-nginx-scan.conf > /tmp/f2b-normal.out || true
           cat /tmp/f2b-normal.out
           grep -Eq '0 matched' /tmp/f2b-normal.out
           printf '%s\n' 'mtproxy: invalid secret from 198.51.100.27; connection closed' > /tmp/tproxy-telegram.log
-          fail2ban-regex /tmp/tproxy-telegram.log web-panel/fail2ban-mtproxy-abuse.conf > /tmp/f2b-telegram.out || true
+          fail2ban-regex /tmp/tproxy-telegram.log panel/fail2ban-mtproxy-abuse.conf > /tmp/f2b-telegram.out || true
           grep -Eq '0 matched' /tmp/f2b-telegram.out
 
   upstream-go:
@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web-panel
+        working-directory: panel
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -108,7 +108,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: "1.26.5"
-          cache-dependency-path: web-panel/go.sum
+          cache-dependency-path: panel/go.sum
 
       - name: Format Go sources
         run: gofmt -w main.go main_test.go
@@ -128,7 +128,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          html = Path("web-panel/templates/dashboard.html").read_text()
+          html = Path("panel/templates/dashboard.html").read_text()
           scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
           if len(scripts) != 1:
               raise SystemExit(f"expected one dashboard script, found {len(scripts)}")
