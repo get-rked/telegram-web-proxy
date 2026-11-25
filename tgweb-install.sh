@@ -4545,24 +4545,30 @@ install_proxy_fail2ban() {
     cloudflare_proxy=1
     local cf_ranges cf_tmp
     cf_tmp="$(mktemp)"
-    if ! curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v4 > "$cf_tmp" ||
-       ! curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v6 >> "$cf_tmp"; then
+    if ! curl --fail --silent --show-error --location --max-time 15 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 > "$cf_tmp" ||
+       ! curl --fail --silent --show-error --location --max-time 15 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v6 >> "$cf_tmp"; then
       rm -f "$cf_tmp"
       die "Не удалось получить официальные сети Cloudflare; не включаю Fail2ban по адресу общего edge-узла."
     fi
     cf_ranges="$(python3 - "$cf_tmp" <<'PYTHON'
 import ipaddress, pathlib, sys
 nets = []
+v4 = v6 = 0
 for raw in pathlib.Path(sys.argv[1]).read_text().splitlines():
     raw = raw.strip()
     if not raw:
         continue
     try:
-        nets.append(str(ipaddress.ip_network(raw, strict=True)))
+        network = ipaddress.ip_network(raw, strict=True)
     except ValueError:
         raise SystemExit("Некорректный CIDR в списке Cloudflare")
-if len(nets) < 10:
-    raise SystemExit("Список Cloudflare неполный")
+    nets.append(str(network))
+    if network.version == 4:
+        v4 += 1
+    else:
+        v6 += 1
+if v4 < 10 or v6 < 5:
+    raise SystemExit("Список Cloudflare IPv4/IPv6 неполный")
 print(" ".join(nets))
 PYTHON
 )" || { rm -f "$cf_tmp"; die "Список сетей Cloudflare не прошёл проверку."; }
