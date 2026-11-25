@@ -68,3 +68,19 @@ Confirmation and status messages are rendered inside the dashboard using the pan
 Для Nginx используется отдельный access log без query string и logrotate (7 архивов). Для Caddy — JSON access log с удалением query string и ограниченной внутренней ротацией. Если домен распознан как Cloudflare-proxied, установщик получает актуальные официальные IPv4/IPv6-сети Cloudflare и настраивает доверие к ним для извлечения реального IP клиента; при неудаче загрузки списков установка прекращается, чтобы не банить общий edge IP.
 
 Диагностика проверяет службу, синтаксис конфигурации, загрузку каждого jail, источник событий и только числовую статистику блокировок. Списки IP-адресов не выводятся. Команда «Перезапустить все службы прокси» не перезапускает Fail2ban.
+
+
+### Если Fail2ban не создаёт управляющий сокет
+
+Установщик устанавливает `python3-systemd` явно: он нужен jail с `backend = systemd`. После перезапуска установщик ждёт управляющий сокет до 15 секунд. Если служба не поднимается, до отката печатаются очищенные от IP-адресов и секретов `systemctl status`, журнал Fail2ban текущей загрузки и результат `fail2ban-client -t`.
+
+Для ручной проверки на сервере:
+
+```bash
+sudo systemctl status fail2ban.service --no-pager -l
+sudo journalctl -u fail2ban.service -b -n 80 --no-pager
+sudo fail2ban-client -t
+/usr/bin/python3 -c 'import systemd.journal; print("systemd backend: OK")'
+```
+
+Отсутствие `/run/fail2ban/fail2ban.sock` само по себе не указывает на ошибку фильтра: сначала нужно проверить, почему завершился демон. Не создавайте сокет вручную и не отключайте проверку доступности.
