@@ -4760,7 +4760,7 @@ PYTHON
 }
 
 diagnose_proxy_fail2ban() {
-  local state jail output current total events source failed=0 selected_web_server
+  local state jail output current total current_failed total_failed events source failed=0 selected_web_server
   local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
   selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   echo "  Служба fail2ban.service:"
@@ -4801,6 +4801,8 @@ diagnose_proxy_fail2ban() {
     fi
     current="$(printf '%s\n' "$output" | sed -nE 's/.*Currently banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     total="$(printf '%s\n' "$output" | sed -nE 's/.*Total banned:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+    current_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Currently failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+    total_failed="$(printf '%s\n' "$output" | sed -nE 's/.*Total failed:[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
     events=0
     case "$jail" in
       tproxy-nginx-scan) [[ ! -f /var/log/nginx/tproxy-access.log ]] || events="$(wc -l < /var/log/nginx/tproxy-access.log | tr -d '[:space:]')" ;;
@@ -4809,7 +4811,7 @@ diagnose_proxy_fail2ban() {
       tproxy-server-abuse) events="$(journalctl -u tproxy-server.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
       tproxy-mtproxy-abuse) events="$(journalctl -u mtproxy.service --since '30 days ago' --no-pager 2>/dev/null | grep -Ec '\[(SECURITY|ABUSE|AUTH_FAIL)\]' || true)" ;;
     esac
-    printf '    %s %-24s jail активен; сейчас заблокировано: %s; всего блокировок: %s\n' "$(status_mark ok)" "$jail" "${current:-0}" "${total:-0}"
+    printf '    %s %-24s активен; неудачных событий: %s / %s; блокировок: %s / %s\n' "$(status_mark ok)" "$jail" "${current_failed:-0}" "${total_failed:-0}" "${current:-0}" "${total:-0}"
     if [[ "$events" =~ ^[0-9]+$ ]] && (( events > 0 )); then
       printf '      %s Источник журнала: %s (строк: %s)\n' "$(status_mark ok)" "$source" "$events"
     else
