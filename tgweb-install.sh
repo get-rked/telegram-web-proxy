@@ -1860,13 +1860,13 @@ configure_proxy_fail2ban() {
 [Definition]
 failregex = ^<HOST> (?:401|403) [A-Z]+$
             ^.*"client_ip":"<HOST>".*"status":(?:401|403)(?:[,}]).*$
-            ignoreregex =
+ignoreregex =
 EOF
   cat > "$filter_dir/tproxy-web-scan.conf" <<'EOF'
 [Definition]
 failregex = ^<HOST> (?:400|404|405|444) [A-Z]+$
             ^.*"client_ip":"<HOST>".*"status":(?:400|404|405|444)(?:[,}]).*$
-            ignoreregex =
+ignoreregex =
 EOF
   chmod 0644 "$filter_dir/tproxy-web-auth.conf" "$filter_dir/tproxy-web-scan.conf"
   if [[ "$WEB_SERVER" == "nginx" ]]; then
