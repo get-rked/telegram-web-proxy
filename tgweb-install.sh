@@ -966,15 +966,35 @@ is_cloudflare_ipv4() {
 }
 
 is_cloudflare_proxied_domain() {
-  local hostname="$1" ranges="" address count=0 total=0
+  local hostname="$1" ipv4_ranges ipv6_ranges
   local -a addresses=()
-  mapfile -t addresses < <(dig +short A "$hostname" 2>/dev/null | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u)
-  ((${#addresses[@]})) || return 1
-  ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
-  [[ -n "$ranges" ]] || return 1
-  for address in "${addresses[@]}"; do ((total += 1)); if is_cloudflare_ipv4 "$address" "$ranges"; then ((count += 1)); fi; done
-  (( total > 0 && count == total ))
+  mapfile -t addresses < <(
+    { dig +short A "$hostname" 2>/dev/null; dig +short AAAA "$hostname" 2>/dev/null; } |
+      python3 -c 'import ipaddress,sys
+for raw in sys.stdin:
+    try:
+        print(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        pass' | sort -u
+  )
+  (("${#addresses[@]}")) || return 1
+  ipv4_ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
+  ipv6_ranges="$(curl --fail --silent --location --max-time 8 --proto '=https' --proto-redir '=https' --tlsv1.2 https://www.cloudflare.com/ips-v6 2>/dev/null || true)"
+  [[ -n "$ipv4_ranges" && -n "$ipv6_ranges" ]] || return 1
+  python3 - "$ipv4_ranges" "$ipv6_ranges" "${addresses[@]}" <<'PYTHON'
+import ipaddress, sys
+ranges = []
+for raw in (sys.argv[1], sys.argv[2]):
+    parsed = [ipaddress.ip_network(line.strip(), strict=True) for line in raw.splitlines() if line.strip()]
+    ranges.append(parsed)
+for raw in sys.argv[3:]:
+    address = ipaddress.ip_address(raw)
+    networks = ranges[0] if address.version == 4 else ranges[1]
+    if not any(address in network for network in networks):
+        raise SystemExit(1)
+PYTHON
 }
+
 
 check_telegram_connectivity() {
   info "Проверяю доступность Telegram до установки компонентов…"
