@@ -55,3 +55,16 @@ go build -trimpath -ldflags="-s -w" -o tproxy-panel .
 The profile table displays Workers and Max Connections from `mtproxy.env`. These are settings of the shared MTProxy service, not independent per-profile limits; the same values are therefore shown for each profile. The profile editor validates Workers (1–256) and Max Connections (1–1,000,000), updates the service environment file atomically, and restarts MTProxy. If applying the change fails, the previous profile and runtime settings are restored.
 
 Confirmation and status messages are rendered inside the dashboard using the panel's own dialog and toast styles; browser-native `alert()` and `confirm()` prompts are not used.
+
+
+## Fail2ban для прокси
+
+Установщик управляет только собственными файлами `tproxy-*` и не перезаписывает SSH- или `recidive`-jail.
+
+- `tproxy-panel`: неудачные входы в административную панель из systemd journal.
+- `tproxy-nginx-scan` / `tproxy-caddy-scan`: запросы к типовым exploit/scanner-путям с кодами 400/403/404/444 из отдельного access log выбранного веб-сервера.
+- `tproxy-server-abuse` и `tproxy-mtproxy-abuse`: только явные маркеры `[SECURITY]`, `[ABUSE]` или `[AUTH_FAIL]` с полем `remote=`. Обычные ошибки Telegram, handshake, secret, timeout и transport не являются причиной блокировки. Если сервис не пишет такие маркеры, диагностика прямо сообщает, что источника событий нет; искусственные события не генерируются.
+
+Для Nginx используется отдельный combined access log с logrotate (7 архивов). Для Caddy — JSON access log с ограниченной внутренней ротацией. Если домен распознан как Cloudflare-proxied, установщик получает актуальные официальные IPv4/IPv6-сети Cloudflare и настраивает доверие к ним для извлечения реального IP клиента; при неудаче загрузки списоков установка прекращается, чтобы не банить общий edge IP.
+
+Диагностика проверяет службу, синтаксис конфигурации, загрузку каждого jail, источник событий и только числовую статистику блокировок. Списки IP-адресов не выводятся. Команда «Перезапустить все службы прокси» не перезапускает Fail2ban.
