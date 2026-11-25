@@ -4775,6 +4775,12 @@ if "/var/log/caddy/tproxy-access.json" not in text:
 """
     text = text[:match.end()] + "\n" + block + text[match.end():]
     path.write_text(text)
+elif "request>uri regexp" not in text:
+    # Upgrade an earlier access-log block without duplicating it.
+    text = text.replace("\\t\\tformat json", """\\t\\tformat filter {
+\\t\\t\\trequest>uri regexp "\\\\?.*$" ""
+\\t\\t}""", 1)
+    path.write_text(text)
 PYTHON
     /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || die "Не удалось отформатировать Caddyfile с access log."
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || die "Caddyfile с access log не прошёл проверку."
