@@ -4530,7 +4530,7 @@ upstream_cli() {
 # Fail2ban proxy protection. SSH and recidive are intentionally not managed here.
 install_proxy_fail2ban() {
   local jail_tmp="/etc/fail2ban/jail.d/tproxy-proxy.local"
-  local nginx_enabled=false caddy_enabled=false cloudflare_proxy=0
+  local cloudflare_proxy=0
   install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
   install -m 0644 "$repo_dir/web-panel/fail2ban-nginx-scan.conf" /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
   install -m 0644 "$repo_dir/web-panel/fail2ban-caddy-scan.conf" /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
@@ -4655,7 +4655,6 @@ PYTHON
   fi
 
   if [[ "$WEB_SERVER" == "nginx" ]]; then
-    nginx_enabled=true
     install -d -m 0755 /var/log/nginx
     touch /var/log/nginx/tproxy-access.log
     chmod 0640 /var/log/nginx/tproxy-access.log
@@ -4715,7 +4714,6 @@ EOF
     nginx -t || die "Nginx не прошёл проверку после включения журнала Fail2ban."
     systemctl reload nginx.service || systemctl restart nginx.service || die "Не удалось применить журнал Nginx."
   elif [[ "$WEB_SERVER" == "caddy" ]]; then
-    caddy_enabled=true
     install -d -o caddy -g caddy -m 0750 /var/log/caddy
     touch /var/log/caddy/tproxy-access.json
     chown caddy:caddy /var/log/caddy/tproxy-access.json
