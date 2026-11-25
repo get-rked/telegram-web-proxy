@@ -2,14 +2,18 @@ package main
 
 import (
 	"bytes"
- "mime/multipart"
- "net/http"
- "net/http/httptest"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDeriveIsDeterministicAndSalted(t *testing.T) {
@@ -344,5 +348,124 @@ func TestDeleteFullBackupRejectsInvalidName(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("unrelated file was affected: %v", err)
+	}
+}
+
+
+func insertTestSession(t *testing.T, a *App, lastActivity time.Time, expires time.Time) string {
+	t.Helper()
+	var username string
+	if err := a.db.QueryRow("SELECT username FROM users LIMIT 1").Scan(&username); err != nil {
+		t.Fatal(err)
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrf, err := randomToken(24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(token))
+	_, err = a.db.Exec(
+		"INSERT INTO sessions(token_hash,username,csrf,expires_at,last_activity) VALUES(?,?,?,?,?)",
+		hex.EncodeToString(sum[:]), username, csrf, expires.Unix(), lastActivity.Unix(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func TestSessionExpiresAfterFiveMinutesIdle(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PANEL_DB", filepath.Join(dir, "panel.db"))
+	a := &App{authSem: make(chan struct{}, 2)}
+	if err := a.init(); err != nil {
+		t.Fatal(err)
+	}
+	defer a.db.Close()
+
+	now := time.Now()
+	token := insertTestSession(t, a, now.Add(-sessionIdleTimeout), now.Add(sessionAbsoluteTimeout))
+	req := httptest.NewRequest(http.MethodGet, "/"+a.base+"/api/profiles", nil)
+	req.AddCookie(&http.Cookie{Name: "tproxy_panel", Value: token})
+	response := httptest.NewRecorder()
+	a.auth(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("expired session reached protected handler")
+	})).ServeHTTP(response, req)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want %d", response.Code, http.StatusUnauthorized)
+	}
+	if got := response.Header().Get("Set-Cookie"); !strings.Contains(got, "Max-Age=0") {
+		t.Fatalf("expired session cookie was not cleared: %q", got)
+	}
+	sum := sha256.Sum256([]byte(token))
+	var count int
+	if err := a.db.QueryRow("SELECT COUNT(*) FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:])).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("expired session was not deleted from database")
+	}
+}
+
+func TestSessionActivityRefreshesIdleDeadline(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PANEL_DB", filepath.Join(dir, "panel.db"))
+	a := &App{authSem: make(chan struct{}, 2)}
+	if err := a.init(); err != nil {
+		t.Fatal(err)
+	}
+	defer a.db.Close()
+
+	now := time.Now()
+	oldActivity := now.Add(-4 * time.Minute)
+	token := insertTestSession(t, a, oldActivity, now.Add(sessionAbsoluteTimeout))
+	req := httptest.NewRequest(http.MethodGet, "/"+a.base+"/api/profiles", nil)
+	req.AddCookie(&http.Cookie{Name: "tproxy_panel", Value: token})
+
+	username, csrf, ok := a.session(req)
+	if !ok || username == "" || csrf == "" {
+		t.Fatal("recently active session was rejected")
+	}
+	sum := sha256.Sum256([]byte(token))
+	var updated int64
+	if err := a.db.QueryRow("SELECT last_activity FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:])).Scan(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated <= oldActivity.Unix() {
+		t.Fatalf("last_activity was not refreshed: got %d, old %d", updated, oldActivity.Unix())
+	}
+}
+
+func TestSessionMigrationAddsLastActivityToExistingDatabase(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "panel.db")
+	legacy, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec("CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL, expires_at INTEGER NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PANEL_DB", dbPath)
+	a := &App{}
+	if err := a.init(); err != nil {
+		t.Fatal(err)
+	}
+	defer a.db.Close()
+
+	var columns int
+	if err := a.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='last_activity'").Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	if columns != 1 {
+		t.Fatal("legacy database was not migrated with last_activity")
 	}
 }
