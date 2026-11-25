@@ -148,7 +148,7 @@ function markUserActivity(){
  lastUserActivity=Date.now();
  void sendActivityHeartbeat();
 }
-for(const eventName of ['pointerdown','keydown','scroll','touchstart']){
+for(const eventName of ['pointerdown','pointermove','keydown','scroll','touchstart']){
  document.addEventListener(eventName,markUserActivity,{passive:true});
 }
 document.addEventListener('visibilitychange',()=>{
