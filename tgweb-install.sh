@@ -4521,7 +4521,7 @@ upstream_cli() {
 # Fail2ban proxy protection. SSH and recidive are intentionally not managed here.
 install_proxy_fail2ban() {
   local jail_tmp="/etc/fail2ban/jail.d/tproxy-proxy.local"
-  local nginx_enabled=false caddy_enabled=false
+  local nginx_enabled=false caddy_enabled=false cloudflare_proxy=0
   install -d -m 0755 /etc/fail2ban/filter.d /etc/fail2ban/jail.d
   install -m 0644 "$repo_dir/web-panel/fail2ban-nginx-scan.conf" /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
   install -m 0644 "$repo_dir/web-panel/fail2ban-caddy-scan.conf" /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
@@ -4531,6 +4531,7 @@ install_proxy_fail2ban() {
   # If the hostname is behind Cloudflare, trust only its published networks so
   # Fail2ban sees the visitor address rather than banning a shared edge node.
   if is_cloudflare_proxied_domain "$HOSTNAME_ARG"; then
+    cloudflare_proxy=1
     local cf_ranges cf_tmp
     cf_tmp="$(mktemp)"
     if ! { curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v4; curl --fail --silent --show-error --max-time 15 https://www.cloudflare.com/ips-v6; } > "$cf_tmp"; then
@@ -4638,6 +4639,10 @@ PYTHON
       /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || die "Не удалось отформатировать Caddyfile Cloudflare."
       TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || die "Caddy trusted_proxies конфигурация не прошла проверку."
     fi
+  fi
+
+  if [[ "$WEB_SERVER" == "caddy" && "$cloudflare_proxy" -eq 0 ]]; then
+    sed -i 's/"client_ip"/"remote_ip"/' /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
   fi
 
   if [[ "$WEB_SERVER" == "nginx" ]]; then
