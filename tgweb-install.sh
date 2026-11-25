@@ -571,7 +571,7 @@ preflight_basics() {
   require_root
   local pkg svc state
   local -a required_packages=(ca-certificates curl nftables openssl coreutils dnsutils netcat-openbsd jq git build-essential qrencode iproute2 libssl-dev util-linux zlib1g-dev)
-  local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service)
+  local -a services=(tproxy-server.service mtproxy.service tproxy-firewall.service refresh-mtproxy-config.timer caddy.service nginx.service fail2ban.service)
   ui_header "Предварительная проверка системы"
   echo "Проверка основных компонентов до ввода параметров установки."
   echo
@@ -1838,6 +1838,140 @@ validate_configs() {
   ok "Конфиги валидны"
 }
 
+# Дополнительная защита HTTP-уровня. SSH и recidive намеренно не изменяются.
+configure_proxy_fail2ban() {
+  local filter_dir=/etc/fail2ban/filter.d jail_dir=/etc/fail2ban/jail.d
+  local active_log="" tmp
+  if ! command -v fail2ban-client >/dev/null 2>&1; then
+    info "Устанавливаю Fail2ban для защиты HTTP-компонентов прокси…"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fail2ban
+  fi
+  command -v fail2ban-client >/dev/null 2>&1 || die "Fail2ban не установлен"
+  install -d -m 0755 "$filter_dir" "$jail_dir"
+  cat > "$filter_dir/tproxy-web-auth.conf" <<'EOF'
+[Definition]
+failregex = ^<HOST> (?:401|403) [A-Z]+$
+            ^.*"remote_ip":"<HOST>".*"status":(?:401|403)(?:[,}]).*$
+            ^.*"remote_addr":"<HOST>".*"status":(?:401|403)(?:[,}]).*$
+ignoreregex =
+EOF
+  cat > "$filter_dir/tproxy-web-scan.conf" <<'EOF'
+[Definition]
+failregex = ^<HOST> (?:400|404|405|444) [A-Z]+$
+            ^.*"remote_ip":"<HOST>".*"status":(?:400|404|405|444)(?:[,}]).*$
+            ^.*"remote_addr":"<HOST>".*"status":(?:400|404|405|444)(?:[,}]).*$
+ignoreregex =
+EOF
+  chmod 0644 "$filter_dir/tproxy-web-auth.conf" "$filter_dir/tproxy-web-scan.conf"
+  if [[ "$WEB_SERVER" == "nginx" ]]; then
+    install -d -m 0755 /var/log/nginx /etc/nginx/conf.d
+    cat > /etc/nginx/conf.d/tproxy-fail2ban.conf <<'EOF'
+map $status $tproxy_fail2ban_loggable {
+    default 0;
+    400 1;
+    401 1;
+    403 1;
+    404 1;
+    405 1;
+    444 1;
+}
+log_format tproxy_fail2ban '$remote_addr $status $request_method';
+EOF
+    if [[ -s "$NGINX_SITE" ]]; then
+      tmp="$(mktemp)"
+      python3 - "$NGINX_SITE" "$tmp" <<'PY' || { rm -f "$tmp"; die "Не удалось настроить безопасное логирование Nginx"; }
+import sys
+src, dst = sys.argv[1:]
+text = open(src, encoding="utf-8").read()
+start = text.find("server {\n listen 443 ssl;")
+if start < 0:
+    raise SystemExit("TLS server block not found")
+pos = text.find(" access_log off;", start)
+if pos < 0:
+    if "access_log /var/log/nginx/tproxy-fail2ban.log" not in text:
+        raise SystemExit("TLS access_log directive not found")
+else:
+    repl = " access_log /var/log/nginx/tproxy-fail2ban.log tproxy_fail2ban if=$tproxy_fail2ban_loggable;"
+    text = text[:pos] + repl + text[pos + len(" access_log off;"):]
+open(dst, "w", encoding="utf-8").write(text)
+PY
+      install -m 0644 "$tmp" "$NGINX_SITE"
+      rm -f "$tmp"
+    fi
+    active_log=/var/log/nginx/tproxy-fail2ban.log
+    nginx -t >/dev/null 2>&1 || die "Nginx не прошёл проверку после настройки Fail2ban"
+    systemctl reload nginx.service 2>/dev/null || systemctl restart nginx.service
+  elif [[ "$WEB_SERVER" == "caddy" ]]; then
+    install -d -o caddy -g caddy -m 0750 /var/log/caddy
+    if [[ -s /etc/caddy/Caddyfile ]] && ! grep -Fq "tproxy-fail2ban.json" /etc/caddy/Caddyfile; then
+      tmp="$(mktemp)"
+      awk '
+        !inserted && /^[[:space:]]*reverse_proxy[[:space:]]/ {
+          print "    # Fail2ban log: source IP and status only; no URL or headers."
+          print "    log {"
+          print "        output file /var/log/caddy/tproxy-fail2ban.json {"
+          print "            roll_size 10MiB"
+          print "            roll_keep 5"
+          print "            roll_keep_for 168h"
+          print "        }"
+          print "        format filter {"
+          print "            wrap json"
+          print "            fields {"
+          print "                request>uri delete"
+          print "                request>headers delete"
+          print "                request>host delete"
+          print "                request>proto delete"
+          print "                resp_headers delete"
+          print "                common_log delete"
+          print "            }"
+          print "        }"
+          print "    }"
+          inserted=1
+        }
+        { print }
+        END { if (!inserted) exit 42 }
+      ' /etc/caddy/Caddyfile > "$tmp" || { rm -f "$tmp"; die "Не удалось добавить логирование Caddy"; }
+      install -m 0644 "$tmp" /etc/caddy/Caddyfile
+      rm -f "$tmp"
+    fi
+    active_log=/var/log/caddy/tproxy-fail2ban.json
+    TPROXY_HOSTNAME="$(jq -r '.public_hostname // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null)" \
+    TPROXY_SITE_ROOT="$(jq -r '.public_dir // empty' "$PROXY_CONFIG_DIR/config.json" 2>/dev/null)" \
+    ACME_EMAIL="$(cat "$PROXY_CONFIG_DIR/acme-email" 2>/dev/null || true)" \
+      /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
+      || die "Caddyfile не прошёл проверку после настройки Fail2ban"
+  else
+    die "Неизвестный веб-сервер для настройки Fail2ban: $WEB_SERVER"
+  fi
+  cat > "$jail_dir/tproxy-proxy.conf" <<EOF
+# SSH и recidive остаются без изменений.
+[tproxy-web-auth]
+enabled = true
+filter = tproxy-web-auth
+logpath = $active_log
+backend = auto
+port = http,https
+maxretry = 5
+findtime = 10m
+bantime = 1h
+
+[tproxy-web-scan]
+enabled = true
+filter = tproxy-web-scan
+logpath = $active_log
+backend = auto
+port = http,https
+maxretry = 20
+findtime = 10m
+bantime = 6h
+EOF
+  chmod 0644 "$jail_dir/tproxy-proxy.conf"
+  fail2ban-client -t >/dev/null || die "Конфигурация Fail2ban не прошла fail2ban-client -t"
+  systemctl enable --now fail2ban.service
+  fail2ban-client reload >/dev/null || die "Не удалось применить конфигурацию Fail2ban"
+  ok "Fail2ban: настроены tproxy-web-auth и tproxy-web-scan; SSH/recidive не изменялись"
+}
+
 start_services() {
   systemctl daemon-reload
   systemctl enable tproxy-firewall.service 2>/dev/null || true
@@ -2085,7 +2219,7 @@ run_config() {
   else printf '%s\n' "$report"; fi
   printf '\nСостояние служб:\n'
   local service state mark
-  for service in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server"; do
+  for service in mtproxy tproxy-firewall tproxy-server refresh-mtproxy-config.timer "$web_server" fail2ban; do
     state="$(systemctl is-active "$service" 2>/dev/null || true)"
     if [[ "$state" == active ]]; then mark="$(status_mark ok)"
     elif [[ "$state" == inactive || "$state" == failed ]]; then mark="$(status_mark fail)"
@@ -2406,6 +2540,7 @@ run_install() {
     if nginx_config_compatible; then ok "Совместимая конфигурация Nginx уже существует — запись и reload пропущены."
     else install_nginx_config; fi
   fi
+  configure_proxy_fail2ban
   validate_configs
   start_services
   if [[ "$MODE" == "update" ]]; then
@@ -2546,7 +2681,7 @@ diagnostics_command() {
 
   echo
   echo "1. Состояние служб"
-  for svc in tproxy-server mtproxy tproxy-firewall refresh-mtproxy-config.timer "$web_server"; do
+  for svc in tproxy-server mtproxy tproxy-firewall refresh-mtproxy-config.timer "$web_server" fail2ban; do
     state="$(systemctl is-active "$svc" 2>/dev/null || true)"
     if [[ "$state" == active ]]; then
       printf '  %s %-30s %s\n' "$(status_mark ok)" "$svc" "$(status_word active)"
@@ -2695,7 +2830,73 @@ diagnostics_command() {
   fi
 
   echo
-  echo "6. Порты и последние ошибки"
+  echo "6. Fail2ban — защита прокси"
+  local f2b_state f2b_enabled f2b_version jail jail_state jail_count jail_banned
+  f2b_state="$(systemctl is-active fail2ban.service 2>/dev/null || true)"
+  f2b_enabled="$(systemctl is-enabled fail2ban.service 2>/dev/null || true)"
+  if [[ "$f2b_state" == active ]]; then
+    printf '  %s Служба fail2ban.service активна\n' "$(status_mark ok)"
+  else
+    printf '  %s Служба fail2ban.service: %s\n' "$(status_mark fail)" "$f2b_state"
+    failed=1
+  fi
+  printf '  %s Автозапуск: %s\n' "$( [[ "$f2b_enabled" == enabled ]] && status_mark ok || status_mark warn )" "$f2b_enabled"
+  if command -v fail2ban-client >/dev/null 2>&1; then
+    f2b_version="$(fail2ban-client --version 2>/dev/null | head -n1 || true)"
+    printf '  %s Версия: %s\n' "$(status_mark ok)" "$f2b_version"
+    if fail2ban-client -t >/dev/null 2>&1; then
+      printf '  %s Конфигурация Fail2ban корректна\n' "$(status_mark ok)"
+    else
+      printf '  %s Ошибка конфигурации Fail2ban (fail2ban-client -t)\n' "$(status_mark fail)"
+      failed=1
+    fi
+    for jail in tproxy-web-auth tproxy-web-scan; do
+      jail_state="$(fail2ban-client status "$jail" 2>/dev/null || true)"
+      if [[ -n "$jail_state" ]]; then
+        jail_count="$(awk -F: '/Currently failed:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}' <<< "$jail_state")"
+        jail_banned="$(awk -F: '/Currently banned:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}' <<< "$jail_state")"
+        printf '  %s Jail %-22s активен; срабатываний: %s; блокировок: %s\n' \
+          "$(status_mark ok)" "$jail" "$jail_count" "$jail_banned"
+      else
+        printf '  %s Jail %s не загружен\n' "$(status_mark fail)" "$jail"
+        failed=1
+      fi
+    done
+    if [[ -s /etc/fail2ban/jail.d/tproxy-proxy.conf ]]; then
+      printf '  %s Файл jail присутствует\n' "$(status_mark ok)"
+    else
+      printf '  %s Файл jail отсутствует\n' "$(status_mark fail)"
+      failed=1
+    fi
+    if [[ "$web_server" == nginx ]]; then
+      if [[ -s /etc/nginx/conf.d/tproxy-fail2ban.conf ]]; then
+        printf '  %s Nginx: формат безопасного журнала настроен\n' "$(status_mark ok)"
+        [[ -s /var/log/nginx/tproxy-fail2ban.log ]] \
+          && printf '  %s Nginx: журнал содержит события\n' "$(status_mark ok)" \
+          || printf '  %s Nginx: журнал пока пуст — это допустимо до первых HTTP-ошибок\n' "$(status_mark warn)"
+      else
+        printf '  %s Nginx: конфигурация журналирования отсутствует\n' "$(status_mark fail)"
+        failed=1
+      fi
+    elif [[ "$web_server" == caddy ]]; then
+      if grep -Fq 'tproxy-fail2ban.json' /etc/caddy/Caddyfile 2>/dev/null; then
+        printf '  %s Caddy: безопасное журналирование настроено\n' "$(status_mark ok)"
+        [[ -s /var/log/caddy/tproxy-fail2ban.json ]] \
+          && printf '  %s Caddy: журнал содержит события\n' "$(status_mark ok)" \
+          || printf '  %s Caddy: журнал пока пуст — это допустимо до первых запросов\n' "$(status_mark warn)"
+      else
+        printf '  %s Caddy: конфигурация журналирования отсутствует\n' "$(status_mark fail)"
+        failed=1
+      fi
+    fi
+    printf '  %s SSH и recidive: существующие jail не изменялись\n' "$(status_mark info)"
+  else
+    printf '  %s fail2ban-client не найден\n' "$(status_mark fail)"
+    failed=1
+  fi
+
+  echo
+  echo "7. Порты и последние ошибки"
   echo
   echo "  Порты, относящиеся к прокси:"
   proxy_ports_table "$relay" "$admin" "$backend"
