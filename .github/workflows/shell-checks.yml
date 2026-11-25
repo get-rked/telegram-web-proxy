@@ -35,7 +35,16 @@ jobs:
       - name: Validate Fail2ban filters
         run: |
           sudo apt-get update
-          sudo apt-get install --yes fail2ban
+          sudo apt-get install --yes fail2ban python3-systemd
+          /usr/bin/python3 -c 'import systemd.journal'
+          sudo install -m 0644 web-panel/fail2ban-filter.conf /etc/fail2ban/filter.d/tproxy-panel.conf
+          sudo install -m 0644 web-panel/fail2ban-jail.conf /etc/fail2ban/jail.d/tproxy-panel.local
+          sudo install -m 0644 web-panel/fail2ban-nginx-scan.conf /etc/fail2ban/filter.d/tproxy-nginx-scan.conf
+          sudo install -m 0644 web-panel/fail2ban-caddy-scan.conf /etc/fail2ban/filter.d/tproxy-caddy-scan.conf
+          sudo install -m 0644 web-panel/fail2ban-server-abuse.conf /etc/fail2ban/filter.d/tproxy-server-abuse.conf
+          sudo install -m 0644 web-panel/fail2ban-mtproxy-abuse.conf /etc/fail2ban/filter.d/tproxy-mtproxy-abuse.conf
+          sudo install -m 0644 web-panel/fail2ban-jail-proxy.conf /etc/fail2ban/jail.d/tproxy-proxy.local
+          sudo fail2ban-client -t
           printf '%s\n' '198.51.100.23 - - [25/Nov/2026:10:00:00 +0000] "GET /.env HTTP/1.1" 404 12' > /tmp/tproxy-nginx.log
           fail2ban-regex /tmp/tproxy-nginx.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-nginx.out || { cat /tmp/f2b-nginx.out; exit 1; }
           cat /tmp/f2b-nginx.out
