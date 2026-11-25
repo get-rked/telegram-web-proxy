@@ -36,16 +36,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes fail2ban
-          printf '%s\\n' '198.51.100.23 - - [25/Nov/2026:10:00:00 +0000] "GET /.env HTTP/1.1" 404 12 "-" "scanner"' > /tmp/tproxy-nginx.log
+          printf '%s\n' '198.51.100.23 - - [25/Nov/2026:10:00:00 +0000] "GET /.env HTTP/1.1" 404 12 "-" "scanner"' > /tmp/tproxy-nginx.log
           fail2ban-regex /tmp/tproxy-nginx.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-nginx.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-nginx.out
-          printf '%s\\n' '{"request":{"remote_ip":"198.51.100.24","client_ip":"198.51.100.24","uri":"/.git/config"},"status":404}' > /tmp/tproxy-caddy.log
+          printf '%s\n' '{"request":{"remote_ip":"198.51.100.24","client_ip":"198.51.100.24","uri":"/.git/config"},"status":404}' > /tmp/tproxy-caddy.log
           fail2ban-regex /tmp/tproxy-caddy.log web-panel/fail2ban-caddy-scan.conf > /tmp/f2b-caddy.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-caddy.out
-          printf '%s\\n' '2026/11/25 [SECURITY] suspicious request remote=198.51.100.25' > /tmp/tproxy-runtime.log
+          printf '%s\n' '2026/11/25 [SECURITY] suspicious request remote=198.51.100.25' > /tmp/tproxy-runtime.log
           fail2ban-regex /tmp/tproxy-runtime.log web-panel/fail2ban-server-abuse.conf > /tmp/f2b-runtime.out
           grep -Eq '[1-9][0-9]* matched' /tmp/f2b-runtime.out
-          printf '%s\\n' '198.51.100.26 - - [25/Nov/2026:10:00:00 +0000] "GET /proxy HTTP/1.1" 404 12 "-" "Telegram"' > /tmp/tproxy-normal.log
+          printf '%s\n' '198.51.100.26 - - [25/Nov/2026:10:00:00 +0000] "GET /proxy HTTP/1.1" 404 12 "-" "Telegram"' > /tmp/tproxy-normal.log
           fail2ban-regex /tmp/tproxy-normal.log web-panel/fail2ban-nginx-scan.conf > /tmp/f2b-normal.out
           grep -Eq '0 matched' /tmp/f2b-normal.out
 
