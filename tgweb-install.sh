@@ -4607,45 +4607,13 @@ PYTHON
     TPROXY_HOSTNAME="$HOSTNAME_ARG" TPROXY_SITE_ROOT="$SITE_DIR" ACME_EMAIL="$EMAIL_ARG" /usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || systemctl restart caddy.service || die "Не удалось применить access log Caddy."
   fi
 
-  cat > "$jail_tmp" <<EOF
-# Managed by tgweb-install.sh. SSH and recidive jails are not modified.
-[tproxy-nginx-scan]
-enabled = $nginx_enabled
-filter = tproxy-nginx-scan
-logpath = /var/log/nginx/tproxy-access.log
-backend = auto
-maxretry = 8
-findtime = 600
-bantime = 3600
+  install -m 0644 "$repo_dir/web-panel/fail2ban-jail-proxy.conf" "$jail_tmp"
+  if [[ "$WEB_SERVER" == "nginx" ]]; then
+    sed -i '/^\[tproxy-nginx-scan\]/,/^\[/ s/^enabled = false/enabled = true/' "$jail_tmp"
+  elif [[ "$WEB_SERVER" == "caddy" ]]; then
+    sed -i '/^\[tproxy-caddy-scan\]/,/^\[/ s/^enabled = false/enabled = true/' "$jail_tmp"
+  fi
 
-[tproxy-caddy-scan]
-enabled = $caddy_enabled
-filter = tproxy-caddy-scan
-logpath = /var/log/caddy/tproxy-access.json
-backend = auto
-maxretry = 8
-findtime = 600
-bantime = 3600
-
-[tproxy-server-abuse]
-enabled = true
-filter = tproxy-server-abuse
-backend = systemd
-journalmatch = _SYSTEMD_UNIT=tproxy-server.service
-maxretry = 5
-findtime = 600
-bantime = 3600
-
-[tproxy-mtproxy-abuse]
-enabled = true
-filter = tproxy-mtproxy-abuse
-backend = systemd
-journalmatch = _SYSTEMD_UNIT=mtproxy.service
-maxretry = 5
-findtime = 600
-bantime = 3600
-EOF
-  chmod 0644 "$jail_tmp"
   fail2ban-client -t || die "Конфигурация Fail2ban для прокси не прошла проверку."
   systemctl enable --now fail2ban.service || die "Не удалось включить fail2ban.service."
   systemctl restart fail2ban.service || die "Не удалось перезапустить Fail2ban после настройки прокси."
@@ -4653,8 +4621,9 @@ EOF
 }
 
 diagnose_proxy_fail2ban() {
-  local state jail output current total events source failed=0
+  local state jail output current total events source failed=0 selected_web_server
   local -a jails=(tproxy-panel tproxy-nginx-scan tproxy-caddy-scan tproxy-server-abuse tproxy-mtproxy-abuse)
+  selected_web_server="$(cat "$PROXY_CONFIG_DIR/web-server" 2>/dev/null || true)"
   echo "  Служба fail2ban.service:"
   state="$(systemctl is-active fail2ban.service 2>/dev/null || true)"
   if [[ "$state" == "active" ]]; then
@@ -4682,14 +4651,12 @@ diagnose_proxy_fail2ban() {
       tproxy-mtproxy-abuse) source="journalctl: mtproxy.service / security markers" ;;
     esac
     if ! output="$(fail2ban-client status "$jail" 2>/dev/null)"; then
-      if [[ "$jail" == "tproxy-nginx-scan" || "$jail" == "tproxy-caddy-scan" ]]; then
-        if ! grep -Eq "^\[tproxy-(nginx|caddy)-scan\][[:space:]]*$" /etc/fail2ban/jail.d/tproxy-proxy.local 2>/dev/null ||
-           ! grep -A1 "^\[tproxy-(nginx|caddy)-scan\]" /etc/fail2ban/jail.d/tproxy-proxy.local | grep -q 'enabled = true'; then
-          printf '    %s %s: отключён (не выбранный веб-сервер)\n' "$(status_mark info)" "$jail"
-          continue
-        fi
+      if [[ "$jail" == "tproxy-nginx-scan" && "$selected_web_server" != "nginx" ]] ||
+         [[ "$jail" == "tproxy-caddy-scan" && "$selected_web_server" != "caddy" ]]; then
+        printf '    %s %s: отключён (не выбранный веб-сервер)\\n' "$(status_mark info)" "$jail"
+        continue
       fi
-      printf '    %s %s: jail не загружен или выключен\n' "$(status_mark fail)" "$jail"
+      printf '    %s %s: jail не загружен или выключен\\n' "$(status_mark fail)" "$jail"
       failed=1
       continue
     fi
@@ -4705,7 +4672,7 @@ diagnose_proxy_fail2ban() {
     esac
     printf '    %s %-24s jail активен; сейчас заблокировано: %s; всего блокировок: %s\n' "$(status_mark ok)" "$jail" "${current:-0}" "${total:-0}"
     if [[ "$events" =~ ^[0-9]+$ ]] && (( events > 0 )); then
-      printf '      %s Источник событий: %s (записей: %s)\n' "$(status_mark ok)" "$source" "$events"
+      printf '      %s Источник журнала: %s (строк: %s)\n' "$(status_mark ok)" "$source" "$events"
     else
       printf '      %s нет источника событий за последние 30 дней: %s\n' "$(status_mark warn)" "$source"
     fi
