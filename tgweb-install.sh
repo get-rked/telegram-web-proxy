@@ -41,7 +41,7 @@ readonly ACME_WEBROOT="/var/www/letsencrypt"
 readonly DEFAULT_PORT=8080
 readonly DEFAULT_ADMIN_PORT=8081
 readonly SCRIPT_VERSION="1.1.0"
-readonly PANEL_SOURCE_REF="feature/web-admin-panel"
+readonly PANEL_SOURCE_REF="main"
 
 # ----------------------------- переменные -----------------------------------
 MODE=""
