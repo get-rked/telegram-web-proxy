@@ -4560,23 +4560,23 @@ import pathlib, re, sys
 path = pathlib.Path("/etc/nginx/sites-available/tproxy-server")
 host, ranges = sys.argv[1], sys.argv[2].split()
 text = path.read_text()
-if "real_ip_header" in text and not re.search(r"(?m)^\\s*real_ip_header\\s+CF-Connecting-IP;", text):
+if "real_ip_header" in text and not re.search(r"(?m)^\s*real_ip_header\s+CF-Connecting-IP;", text):
     raise SystemExit("В Nginx уже задан другой real_ip_header; не перезаписываю его автоматически")
 lines = text.splitlines(keepends=True)
 out, depth, target, done = [], 0, False, False
 for line in lines:
-    if re.match(r"^\\s*server\\s*\\{", line):
+    if re.match(r"^\s*server\s*\{", line):
         target, depth = False, 0
     if "server_name " + host + ";" in line:
         target = True
-    if target and not done and re.match(r"^\\s*listen\\s+443", line):
+    if target and not done and re.match(r"^\s*listen\s+443", line):
         out.append(line)
         if "real_ip_header CF-Connecting-IP;" not in text:
-            out.append("  real_ip_header CF-Connecting-IP;\\n")
-            out.append("  real_ip_recursive on;\\n")
+            out.append("  real_ip_header CF-Connecting-IP;\n")
+            out.append("  real_ip_recursive on;\n")
             for network in ranges:
                 if "set_real_ip_from " + network + ";" not in text:
-                    out.append("  set_real_ip_from " + network + ";\\n")
+                    out.append("  set_real_ip_from " + network + ";\n")
         done = True
         continue
     out.append(line)
@@ -4607,7 +4607,7 @@ else:
             break
     if end is None:
         raise SystemExit("Не удалось разобрать global options block в Caddyfile")
-    trusted = [i for i in range(start + 1, end) if re.match(r"\\s*trusted_proxies\\s+", lines[i])]
+    trusted = [i for i in range(start + 1, end) if re.match(r"\s*trusted_proxies\s+", lines[i])]
     if trusted:
         if "trusted_proxies static " not in lines[trusted[0]]:
             raise SystemExit("В Caddy уже настроен нестандартный trusted_proxies; требуется ручное объединение")
@@ -4618,7 +4618,7 @@ else:
             lines[end:end] = ["  servers {", "    " + directive, "    trusted_proxies_strict", "  }"]
         else:
             lines[servers + 1:servers + 1] = ["    " + directive, "    trusted_proxies_strict"]
-path.write_text("\\n".join(lines) + "\\n")
+path.write_text("\n".join(lines) + "\n")
 PYTHON
     fi
     if [[ "$WEB_SERVER" == "nginx" ]]; then
